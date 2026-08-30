@@ -1,0 +1,28 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: alma_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: alma_password
+      POSTGRES_DB: alma_erp
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  nats:
+    image: nats:alpine
+    container_name: alma_nats
+    command:
+      - "-js"
+      - "-m"
+      - "8222"
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    restart: unless-stopped
+
+volumes:
+  pgdata:

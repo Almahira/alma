@@ -1,0 +1,7 @@
+{
+  "name": "@ALMA/mdl_warehouse",
+  "version": "1.0.0",
+  "description": "Modul warehouse Standar Emas Enterprise",
+  "main": "src/index.ts",
+  "type": "module"
+}

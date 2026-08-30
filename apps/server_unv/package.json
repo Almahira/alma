@@ -1,0 +1,32 @@
+{
+  "name": "@ALMA/server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/src/index.js",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.45.2",
+    "express": "^4.19.2",
+    "nats": "^2.29.3",
+    "pg": "^8.11.5",
+    "socket.io": "^4.8.3",
+    "ulid": "^2.3.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.12.11",
+    "@types/pg": "^8.11.6",
+    "drizzle-kit": "^0.31.10",
+    "tsx": "^4.10.0",
+    "typescript": "^5.5.0"
+  }
+}

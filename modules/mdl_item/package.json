@@ -1,0 +1,10 @@
+{
+  "name": "@ALMA/mdl_item",
+  "version": "1.0.0",
+  "description": "Modul Master Data Item, Kategori, dan UOM",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "type": "module"
+}

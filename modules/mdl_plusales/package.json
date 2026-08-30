@@ -1,0 +1,7 @@
+{
+  "name": "@ALMA/mdl_plusales",
+  "version": "1.0.0",
+  "description": "Modul PLU sales Standar Emas Enterprise",
+  "main": "src/index.ts",
+  "type": "module"
+}

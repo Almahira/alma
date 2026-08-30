@@ -1,0 +1,7 @@
+{
+  "name": "@ALMA/mdl_receiving",
+  "version": "1.0.0",
+  "description": "Modul Transaksi Receiving, Hutang, Piutang, dan Pettycash",
+  "main": "src/index.ts",
+  "type": "module"
+}

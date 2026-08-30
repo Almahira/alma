@@ -1,0 +1,7 @@
+{
+  "name": "@ALMA/mdl_vendor",
+  "version": "1.0.0",
+  "description": "Modul Master Data Vendor",
+  "main": "src/index.ts",
+  "type": "module"
+}

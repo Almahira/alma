@@ -1,0 +1,7 @@
+{
+  "name": "@ALMA/mdl_executivepanel",
+  "version": "1.0.0",
+  "description": "Modul executivepanel Standar Emas Enterprise",
+  "main": "src/index.ts",
+  "type": "module"
+}

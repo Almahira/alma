@@ -1,0 +1,63 @@
+{
+  "name": "ALMA-erp-core",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "create:module": "node packages/core_unv/src/generator/createModule.js",
+    "remove:module": "node packages/core_unv/src/generator/removeModule.js",
+    "dev:client": "pnpm --filter client dev --host",
+    "dev:server": "pnpm --filter server dev",
+    "build:client": "pnpm --filter client build",
+    "build:server": "pnpm --filter server build",
+    "db:generate": "pnpm --filter server exec drizzle-kit generate",
+    "db:push": "pnpm --filter server exec drizzle-kit push --force",
+    "db:studio": "pnpm --filter server exec drizzle-kit studio",
+    "db:reset": "pnpm --filter server exec tsx src/scripts/reset-db.ts",
+    "nats:reset": "pnpm --filter server exec tsx src/scripts/reset-nats.ts",
+    "db:seed": "pnpm --filter server exec tsx src/scripts/seed.ts",
+    "fr": "pnpm run db:reset && pnpm run db:push && pnpm run db:seed && pnpm run nats:reset"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "^8.0.1",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "typescript": "^5.5.0"
+  },
+  "dependencies": {
+    "@types/file-saver": "^2.0.7",
+    "@types/multer": "^2.2.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.45.2",
+    "express": "^4.19.2",
+    "file-saver": "^2.0.5",
+    "framer-motion": "^13.1.0",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.8",
+    "lucide-react": "^0.378.0",
+    "multer": "^2.2.0",
+    "nats": "^2.29.3",
+    "nodemailer": "^9.0.6",
+    "pg": "^8.11.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.23.1",
+    "recharts": "^3.10.1",
+    "rxdb": "^17.4.0",
+    "rxjs": "^7.8.2",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3",
+    "tweetnacl": "^1.0.3",
+    "tweetnacl-util": "^0.15.1",
+    "ulid": "^2.4.0",
+    "ulidx": "^2.4.1",
+    "xlsx": "^0.18.5",
+    "z-schema": "^12.4.1",
+    "zod": "^4.4.3",
+    "zustand": "^4.5.2"
+  }
+}

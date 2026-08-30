@@ -1,0 +1,13 @@
+packages:
+  # Bagian Inti / Universal (Tidak boleh ada logika bisnis di sini)
+  - "packages/core_unv"
+  - "apps/server_unv"
+  - "apps/client_unv"
+
+  # Bagian Modul / Bisnis (Bisa ditambah/dihapus kapan saja)
+  - "modules/*"
+
+allowBuilds:
+  core-js: false
+  es5-ext: false
+  esbuild: false

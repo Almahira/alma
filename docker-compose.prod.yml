@@ -1,0 +1,49 @@
+# File: docker-compose.prod.yml
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: alma_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: alma_secure_password_2026
+      POSTGRES_DB: alma_erp
+    ports:
+      - "5432:5432"
+    volumes:
+      - alma_pgdata:/var/lib/postgresql/data
+    restart: always
+
+  nats:
+    image: nats:alpine
+    container_name: alma_nats
+    command:
+      - "-js"
+      - "-m"
+      - "8222"
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    restart: always
+
+  server:
+    build:
+      context: .
+      dockerfile: apps/server_unv/Dockerfile
+    container_name: alma_server
+    environment:
+      PORT: 5000
+      DATABASE_URL: postgresql://postgres:alma_secure_password_2026@postgres:5432/alma_erp
+      NATS_URL: nats://nats:4222
+      ALLOWED_ORIGINS: "*"
+    ports:
+      - "5000:5000"
+    volumes:
+      - alma_uploads:/app/apps/server_unv/uploads
+    depends_on:
+      - postgres
+      - nats
+    restart: always
+
+volumes:
+  alma_pgdata:
+  alma_uploads:
