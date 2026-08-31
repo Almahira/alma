@@ -24,6 +24,7 @@ import {
   Box,
   ShieldCheck,
   Key,
+  LayoutDashboard,
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { createPortal } from "react-dom";
@@ -1076,6 +1077,14 @@ export function UniversalLayout({
           </div>
 
           <div className="flex items-center gap-3 shrink-0">
+            <button
+              onClick={() => navigate("/dashboard/executive")}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black uppercase text-orange-500 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 transition cursor-pointer shadow-xs"
+              title="Buka Executive Owner Dashboard"
+            >
+              <LayoutDashboard className="w-4 h-4 text-orange-500" />
+              <span className="hidden md:inline">Executive Portal</span>
+            </button>
             {/* ================================================================= */}
             {/* KAPSUL "MODUL CONTROL" (KLIK UNTUK KONFIGURASI MODUL) */}
             {/* ================================================================= */}

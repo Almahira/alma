@@ -38,8 +38,11 @@ export default function ExecutiveDashboard() {
       window.removeEventListener("UNV_STATE_UPDATED", handleLiveUpdate);
   }, []);
 
+  const activeCompanyId = localStorage.getItem("__unv_companyId") || "";
+
   const [filters, setFilters] = useState<DashboardFilterState>({
     month: new Date().toISOString().slice(0, 7),
+    companyId: activeCompanyId,
     regionId: "",
     outletId: "",
     dateStart: "",
@@ -47,6 +50,18 @@ export default function ExecutiveDashboard() {
     showTaxService: false,
     devidenPosition: "TOP_NET_SALES",
   });
+
+  const filteredRegions = useMemo(() => {
+    return (regions || []).filter(
+      (r) => !activeCompanyId || r.companyId === activeCompanyId,
+    );
+  }, [regions, activeCompanyId]);
+
+  const filteredOutlets = useMemo(() => {
+    return (outlets || []).filter(
+      (o) => !activeCompanyId || o.companyId === activeCompanyId,
+    );
+  }, [outlets, activeCompanyId]);
 
   // 3. Deteksi Ukuran Layar Otomatis (Responsive Switcher)
   const [windowWidth, setWindowWidth] = useState<number>(
@@ -70,7 +85,7 @@ export default function ExecutiveDashboard() {
       targets,
       allocations,
       ownerLedgers,
-      outlets,
+      filteredOutlets,
       itemCategories,
       products,
     );
@@ -84,7 +99,7 @@ export default function ExecutiveDashboard() {
     targets,
     allocations,
     ownerLedgers,
-    outlets,
+    filteredOutlets,
     itemCategories,
     products,
   ]);
@@ -123,8 +138,8 @@ export default function ExecutiveDashboard() {
       data={financials}
       filters={filters}
       setFilters={setFilters}
-      regions={regions}
-      outlets={outlets}
+      regions={filteredRegions}
+      outlets={filteredOutlets}
       receivingDocs={receivingDocs}
       vendors={vendors}
     />

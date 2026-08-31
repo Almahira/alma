@@ -2,6 +2,7 @@
 
 export interface DashboardFilterState {
   month: string; // "YYYY-MM"
+  companyId?: string;
   regionId: string;
   outletId: string;
   dateStart: string;
@@ -23,8 +24,18 @@ export function calculateExecutiveFinancials(
   itemCategories: any[],
   products: any[],
 ) {
+  const activeCompanyId =
+    filters.companyId ||
+    (typeof window !== "undefined"
+      ? localStorage.getItem("__unv_companyId")
+      : "") ||
+    "";
   // 1. REVENUE DARI PLUSALES
   const filteredSales = (plusalesDocs || []).filter((d) => {
+    const matchCompany =
+      !activeCompanyId ||
+      d.companyId === activeCompanyId ||
+      d.organization?.companyId === activeCompanyId;
     const matchMonth =
       !filters.month || (d.date && d.date.startsWith(filters.month));
     const matchOutlet = !filters.outletId || d.outletId === filters.outletId;
@@ -33,6 +44,7 @@ export function calculateExecutiveFinancials(
     const matchDateStart = !filters.dateStart || d.date >= filters.dateStart;
     const matchDateEnd = !filters.dateEnd || d.date <= filters.dateEnd;
     return (
+      matchCompany &&
       matchMonth &&
       matchOutlet &&
       matchRegion &&
@@ -118,6 +130,10 @@ export function calculateExecutiveFinancials(
 
   // 4. BELANJA RECEIVING
   const filteredReceiving = (receivingDocs || []).filter((d) => {
+    const matchCompany =
+      !activeCompanyId ||
+      d.companyId === activeCompanyId ||
+      d.organization?.companyId === activeCompanyId;
     const matchMonth =
       !filters.month || (d.date && d.date.startsWith(filters.month));
     const matchOutlet = !filters.outletId || d.outletId === filters.outletId;
@@ -126,6 +142,7 @@ export function calculateExecutiveFinancials(
     const matchDateStart = !filters.dateStart || d.date >= filters.dateStart;
     const matchDateEnd = !filters.dateEnd || d.date <= filters.dateEnd;
     return (
+      matchCompany &&
       matchMonth &&
       matchOutlet &&
       matchRegion &&
@@ -214,6 +231,10 @@ export function calculateExecutiveFinancials(
 
   const totalEdrFromWarehouse = (warehouseDistributions || [])
     .filter((d) => {
+      const matchCompany =
+        !activeCompanyId ||
+        d.companyId === activeCompanyId ||
+        d.organization?.companyId === activeCompanyId;
       const matchMonth =
         !filters.month || (d.date && d.date.startsWith(filters.month));
       const matchOutlet = !filters.outletId || d.outletId === filters.outletId;
@@ -222,18 +243,28 @@ export function calculateExecutiveFinancials(
         divUpper.includes("KARYAWAN") ||
         divUpper.includes("EDR") ||
         divUpper.includes("EMPLOYEE");
-      return matchMonth && matchOutlet && isEdr && d.isActive !== false;
+      return (
+        matchCompany &&
+        matchMonth &&
+        matchOutlet &&
+        isEdr &&
+        d.isActive !== false
+      );
     })
     .reduce((sum, d) => sum + (d.totalCost || 0), 0);
 
   const totalEmployeeMeals = totalEdrFromReceiving + totalEdrFromWarehouse;
 
   const filteredSpoilWaste = (spoilWastes || []).filter((sw) => {
+    const matchCompany =
+      !activeCompanyId ||
+      sw.companyId === activeCompanyId ||
+      sw.organization?.companyId === activeCompanyId;
     const matchMonth =
       !filters.month || (sw.date && sw.date.startsWith(filters.month));
     const matchOutlet = !filters.outletId || sw.outletId === filters.outletId;
     const matchActive = sw.isActive !== false;
-    return matchMonth && matchOutlet && matchActive;
+    return matchCompany && matchMonth && matchOutlet && matchActive;
   });
 
   const totalSpoilLoss = filteredSpoilWaste.reduce(
@@ -266,11 +297,15 @@ export function calculateExecutiveFinancials(
 
   // 6. OWNER & DEVIDEN
   const filteredOwnerLedgers = (ownerLedgers || []).filter((o) => {
+    const matchCompany =
+      !activeCompanyId ||
+      o.companyId === activeCompanyId ||
+      o.organization?.companyId === activeCompanyId;
     const matchMonth =
       !filters.month || (o.date && o.date.startsWith(filters.month));
     const matchOutlet =
       !filters.outletId || !o.outletId || o.outletId === filters.outletId;
-    return matchMonth && matchOutlet && o.isActive !== false;
+    return matchCompany && matchMonth && matchOutlet && o.isActive !== false;
   });
 
   const devidenMitraDoc = filteredOwnerLedgers.find(
@@ -392,6 +427,7 @@ export function calculateExecutiveFinancials(
 
   // 8. PERFORMA OUTLET
   const outletPerformance = (outlets || [])
+    .filter((out) => !activeCompanyId || out.companyId === activeCompanyId)
     .map((out) => {
       const salesOfOutlet = (plusalesDocs || [])
         .filter(

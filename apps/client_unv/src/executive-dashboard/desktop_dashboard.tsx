@@ -11,6 +11,7 @@ import {
   RotateCw,
   Sun,
   Moon,
+  ArrowLeft,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { DebtReceivableView } from "./components/DebtReceivableView";
@@ -23,6 +24,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
+import { useNavigate } from "react-router-dom";
 
 /* ------------------------------------------------------------------ */
 /*  HOOK: Mouse position untuk efek highlight dinamis pada liquid glass */
@@ -139,6 +141,7 @@ export const DesktopDashboard: React.FC<{
   lastSyncTime = "",
   onManualSync,
 }) => {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<
     "PL_WATERFALL" | "DEBT_RECEIVABLE"
   >("PL_WATERFALL");
@@ -214,6 +217,14 @@ export const DesktopDashboard: React.FC<{
           <div className="flex items-center justify-between gap-3">
             {/* Kiri: Logo & Judul */}
             <div className="flex items-center gap-3 shrink-0">
+              <button
+                onClick={() => navigate("/app")}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-xs font-black uppercase transition shadow-md cursor-pointer mr-1"
+                title="Kembali ke Ruang Kerja Kasir / ERP"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span className="hidden sm:inline">Kembali ke ERP</span>
+              </button>
               <motion.div
                 ref={logoRef}
                 onClick={handleLogoClick}
