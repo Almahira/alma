@@ -1,5 +1,5 @@
 # File: Dockerfile (Root Monorepo)
-FROM node:20-slim
+FROM node:22-slim
 
 # Install curl, ca-certificates & NATS Server binary
 RUN apt-get update && apt-get install -y curl ca-certificates procps && rm -rf /var/lib/apt/lists/*
