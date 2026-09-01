@@ -168,14 +168,20 @@ router.post("/create-snap", async (req: Request, res: Response) => {
       ...(tier === "EXCLUSIVE" ? ["mdl_ai_forecasting", "mdl_ai_ocr"] : []),
     ];
 
-    const serverKey =
-      process.env.MIDTRANS_SERVER_KEY || "SB-Mid-server-YOUR_SERVER_KEY";
+    // PERBAIKAN 1 & 2: Wajibkan MIDTRANS_SERVER_KEY dan evaluasi boolean isProduction
+    const serverKey = process.env.MIDTRANS_SERVER_KEY;
+    if (!serverKey) {
+      return res.status(500).json({ error: "Server tidak dikonfigurasi dengan kredensial Midtrans." });
+    }
     const isProduction = process.env.MIDTRANS_IS_PRODUCTION === "true";
     const midtransSnapUrl = isProduction
       ? "https://app.midtrans.com/snap/v1/transactions"
       : "https://app.sandbox.midtrans.com/snap/v1/transactions";
 
     const authString = Buffer.from(`${serverKey}:`).toString("base64");
+    
+    // PERBAIKAN 3: Gunakan FRONTEND_URL dari env untuk callback
+    const frontendUrl = process.env.FRONTEND_URL || "https://alma-client-unv.vercel.app";
 
     const snapPayload = {
       transaction_details: {
@@ -196,7 +202,7 @@ router.post("/create-snap", async (req: Request, res: Response) => {
         },
       ],
       callbacks: {
-        finish: `${req.headers.origin || "http://localhost:3010"}/?payment=finish&orderId=${orderId}`,
+        finish: `${req.headers.origin || frontendUrl}/?payment=finish&orderId=${orderId}`,
       },
     };
 
@@ -284,8 +290,11 @@ router.post("/notification", async (req: Request, res: Response) => {
         now.setFullYear(now.getFullYear() + 1),
       ).toISOString();
 
-      const masterSecretKey =
-        process.env.ALMA_MASTER_SECRET_KEY || "ALMA_SECRET_DEV_KEY";
+      // PERBAIKAN: Wajibkan Master Key di Env
+      const masterSecretKey = process.env.ALMA_MASTER_SECRET_KEY;
+      if (!masterSecretKey) {
+        throw new Error("ALMA_MASTER_SECRET_KEY belum diatur di sistem!");
+      }
 
       const allowedModules = (order.allowedModules as string[]) || [
         "mdl_organization",
@@ -439,6 +448,7 @@ router.get("/order-status/:orderId", async (req: Request, res: Response) => {
 
     const order = orderRows[0];
 
+    // PERBAIKAN 4: Menjaga keamanan API di mode production
     if (
       order.status === "PENDING" &&
       orderId.startsWith("ALMA-ORD-") &&
@@ -466,6 +476,12 @@ router.get("/order-status/:orderId", async (req: Request, res: Response) => {
 
       const maxOutlets = order.tier === "EXCLUSIVE" ? 100 : 50;
 
+      // Ambil key dari .env alih-alih hardcode string
+      const masterSecretKey = process.env.ALMA_MASTER_SECRET_KEY;
+      if (!masterSecretKey) {
+        throw new Error("ALMA_MASTER_SECRET_KEY belum diatur!");
+      }
+
       const token = LicenseManager.generateLicenseToken(
         {
           licenseId: `LIC_${ulid()}`,
@@ -476,7 +492,7 @@ router.get("/order-status/:orderId", async (req: Request, res: Response) => {
           allowedModules,
           validUntil,
         },
-        "ALMA_SECRET_DEV_KEY",
+        masterSecretKey,
       );
 
       await db
