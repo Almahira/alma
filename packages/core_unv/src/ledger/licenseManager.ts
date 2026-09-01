@@ -3,7 +3,7 @@ import { CryptoManager } from "./crypto";
 
 // PERINGATAN: Kunci Publik di bawah ini harus dipasangkan dengan Secret Key Ed25519 aslimu di .env
 export const ALMA_MASTER_PUBLIC_KEY =
-  "zYtxDlm3oaQmnxW8ZjkseAm804MF///vZlYoUM0GYXc=";
+  "/wjmuBlzNSaIlk+03QrFaAQoY2WW+uH/74FmYoSY4hs=";
 
 export interface AlmaLicensePayload {
   licenseId: string;
