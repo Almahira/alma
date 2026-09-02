@@ -1,10 +1,38 @@
+// File: apps/server_unv/src/routes/provision.ts
 import express from "express";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { db } from "../config/db.js";
 import { companies, regions, outlets, userAccounts, employees, } from "../../../../modules/mdl_organization/src/server/schema.js";
 import { systemEventJournal, deviceRegistry, } from "../../../../packages/db-schema/index.js";
 import { ulid } from "ulidx";
+import { LicenseManager } from "../../../../packages/core_unv/src/ledger/licenseManager.js";
 const router = express.Router();
+// Helper: Cek Kuota Perangkat Aktif (Free = 10, Premium = 50, Exclusive = 100)
+async function checkDeviceQuota(companyId, licenseKey, licenseTier) {
+    let maxAllowed = 10; // Default Free: 10 Mesin Kasir / Perangkat
+    if (licenseKey) {
+        const licenseData = LicenseManager.verifyLicense(licenseKey);
+        if (licenseData.isValid && licenseData.maxOutlets) {
+            maxAllowed = licenseData.maxOutlets;
+        }
+    }
+    else if (licenseTier === "PREMIUM") {
+        maxAllowed = 50;
+    }
+    else if (licenseTier === "EXCLUSIVE") {
+        maxAllowed = 100;
+    }
+    const activeDevices = await db
+        .select({ count: sql `count(*)` })
+        .from(deviceRegistry)
+        .where(and(eq(deviceRegistry.companyId, companyId), eq(deviceRegistry.status, "ACTIVE")));
+    const currentCount = Number(activeDevices[0]?.count || 0);
+    return {
+        allowed: currentCount < maxAllowed,
+        currentCount,
+        maxAllowed,
+    };
+}
 router.get("/system-status", async (_req, res) => {
     try {
         const companyList = await db.select().from(companies).limit(1);
@@ -23,7 +51,7 @@ router.get("/system-status", async (_req, res) => {
 });
 router.post("/cold-start", async (req, res) => {
     try {
-        const { company, region, outlet, superAdmin, device } = req.body;
+        const { company, region, outlet, superAdmin, device, licenseTier = "FREE", licenseKey = null, licenseExpiresAt = null, } = req.body;
         if (!company?.name ||
             !superAdmin?.email ||
             !superAdmin?.password ||
@@ -38,6 +66,12 @@ router.post("/cold-start", async (req, res) => {
         const employeeId = `AGG_${ulid()}`;
         const userId = `AGG_${ulid()}`;
         const deviceId = device.deviceId || device.nodeId || `NODE_${ulid()}`;
+        // Generator Kode Unik Anti-Bentrok
+        const suffix = ulid().slice(-4).toUpperCase();
+        const compCode = company.code || `COM_${suffix}`;
+        const regCode = region?.code || `REG_${suffix}`;
+        const outCode = outlet?.code || `OUT_${suffix}`;
+        const empNumber = `EMP-${suffix}`;
         const companyEventId = `EVT_${ulid()}`;
         const regionEventId = regionId ? `EVT_${ulid()}` : null;
         const outletEventId = outletId ? `EVT_${ulid()}` : null;
@@ -55,7 +89,7 @@ router.post("/cold-start", async (req, res) => {
                 aggregateVersion: 1,
                 type: "COMPANY_CREATED",
                 payload: JSON.stringify({
-                    code: company.code || company.name.substring(0, 3).toUpperCase() + "01",
+                    code: compCode,
                     name: company.name.toUpperCase(),
                     legalName: company.legalName || null,
                 }),
@@ -70,7 +104,7 @@ router.post("/cold-start", async (req, res) => {
                     type: "REGION_CREATED",
                     payload: JSON.stringify({
                         companyId,
-                        code: region.code || "REG01",
+                        code: regCode,
                         name: region.name.toUpperCase(),
                         timezone: region.timezone || "Asia/Jakarta",
                         address: region.address || null,
@@ -88,7 +122,7 @@ router.post("/cold-start", async (req, res) => {
                     payload: JSON.stringify({
                         companyId,
                         regionId,
-                        code: outlet.code || "OUT01",
+                        code: outCode,
                         name: outlet.name.toUpperCase(),
                         address: outlet.address || "Pusat",
                         industry: outlet.industry || "UMUM",
@@ -103,7 +137,7 @@ router.post("/cold-start", async (req, res) => {
                 aggregateVersion: 1,
                 type: "EMPLOYEE_CREATED",
                 payload: JSON.stringify({
-                    employeeNumber: "EMP-0001",
+                    employeeNumber: empNumber,
                     fullName: superAdmin.fullName.toUpperCase(),
                     gender: superAdmin.gender || "LAKI-LAKI",
                     phone: superAdmin.phone || null,
@@ -130,7 +164,7 @@ router.post("/cold-start", async (req, res) => {
             await tx.insert(systemEventJournal).values(journalEvents);
             await tx.insert(companies).values({
                 id: companyId,
-                code: company.code || company.name.substring(0, 3).toUpperCase() + "01",
+                code: compCode,
                 name: company.name.toUpperCase(),
                 legalName: company.legalName || null,
                 isActive: true,
@@ -140,7 +174,7 @@ router.post("/cold-start", async (req, res) => {
                 await tx.insert(regions).values({
                     id: regionId,
                     companyId,
-                    code: region.code || "REG01",
+                    code: regCode,
                     name: region.name.toUpperCase(),
                     timezone: region.timezone || "Asia/Jakarta",
                     address: region.address || null,
@@ -153,7 +187,7 @@ router.post("/cold-start", async (req, res) => {
                     id: outletId,
                     companyId,
                     regionId: regionId,
-                    code: outlet.code || "OUT01",
+                    code: outCode,
                     name: outlet.name.toUpperCase(),
                     address: outlet.address || "Pusat",
                     industry: outlet.industry || "UMUM",
@@ -163,7 +197,7 @@ router.post("/cold-start", async (req, res) => {
             }
             await tx.insert(employees).values({
                 id: employeeId,
-                employeeNumber: "EMP-0001",
+                employeeNumber: empNumber,
                 fullName: superAdmin.fullName.toUpperCase(),
                 gender: superAdmin.gender || "LAKI-LAKI",
                 phone: superAdmin.phone || null,
@@ -194,6 +228,9 @@ router.post("/cold-start", async (req, res) => {
                 lat: String(device.lat || ""),
                 lng: String(device.lng || ""),
                 status: "ACTIVE",
+                licenseTier: licenseTier,
+                licenseKey: licenseKey,
+                licenseExpiresAt: licenseExpiresAt ? new Date(licenseExpiresAt) : null,
             });
         });
         res.status(200).json({
@@ -280,11 +317,17 @@ router.get("/devices-by-scope", async (req, res) => {
 });
 router.post("/device", async (req, res) => {
     try {
-        const { companyId, regionId, outletId, name, replaceDeviceId, lat, lng, publicKey, allowedModules, } = req.body;
+        const { companyId, regionId, outletId, name, replaceDeviceId, lat, lng, publicKey, allowedModules, licenseTier = "FREE", licenseKey = null, licenseExpiresAt = null, } = req.body;
         if (!companyId || !name || !publicKey) {
             return res
                 .status(400)
                 .json({ error: "Data registrasi perangkat tidak lengkap." });
+        }
+        const quotaCheck = await checkDeviceQuota(companyId, licenseKey, licenseTier);
+        if (!quotaCheck.allowed) {
+            return res.status(403).json({
+                error: `Batas kuota lisensi tercapai! Maksimal ${quotaCheck.maxAllowed} perangkat aktif untuk paket ini. Silakan upgrade lisensi perusahaan Anda di portal cloud.`,
+            });
         }
         const deviceId = req.body.deviceId || req.body.nodeId || `NODE_${ulid()}`;
         await db.transaction(async (tx) => {
@@ -305,6 +348,9 @@ router.post("/device", async (req, res) => {
                 lat: String(lat || ""),
                 lng: String(lng || ""),
                 status: "ACTIVE",
+                licenseTier: licenseTier,
+                licenseKey: licenseKey,
+                licenseExpiresAt: licenseExpiresAt ? new Date(licenseExpiresAt) : null,
             });
         });
         res.status(200).json({
@@ -358,11 +404,13 @@ router.post("/takeover", async (req, res) => {
                 lat: String(lat || ""),
                 lng: String(lng || ""),
                 status: "ACTIVE",
+                licenseTier: oldDevice.licenseTier,
+                licenseKey: oldDevice.licenseKey,
+                licenseExpiresAt: oldDevice.licenseExpiresAt,
             });
         });
         const io = req.app.get("io");
         if (io) {
-            console.log(`[KILL SWITCH] Memancarkan sinyal pemutusan ke perangkat lama: ${replaceDeviceId}`);
             io.emit("DEVICE_FORCE_LOGOUT", {
                 deviceId: replaceDeviceId,
                 reason: "DEVICE_REPLACED",
@@ -381,6 +429,55 @@ router.post("/takeover", async (req, res) => {
     }
     catch (err) {
         console.error("[TAKEOVER ERROR]:", err);
+        res.status(500).json({ error: err.message });
+    }
+});
+router.patch("/upgrade-license", async (req, res) => {
+    try {
+        const { companyId, newLicenseKey } = req.body;
+        if (!companyId || !newLicenseKey) {
+            return res.status(400).json({
+                error: "companyId dan newLicenseKey wajib disertakan.",
+            });
+        }
+        const licenseData = LicenseManager.verifyLicense(newLicenseKey);
+        if (!licenseData.isValid) {
+            return res.status(400).json({
+                error: licenseData.errorMessage ||
+                    "Kunci lisensi tidak sah atau kedaluwarsa.",
+            });
+        }
+        await db
+            .update(deviceRegistry)
+            .set({
+            licenseTier: licenseData.tier,
+            licenseKey: newLicenseKey,
+            allowedModules: licenseData.allowedModules,
+            licenseExpiresAt: licenseData.validUntil
+                ? new Date(licenseData.validUntil)
+                : null,
+            updatedAt: new Date(),
+        })
+            .where(eq(deviceRegistry.companyId, companyId));
+        const io = req.app.get("io");
+        if (io) {
+            io.to(`company:${companyId}`).emit("LICENSE_UPGRADED", {
+                companyId,
+                tier: licenseData.tier,
+                licenseKey: newLicenseKey,
+                allowedModules: licenseData.allowedModules,
+                validUntil: licenseData.validUntil,
+            });
+        }
+        res.status(200).json({
+            status: "SUCCESS",
+            message: `Lisensi perusahaan berhasil ditingkatkan ke paket ${licenseData.tier}.`,
+            tier: licenseData.tier,
+            allowedModules: licenseData.allowedModules,
+        });
+    }
+    catch (err) {
+        console.error("[UPGRADE LICENSE ERROR]:", err);
         res.status(500).json({ error: err.message });
     }
 });

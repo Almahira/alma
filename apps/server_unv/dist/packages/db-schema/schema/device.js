@@ -14,4 +14,10 @@ export const deviceRegistry = pgTable("device_registry", {
     lastSeenAt: timestamp("last_seen_at").defaultNow(),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
+    // ★ Kolom baru untuk lisensi
+    licenseTier: varchar("license_tier", { length: 20 })
+        .notNull()
+        .default("FREE"),
+    licenseKey: text("license_key"), // NULLABLE (tidak ada untuk FREE)
+    licenseExpiresAt: timestamp("license_expires_at"), // NULLABLE, diisi untuk berbayar
 });

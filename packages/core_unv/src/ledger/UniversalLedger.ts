@@ -26,8 +26,10 @@ import { globalCircuitBreaker } from "../io/CircuitBreaker";
 import { getServerUrl, getApiUrl } from "../config/env";
 import { LicenseManager } from "./licenseManager";
 
-disableWarnings();
-addRxPlugin(RxDBDevModePlugin);
+if (typeof window !== "undefined" && (import.meta as any).env?.DEV) {
+  disableWarnings();
+  addRxPlugin(RxDBDevModePlugin);
+}
 
 export class UniversalLedger {
   private db!: RxDatabase<{

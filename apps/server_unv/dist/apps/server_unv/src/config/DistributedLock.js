@@ -1,6 +1,6 @@
 // File: apps/server_unv/src/config/DistributedLock.ts
 import { sql } from "drizzle-orm";
-import { db } from "./db"; // Menggunakan konfigurasi DB yang sudah ada
+import { db } from "./db.js"; // Menggunakan konfigurasi DB yang sudah ada
 export class DistributedLock {
     /**
      * Berusaha mengambil kunci sewa (Lease) untuk sebuah pekerjaan spesifik.

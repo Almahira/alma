@@ -1,3 +1,19 @@
 {
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https: http: ws: wss:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.midtrans.com https://*.veritrans.co.id; script-src-elem 'self' 'unsafe-inline' 'unsafe-eval' https://*.midtrans.com https://*.veritrans.co.id; style-src 'self' 'unsafe-inline' https:; frame-src 'self' https://*.midtrans.com https://*.veritrans.co.id; img-src 'self' data: blob: https:; connect-src 'self' https: http: ws: wss: https://*.midtrans.com https://*.veritrans.co.id;"
+        }
+      ]
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
 }

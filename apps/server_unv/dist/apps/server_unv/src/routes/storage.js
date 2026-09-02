@@ -12,7 +12,7 @@ const storage = multer.diskStorage({
         const date = new Date();
         const year = date.getFullYear();
         const month = String(date.getMonth() + 1).padStart(2, "0");
-        // Format: uploads/ORGANIZATION
+        // Format folder: uploads/ORGANIZATION / uploads/RECEIVING_DOCUMENT
         const aggregateDir = path.join(UPLOAD_ROOT, aggregateType);
         if (!fs.existsSync(aggregateDir)) {
             fs.mkdirSync(aggregateDir, { recursive: true });
@@ -25,16 +25,16 @@ const storage = multer.diskStorage({
         const year = date.getFullYear();
         const month = String(date.getMonth() + 1).padStart(2, "0");
         const ext = path.extname(file.originalname);
-        // Format: YYYY#MM#FILEID.ext
+        // Format nama file: YYYY#MM#FILEID.ext
         const newFilename = `${year}#${month}#${fileId}${ext}`;
         cb(null, newFilename);
     },
 });
 const upload = multer({
     storage,
-    limits: { fileSize: 200 * 1024 * 1024 }, // Hard limit server 200MB, validasi halus ada di klien
+    limits: { fileSize: 200 * 1024 * 1024 }, // Hard limit server 200MB, validasi halus di klien
 });
-// Endpoint Upload
+// Endpoint Upload File
 router.post("/upload", upload.single("file"), (req, res) => {
     try {
         if (!req.file) {
@@ -53,7 +53,7 @@ router.post("/upload", upload.single("file"), (req, res) => {
         res.status(500).json({ status: "FAILED", message: error.message });
     }
 });
-// Endpoint Download
+// Endpoint Download File
 router.get("/download/:aggregateType/:fileId", (req, res) => {
     const { aggregateType, fileId } = req.params;
     const aggregateDir = path.join(UPLOAD_ROOT, aggregateType);
@@ -62,7 +62,6 @@ router.get("/download/:aggregateType/:fileId", (req, res) => {
             .status(404)
             .json({ status: "FAILED", message: "Direktori tidak ditemukan" });
     }
-    // Cari file yang mengandung fileId
     const files = fs.readdirSync(aggregateDir);
     const matchedFile = files.find((f) => f.includes(`#${fileId}.`));
     if (!matchedFile) {
@@ -73,5 +72,4 @@ router.get("/download/:aggregateType/:fileId", (req, res) => {
     const filePath = path.join(aggregateDir, matchedFile);
     res.sendFile(filePath);
 });
-// ---> PERBAIKAN DI SINI: Menambahkan anotasi tipe eksplisit : Router <---
 export const storageRouter = router;

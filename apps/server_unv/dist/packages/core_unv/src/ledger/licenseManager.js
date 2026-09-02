@@ -1,10 +1,9 @@
 // File: packages/core_unv/src/ledger/licenseManager.ts
-import { CryptoManager } from "./crypto";
-// KUNCI PUBLIK MASTER RESMI ALMA (Ditanam di Klien & Aman Diakses Publik)
+import { CryptoManager } from "./crypto.js";
 export const ALMA_MASTER_PUBLIC_KEY = "zYtxDlm3oaQmnxW8ZjkseAm804MF///vZlYoUM0GYXc=";
 export class LicenseManager {
     /**
-     * MEMVALIDASI TOKEN LISENSI SECARA OFFLINE DI KLIEN BROWSER
+     * MEMVALIDASI TOKEN LISENSI SECARA OFFLINE DI KLIEN BROWSER & SERVER
      */
     static verifyLicense(licenseToken) {
         if (!licenseToken || !licenseToken.startsWith("ALMA-LIC-")) {
@@ -12,6 +11,7 @@ export class LicenseManager {
                 isValid: false,
                 tier: "FREE",
                 allowedModules: ["mdl_organization"],
+                maxOutlets: 10, // Kuota Default FREE = 10
                 errorMessage: "Format kunci lisensi tidak valid.",
             };
         }
@@ -20,12 +20,20 @@ export class LicenseManager {
             const decodedJson = atob(rawBase64);
             const parsed = JSON.parse(decodedJson);
             const { payload, signature } = parsed;
+            const fallbackQuota = payload.tier === "EXCLUSIVE"
+                ? 100
+                : payload.tier === "PREMIUM"
+                    ? 50
+                    : 10;
             // 1. Cek Masa Berlaku
             if (new Date(payload.validUntil).getTime() <= Date.now()) {
                 return {
                     isValid: false,
-                    tier: "FREE",
-                    allowedModules: ["mdl_organization"],
+                    tier: payload.tier || "FREE",
+                    companyName: payload.companyName,
+                    allowedModules: payload.allowedModules || ["mdl_organization"],
+                    validUntil: payload.validUntil,
+                    maxOutlets: payload.maxOutlets || fallbackQuota,
                     errorMessage: "Masa aktif kunci lisensi telah kedaluwarsa.",
                 };
             }
@@ -33,7 +41,6 @@ export class LicenseManager {
             const canonicalData = CryptoManager.canonicalStringify(payload);
             const isVerified = CryptoManager.verify(canonicalData, signature, ALMA_MASTER_PUBLIC_KEY);
             if (!isVerified) {
-                // Fallback untuk pengembangan lokal / dev sandbox jika signature mock
                 if (signature.startsWith("DEV_MOCK_SIGNATURE")) {
                     return {
                         isValid: true,
@@ -41,12 +48,14 @@ export class LicenseManager {
                         companyName: payload.companyName,
                         allowedModules: payload.allowedModules,
                         validUntil: payload.validUntil,
+                        maxOutlets: payload.maxOutlets || fallbackQuota,
                     };
                 }
                 return {
                     isValid: false,
                     tier: "FREE",
                     allowedModules: ["mdl_organization"],
+                    maxOutlets: 10,
                     errorMessage: "Tanda tangan lisensi tidak sah (Data telah diubah).",
                 };
             }
@@ -56,6 +65,7 @@ export class LicenseManager {
                 companyName: payload.companyName,
                 allowedModules: payload.allowedModules,
                 validUntil: payload.validUntil,
+                maxOutlets: payload.maxOutlets || fallbackQuota,
             };
         }
         catch (err) {
@@ -63,12 +73,13 @@ export class LicenseManager {
                 isValid: false,
                 tier: "FREE",
                 allowedModules: ["mdl_organization"],
+                maxOutlets: 10,
                 errorMessage: "Gagal memproses berkas lisensi.",
             };
         }
     }
     /**
-     * MEMBANGKITKAN KUNCI LISENSI RESMI (HANYA DI SERVER / PORTAL OWNER)
+     * MEMBANGKITKAN KUNCI LISENSI RESMI
      */
     static generateLicenseToken(payload, secretKeyBase64) {
         const canonicalData = CryptoManager.canonicalStringify(payload);

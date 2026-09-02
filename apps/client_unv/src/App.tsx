@@ -156,14 +156,21 @@ function WorkspaceWrapper() {
 }
 
 export default function App() {
+  const isProvisioned =
+    typeof window !== "undefined" && !!localStorage.getItem("__unv_deviceToken");
+
   return (
     <BrowserRouter>
       <Routes>
         {/* 1. CLOUD MARKETING & BILLING PORTAL */}
-        <Route path="/" element={<LandingPage />} />
+        <Route
+          path="/"
+          element={
+            isProvisioned ? <Navigate to="/app" replace /> : <LandingPage />
+          }
+        />
         <Route path="/pricing" element={<LandingPage />} />
         <Route path="/billing" element={<LandingPage />} />
-
         {/* 2. PORTAL AKTIVASI & SETUP PERANGKAT KASIR */}
         <Route
           path="/setup"
@@ -173,7 +180,6 @@ export default function App() {
             />
           }
         />
-
         {/* 3. SEMUA RUANG OPERASIONAL ERP / KASIR (WILDCARD CATCH-ALL) */}
         <Route path="/*" element={<WorkspaceWrapper />} />
       </Routes>

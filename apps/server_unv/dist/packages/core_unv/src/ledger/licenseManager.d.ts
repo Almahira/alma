@@ -15,7 +15,7 @@ export interface AlmaSignedLicense {
 }
 export declare class LicenseManager {
     /**
-     * MEMVALIDASI TOKEN LISENSI SECARA OFFLINE DI KLIEN BROWSER
+     * MEMVALIDASI TOKEN LISENSI SECARA OFFLINE DI KLIEN BROWSER & SERVER
      */
     static verifyLicense(licenseToken: string): {
         isValid: boolean;
@@ -23,10 +23,11 @@ export declare class LicenseManager {
         companyName?: string;
         allowedModules: string[];
         validUntil?: string;
+        maxOutlets?: number;
         errorMessage?: string;
     };
     /**
-     * MEMBANGKITKAN KUNCI LISENSI RESMI (HANYA DI SERVER / PORTAL OWNER)
+     * MEMBANGKITKAN KUNCI LISENSI RESMI
      */
     static generateLicenseToken(payload: AlmaLicensePayload, secretKeyBase64: string): string;
 }
