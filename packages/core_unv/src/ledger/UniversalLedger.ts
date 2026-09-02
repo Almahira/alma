@@ -73,7 +73,7 @@ export class UniversalLedger {
           storage: getRxStorageDexie(),
         }),
         multiInstance: false,
-        ignoreDuplicate: true,
+        ignoreDuplicate: Boolean((import.meta as any).env?.DEV),
       });
 
       await this.db.addCollections({
