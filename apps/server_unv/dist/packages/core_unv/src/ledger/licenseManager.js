@@ -1,6 +1,7 @@
 // File: packages/core_unv/src/ledger/licenseManager.ts
 import { CryptoManager } from "./crypto.js";
-export const ALMA_MASTER_PUBLIC_KEY = "zYtxDlm3oaQmnxW8ZjkseAm804MF///vZlYoUM0GYXc=";
+// PERINGATAN: Kunci Publik di bawah ini harus dipasangkan dengan Secret Key Ed25519 aslimu di .env
+export const ALMA_MASTER_PUBLIC_KEY = "/wjmuBlzNSaIlk+03QrFaAQoY2WW+uH/74FmYoSY4hs=";
 export class LicenseManager {
     /**
      * MEMVALIDASI TOKEN LISENSI SECARA OFFLINE DI KLIEN BROWSER & SERVER
@@ -11,7 +12,7 @@ export class LicenseManager {
                 isValid: false,
                 tier: "FREE",
                 allowedModules: ["mdl_organization"],
-                maxOutlets: 10, // Kuota Default FREE = 10
+                maxOutlets: 10,
                 errorMessage: "Format kunci lisensi tidak valid.",
             };
         }
@@ -37,20 +38,11 @@ export class LicenseManager {
                     errorMessage: "Masa aktif kunci lisensi telah kedaluwarsa.",
                 };
             }
-            // 2. Verifikasi Tanda Tangan Kriptografi Ed25519
+            // 2. Verifikasi Tanda Tangan Kriptografi Ed25519 Secara Ketat
             const canonicalData = CryptoManager.canonicalStringify(payload);
             const isVerified = CryptoManager.verify(canonicalData, signature, ALMA_MASTER_PUBLIC_KEY);
+            // BLOK DEV_MOCK_SIGNATURE DIHAPUS. Tanda tangan wajib valid 100%.
             if (!isVerified) {
-                if (signature.startsWith("DEV_MOCK_SIGNATURE")) {
-                    return {
-                        isValid: true,
-                        tier: payload.tier,
-                        companyName: payload.companyName,
-                        allowedModules: payload.allowedModules,
-                        validUntil: payload.validUntil,
-                        maxOutlets: payload.maxOutlets || fallbackQuota,
-                    };
-                }
                 return {
                     isValid: false,
                     tier: "FREE",
@@ -82,14 +74,12 @@ export class LicenseManager {
      * MEMBANGKITKAN KUNCI LISENSI RESMI
      */
     static generateLicenseToken(payload, secretKeyBase64) {
+        if (!secretKeyBase64 || secretKeyBase64 === "ALMA_SECRET_DEV_KEY") {
+            throw new Error("Penerbitan lisensi ditolak: Kunci rahasia produksi belum dikonfigurasi.");
+        }
         const canonicalData = CryptoManager.canonicalStringify(payload);
-        let signature = "";
-        try {
-            signature = CryptoManager.sign(canonicalData, secretKeyBase64);
-        }
-        catch {
-            signature = `DEV_MOCK_SIGNATURE_${Date.now()}`;
-        }
+        // Metode sign() akan otomatis throw error jika gagal (bukan fallback ke mock lagi)
+        const signature = CryptoManager.sign(canonicalData, secretKeyBase64);
         const licenseObject = {
             payload,
             signature,

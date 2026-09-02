@@ -1,4 +1,4 @@
-export declare const ALMA_MASTER_PUBLIC_KEY = "zYtxDlm3oaQmnxW8ZjkseAm804MF///vZlYoUM0GYXc=";
+export declare const ALMA_MASTER_PUBLIC_KEY = "/wjmuBlzNSaIlk+03QrFaAQoY2WW+uH/74FmYoSY4hs=";
 export interface AlmaLicensePayload {
     licenseId: string;
     tier: "FREE" | "PREMIUM" | "EXCLUSIVE";

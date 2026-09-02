@@ -150,11 +150,24 @@ const CheckoutModal: React.FC<{
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
 
-      if (
-        (window as any).snap &&
-        data.token &&
-        !data.token.startsWith("DEV_")
-      ) {
+      // FUNGSI HELPER: LOAD SNAP.JS HANYA SAAT DIBUTUHKAN (LAZY LOAD)
+      const loadSnapScript = (): Promise<void> => {
+        return new Promise((resolve, reject) => {
+          if ((window as any).snap) return resolve();
+          const script = document.createElement("script");
+          script.src = "https://app.midtrans.com/snap/snap.js";
+          script.setAttribute(
+            "data-client-key",
+            "Mid-client-7ZHoQPtcHnpcwglB",
+          );
+          script.onload = () => resolve();
+          script.onerror = () => reject(new Error("Gagal memuat sistem pembayaran Midtrans."));
+          document.body.appendChild(script);
+        });
+      };
+
+      if (data.token && !data.token.startsWith("DEV_")) {
+        await loadSnapScript();
         (window as any).snap.pay(data.token, {
           onSuccess: async () => {
             const statusRes = await fetch(
