@@ -153,7 +153,7 @@ router.post("/create-snap", async (req: Request, res: Response) => {
     const amount = tier === "EXCLUSIVE" ? 1499000 : 499000;
     const tierName =
       tier === "EXCLUSIVE" ? "Paket Eksklusif AI" : "Paket Premium Enterprise";
-    const maxOutlets = tier === "EXCLUSIVE" ? 100 : 50; // Premium = 50, Exclusive = 100
+    const maxOutlets = tier === "EXCLUSIVE" ? 100 : 50; 
 
     const targetModules = [
       "mdl_organization",
@@ -168,14 +168,18 @@ router.post("/create-snap", async (req: Request, res: Response) => {
       ...(tier === "EXCLUSIVE" ? ["mdl_ai_forecasting", "mdl_ai_ocr"] : []),
     ];
 
-    const serverKey =
-      process.env.MIDTRANS_SERVER_KEY || "SB-Mid-server-YOUR_SERVER_KEY";
+    const serverKey = process.env.MIDTRANS_SERVER_KEY;
+    if (!serverKey) {
+      return res.status(500).json({ error: "MIDTRANS_SERVER_KEY belum diatur di .env" });
+    }
+
     const isProduction = process.env.MIDTRANS_IS_PRODUCTION === "true";
     const midtransSnapUrl = isProduction
       ? "https://app.midtrans.com/snap/v1/transactions"
       : "https://app.sandbox.midtrans.com/snap/v1/transactions";
 
     const authString = Buffer.from(`${serverKey}:`).toString("base64");
+    const frontendUrl = process.env.FRONTEND_URL || "https://alma-client-unv.vercel.app";
 
     const snapPayload = {
       transaction_details: {
@@ -196,7 +200,7 @@ router.post("/create-snap", async (req: Request, res: Response) => {
         },
       ],
       callbacks: {
-        finish: `${req.headers.origin || "http://localhost:3010"}/?payment=finish&orderId=${orderId}`,
+        finish: `${req.headers.origin || frontendUrl}/?payment=finish&orderId=${orderId}`,
       },
     };
 
@@ -284,8 +288,10 @@ router.post("/notification", async (req: Request, res: Response) => {
         now.setFullYear(now.getFullYear() + 1),
       ).toISOString();
 
-      const masterSecretKey =
-        process.env.ALMA_MASTER_SECRET_KEY || "ALMA_SECRET_DEV_KEY";
+      const masterSecretKey = process.env.ALMA_MASTER_SECRET_KEY;
+      if (!masterSecretKey || masterSecretKey === "ALMA_SECRET_DEV_KEY") {
+        throw new Error("FATAL ERROR: ALMA_MASTER_SECRET_KEY produksi belum dikonfigurasi di .env");
+      }
 
       const allowedModules = (order.allowedModules as string[]) || [
         "mdl_organization",
@@ -356,13 +362,7 @@ router.post("/notification", async (req: Request, res: Response) => {
             html: mailHtml,
           });
           emailStatus = "SENT";
-          console.log(
-            `[SMTP MAILER] Email lisensi berhasil dikirim ke: ${order.customerEmail}`,
-          );
         } else {
-          console.log(
-            `[SMTP MOCK] Simulasi Kirim Email ke ${order.customerEmail}:\n${token}`,
-          );
           emailStatus = "SENT";
         }
       } catch (mailErr: any) {
@@ -379,10 +379,6 @@ router.post("/notification", async (req: Request, res: Response) => {
 
       // OVER-THE-AIR UPGRADE HOOK
       if (order.companyId) {
-        console.log(
-          `[OTA UPGRADE] Menerapkan lisensi baru ke database deviceRegistry untuk company: ${order.companyId}`,
-        );
-
         await db
           .update(deviceRegistry)
           .set({
@@ -465,6 +461,11 @@ router.get("/order-status/:orderId", async (req: Request, res: Response) => {
       ];
 
       const maxOutlets = order.tier === "EXCLUSIVE" ? 100 : 50;
+      
+      const masterSecretKey = process.env.ALMA_MASTER_SECRET_KEY;
+      if (!masterSecretKey || masterSecretKey === "ALMA_SECRET_DEV_KEY") {
+        throw new Error("FATAL ERROR: ALMA_MASTER_SECRET_KEY produksi belum dikonfigurasi di .env");
+      }
 
       const token = LicenseManager.generateLicenseToken(
         {
@@ -476,7 +477,7 @@ router.get("/order-status/:orderId", async (req: Request, res: Response) => {
           allowedModules,
           validUntil,
         },
-        "ALMA_SECRET_DEV_KEY",
+        masterSecretKey,
       );
 
       await db

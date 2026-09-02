@@ -689,7 +689,7 @@ export function UniversalLayout({
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 4000);
         const serverUrl =
-          localStorage.getItem("__unv_serverUrl") || "http://localhost:5000";
+          localStorage.getItem("__unv_serverUrl") || "https://api.almazain.my.id";
 
         const res = await fetch(`${serverUrl.replace(/\/+$/, "")}/api/health`, {
           method: "GET",
