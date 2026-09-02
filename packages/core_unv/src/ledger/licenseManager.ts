@@ -1,5 +1,5 @@
 // File: packages/core_unv/src/ledger/licenseManager.ts
-import { CryptoManager } from "./crypto";
+import { CryptoManager } from "./crypto.js";
 
 export const ALMA_MASTER_PUBLIC_KEY =
   "zYtxDlm3oaQmnxW8ZjkseAm804MF///vZlYoUM0GYXc=";
