@@ -26,8 +26,13 @@ export const STANDARD_UOMS = [
   { value: "PORSI", label: "Porsi (PORSI)", type: "UNIT", ratioToPcs: 1 },
 ];
 
+export interface ConversionVariantInput {
+  value: number; // misal: 25
+  uom: string; // misal: "KG"
+}
+
 /**
- * Mengonversi kuantitas dari satuan input ke satuan master database
+ * 1. Mengonversi kuantitas matematis antar satuan sejenis (Massa ke Massa, Volume ke Volume)
  */
 export function convertUomQty(
   qty: number,
@@ -60,6 +65,12 @@ export function convertUomQty(
   if (from === "ONS" && (target === "GRAM" || target === "G")) {
     return { convertedQty: qty * 100, ratio: 100 };
   }
+  if ((from === "KG" || from === "KILOGRAM") && target === "ONS") {
+    return { convertedQty: qty * 10, ratio: 10 };
+  }
+  if ((from === "GRAM" || from === "G") && target === "ONS") {
+    return { convertedQty: qty / 100, ratio: 0.01 };
+  }
 
   // 2. Konversi Kelompok Volume (LITER <-> ML <-> CC)
   if (
@@ -80,15 +91,91 @@ export function convertUomQty(
 }
 
 /**
- * Menghitung Nilai Kerugian HPP Berdasarkan Satuan Input
+ * 2. JANTUNG MATEMATIKA: Menghitung Rasio & Biaya HPP Berdasarkan Varian Kemasan
+ * Mendukung konversi dari takaran mikro (Gram/ML) ke kemasan makro (Karung/Jerigen/Dus)
+ */
+export function calculatePackagingLossCost(
+  inputQty: number,
+  inputUom: string,
+  baseUom: string,
+  basePricePerUnit: number,
+  variant?: ConversionVariantInput | null,
+): {
+  convertedBaseQty: number; // Berapa bagian kemasan master (misal: 0.02 Karung)
+  convertedStandardQty: number; // Takaran dalam satuan varian (misal: 0.5 KG)
+  standardUom: string; // Satuan standar (misal: "KG")
+  unitCostPerStandard: number; // HPP per satuan standar (misal: Rp 4.000 / KG)
+  totalCost: number; // Total Rupiah HPP / Kerugian
+} {
+  const cleanInputUom = (inputUom || "").toUpperCase().trim();
+  const cleanBaseUom = (baseUom || "").toUpperCase().trim();
+
+  // KASUS 1: BARANG MEMILIKI VARIAN KONVERSI KEMASAN (Misal: 1 KARUNG = 25 KG)
+  if (variant && Number(variant.value) > 0 && variant.uom) {
+    const variantStandardUom = variant.uom.toUpperCase().trim();
+    const variantCapacity = Number(variant.value);
+
+    // Langkah A: Konversi takaran input ke satuan standar varian (misal: 500 GRAM -> 0.5 KG)
+    const { convertedQty: standardQty } = convertUomQty(
+      inputQty,
+      cleanInputUom,
+      variantStandardUom,
+    );
+
+    // Langkah B: Hitung HPP per satuan standar (misal: Rp 100.000 / 25 KG = Rp 4.000 / KG)
+    const unitCostPerStandard = Math.round(basePricePerUnit / variantCapacity);
+
+    // Langkah C: Hitung bagian kemasan master untuk pemotongan stok (misal: 0.5 KG / 25 KG = 0.02 Karung)
+    const convertedBaseQty = parseFloat(
+      (standardQty / variantCapacity).toFixed(4),
+    );
+
+    // Langkah D: Hitung total biaya HPP
+    const totalCost = Math.round(
+      standardQty * (basePricePerUnit / variantCapacity),
+    );
+
+    return {
+      convertedBaseQty,
+      convertedStandardQty: standardQty,
+      standardUom: variantStandardUom,
+      unitCostPerStandard,
+      totalCost,
+    };
+  }
+
+  // KASUS 2: BARANG STANDAR TANPA VARIAN (Misal: Daging per KG, Telur per KG)
+  const { convertedQty } = convertUomQty(inputQty, cleanInputUom, cleanBaseUom);
+  const totalCost = Math.round(convertedQty * (basePricePerUnit || 0));
+
+  return {
+    convertedBaseQty: convertedQty,
+    convertedStandardQty: convertedQty,
+    standardUom: cleanBaseUom,
+    unitCostPerStandard: basePricePerUnit,
+    totalCost,
+  };
+}
+
+/**
+ * 3. BACKWARD-COMPATIBLE WRAPPER: Menjamin modul lama tidak error
  */
 export function calculateLossCost(
   inputQty: number,
   inputUom: string,
   baseUom: string,
   basePricePerUnit: number,
+  variant?: ConversionVariantInput | null,
 ): { convertedQty: number; totalCost: number } {
-  const { convertedQty } = convertUomQty(inputQty, inputUom, baseUom);
-  const totalCost = Math.round(convertedQty * (basePricePerUnit || 0));
-  return { convertedQty, totalCost };
+  const result = calculatePackagingLossCost(
+    inputQty,
+    inputUom,
+    baseUom,
+    basePricePerUnit,
+    variant,
+  );
+  return {
+    convertedQty: result.convertedBaseQty,
+    totalCost: result.totalCost,
+  };
 }

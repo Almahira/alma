@@ -12,6 +12,17 @@ interface OrgStoreState extends OrgState {
   getPositionsByDivision: (divisionId: string) => any[];
 }
 
+export const useHasWriteAccess = () => {
+  try {
+    const rawUser = localStorage.getItem("__unv_activeUser");
+    if (rawUser) {
+      const user = JSON.parse(rawUser);
+      return ["SUPER_ADMIN", "OUTLET_MANAGER", "ADMIN"].includes(user.role);
+    }
+  } catch (e) {}
+  return false;
+};
+
 export const useOrgStore = create<OrgStoreState>((set, get) => ({
   companies: [],
   regions: [],

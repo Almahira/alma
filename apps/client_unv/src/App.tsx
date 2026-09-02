@@ -21,6 +21,7 @@ import { ModuleLifecycleWrapper } from "./shared-ui/ModuleLifecycleWrapper";
 import ExecutiveDashboard from "./executive-dashboard/ExecutiveDashboard";
 import { LandingPage } from "./system-ui/LandingPage";
 import { SetupWizard } from "./system-ui/SetupWizard";
+import { LoginPage } from "./system-ui/LoginPage";
 
 function getAllowedModules(): string[] {
   try {
@@ -66,10 +67,16 @@ function getAggregatedRoutes(): (RouteConfig & { pluginName: string })[] {
 function WorkspaceWrapper() {
   const location = useLocation();
   const isProvisioned = !!localStorage.getItem("__unv_deviceToken");
+  const hasActiveUser = !!localStorage.getItem("__unv_activeUser");
 
-  // Jika mesin belum terdaftar, arahkan ke Setup Wizard
+  // 1. Jika mesin belum terdaftar, arahkan ke Setup Wizard
   if (!isProvisioned) {
     return <Navigate to="/setup" replace />;
+  }
+
+  // 2. Jika mesin sudah terdaftar tapi belum ada aktor yang login / shift kasir:
+  if (!hasActiveUser) {
+    return <LoginPage onLoginSuccess={() => window.location.reload()} />;
   }
 
   // Khusus Executive Dashboard (Full Screen Mode)
@@ -157,7 +164,8 @@ function WorkspaceWrapper() {
 
 export default function App() {
   const isProvisioned =
-    typeof window !== "undefined" && !!localStorage.getItem("__unv_deviceToken");
+    typeof window !== "undefined" &&
+    !!localStorage.getItem("__unv_deviceToken");
 
   return (
     <BrowserRouter>

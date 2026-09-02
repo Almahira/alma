@@ -11,7 +11,7 @@ import {
   User,
   Users,
 } from "lucide-react";
-import { useOrgStore } from "./store";
+import { useOrgStore, useHasWriteAccess } from "./store";
 import { globalCommandBus } from "../../../../packages/core_unv/src/cqrs/CommandBus";
 import { useUniversalModal } from "../../../../apps/client_unv/src/shared-ui/UniversalLayout";
 
@@ -23,7 +23,7 @@ const UserAccountForm: React.FC<{
   const { openAlert } = useUniversalModal();
   const { employees, positions } = useOrgStore();
   const [formData, setFormData] = useState<any>(
-    initialData || { role: "CASHIER" },
+    initialData || { role: "STAFF" },
   );
 
   const handleSave = async (e: React.FormEvent) => {
@@ -125,17 +125,15 @@ const UserAccountForm: React.FC<{
               HAK AKSES / ROLE GUARD
             </label>
             <select
-              value={formData.role || "CASHIER"}
+              value={formData.role || "STAFF"}
               onChange={(e) =>
                 setFormData({ ...formData, role: e.target.value })
               }
               className="w-full text-sm font-bold text-(--text-primary) p-2.5 bg-(--bg-input) border border-(--border-color) rounded-lg outline-none focus:border-orange-500"
             >
-              <option value="SUPER_ADMIN">SUPER ADMIN (SEMUA AKSES)</option>
+              <option value="SUPER_ADMIN">SUPER ADMIN</option>
               <option value="OUTLET_MANAGER">OUTLET MANAGER</option>
-              <option value="CASHIER">KASIR (POS)</option>
-              <option value="KITCHEN">KITCHEN / DISPLAY</option>
-              <option value="PURCHASING">PURCHASING & GUDANG</option>
+              <option value="ADMIN">ADMIN OUTLET</option>
               <option value="STAFF">STAFF UMUM</option>
             </select>
           </div>
@@ -184,6 +182,7 @@ const UserAccountForm: React.FC<{
 export const AccountPage: React.FC = () => {
   const { openSideOver, closeSideOver, openAlert } = useUniversalModal();
   const { userAccounts, employees, positions } = useOrgStore();
+  const hasWriteAccess = useHasWriteAccess();
   const [viewStatus, setViewStatus] = useState<"AKTIF" | "ARSIP">("AKTIF");
 
   const handleArchive = (id: string) => {
@@ -227,49 +226,55 @@ export const AccountPage: React.FC = () => {
             Otorisasi Pengguna, Kredensial Login, dan PIN Mesin Kasir
           </p>
         </div>
-        <button
-          onClick={() => {
-            openSideOver({
-              title: "BUAT AKUN PENGGUNA",
-              width: "w-[500px]",
-              content: (
-                <UserAccountForm
-                  isEditMode={false}
-                  initialData={{}}
-                  onClose={closeSideOver}
-                />
-              ),
-            });
-          }}
-          className="flex items-center gap-2 px-4 py-2 text-xs font-black text-white bg-orange-500 rounded-lg hover:bg-orange-600 transition shadow-[0_4px_10px_rgba(249,115,22,0.3)] cursor-pointer"
-        >
-          <Plus className="w-4 h-4" /> + BUAT AKUN BARU
-        </button>
+        {hasWriteAccess && (
+          <button
+            onClick={() => {
+              openSideOver({
+                title: "BUAT AKUN PENGGUNA",
+                width: "w-[500px]",
+                content: (
+                  <UserAccountForm
+                    isEditMode={false}
+                    initialData={{}}
+                    onClose={closeSideOver}
+                  />
+                ),
+              });
+            }}
+            className="flex items-center gap-2 px-4 py-2 text-xs font-black text-white bg-orange-500 rounded-lg hover:bg-orange-600 transition shadow-[0_4px_10px_rgba(249,115,22,0.3)] cursor-pointer"
+          >
+            <Plus className="w-4 h-4" /> + BUAT AKUN BARU
+          </button>
+        )}
       </div>
 
       {/* Tabs */}
       <div className="px-6 bg-(--bg-card) border-b border-(--border-color) flex items-center justify-between shrink-0">
         <div className="flex items-center gap-6">
-          <button
-            onClick={() => setViewStatus("AKTIF")}
-            className={`py-3 text-xs font-black tracking-wide border-b-[3px] transition-all cursor-pointer flex items-center gap-2 ${
-              viewStatus === "AKTIF"
-                ? "border-orange-500 text-orange-600"
-                : "border-transparent text-(--text-secondary) hover:text-(--text-primary)"
-            }`}
-          >
-            <ShieldCheck className="w-4 h-4" /> AKUN AKTIF
-          </button>
-          <button
-            onClick={() => setViewStatus("ARSIP")}
-            className={`py-3 text-xs font-black tracking-wide border-b-[3px] transition-all cursor-pointer flex items-center gap-2 ${
-              viewStatus === "ARSIP"
-                ? "border-(--text-primary) text-(--text-primary)"
-                : "border-transparent text-(--text-secondary) hover:text-(--text-primary)"
-            }`}
-          >
-            <Archive className="w-4 h-4" /> AKUN DIKUNCI / ARSIP
-          </button>
+          {hasWriteAccess && (
+            <button
+              onClick={() => setViewStatus("AKTIF")}
+              className={`py-3 text-xs font-black tracking-wide border-b-[3px] transition-all cursor-pointer flex items-center gap-2 ${
+                viewStatus === "AKTIF"
+                  ? "border-orange-500 text-orange-600"
+                  : "border-transparent text-(--text-secondary) hover:text-(--text-primary)"
+              }`}
+            >
+              <ShieldCheck className="w-4 h-4" /> AKUN AKTIF
+            </button>
+          )}
+          {hasWriteAccess && (
+            <button
+              onClick={() => setViewStatus("ARSIP")}
+              className={`py-3 text-xs font-black tracking-wide border-b-[3px] transition-all cursor-pointer flex items-center gap-2 ${
+                viewStatus === "ARSIP"
+                  ? "border-(--text-primary) text-(--text-primary)"
+                  : "border-transparent text-(--text-secondary) hover:text-(--text-primary)"
+              }`}
+            >
+              <Archive className="w-4 h-4" /> AKUN DIKUNCI / ARSIP
+            </button>
+          )}
         </div>
       </div>
 
@@ -336,38 +341,44 @@ export const AccountPage: React.FC = () => {
                       <td className="px-6 py-4 text-right space-x-2">
                         {viewStatus === "AKTIF" ? (
                           <>
-                            <button
-                              onClick={() =>
-                                openSideOver({
-                                  title: "EDIT AKUN",
-                                  width: "w-[500px]",
-                                  content: (
-                                    <UserAccountForm
-                                      isEditMode={true}
-                                      initialData={user}
-                                      onClose={closeSideOver}
-                                    />
-                                  ),
-                                })
-                              }
-                              className="p-1.5 text-(--text-secondary) hover:text-blue-500 rounded"
-                            >
-                              <Edit2 className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              onClick={() => handleArchive(user.id)}
-                              className="p-1.5 text-(--text-secondary) hover:text-rose-500 rounded"
-                            >
-                              <Archive className="w-3.5 h-3.5" />
-                            </button>
+                            {hasWriteAccess && (
+                              <button
+                                onClick={() =>
+                                  openSideOver({
+                                    title: "EDIT AKUN",
+                                    width: "w-[500px]",
+                                    content: (
+                                      <UserAccountForm
+                                        isEditMode={true}
+                                        initialData={user}
+                                        onClose={closeSideOver}
+                                      />
+                                    ),
+                                  })
+                                }
+                                className="p-1.5 text-(--text-secondary) hover:text-blue-500 rounded"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            {hasWriteAccess && (
+                              <button
+                                onClick={() => handleArchive(user.id)}
+                                className="p-1.5 text-(--text-secondary) hover:text-rose-500 rounded"
+                              >
+                                <Archive className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                           </>
                         ) : (
-                          <button
-                            onClick={() => handleRestore(user.id)}
-                            className="px-3 py-1 text-[10px] font-bold text-emerald-500 bg-emerald-500/10 rounded"
-                          >
-                            RESTORE
-                          </button>
+                          hasWriteAccess && (
+                            <button
+                              onClick={() => handleRestore(user.id)}
+                              className="px-3 py-1 text-[10px] font-bold text-emerald-500 bg-emerald-500/10 rounded"
+                            >
+                              RESTORE
+                            </button>
+                          )
                         )}
                       </td>
                     </tr>

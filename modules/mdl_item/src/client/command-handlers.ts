@@ -97,6 +97,8 @@ export const itemCommandHandlers: CommandHandler[] = [
       );
     },
   },
+  // Di dalam modules/mdl_item/src/client/command-handlers.ts:
+
   {
     commandType: "CREATE_PRODUCT",
     execute: async (cmd: Command) => {
@@ -117,8 +119,11 @@ export const itemCommandHandlers: CommandHandler[] = [
         regionId,
         outletId,
         name: cmd.payload.name,
-        isExpense: Boolean(cmd.payload.isExpense), // <--- EKSPLISIT BOOLEAN
+        isExpense: Boolean(cmd.payload.isExpense),
         pricing: cmd.payload.pricing || {},
+        uomConversions: Array.isArray(cmd.payload.uomConversions)
+          ? cmd.payload.uomConversions
+          : [], // <--- TERUSKAN VARIAN KE EVENT
         approvalStatus: cmd.payload.approvalStatus || "PENDING",
         validateId: validateId,
       };
@@ -144,6 +149,9 @@ export const itemCommandHandlers: CommandHandler[] = [
         name: cmd.payload.name,
         isExpense: cmd.payload.isExpense,
         pricing: cmd.payload.pricing,
+        uomConversions: Array.isArray(cmd.payload.uomConversions)
+          ? cmd.payload.uomConversions
+          : [], // <--- UPDATE VARIAN KE EVENT
         nameChanged: cmd.payload.nameChanged,
       };
       await globalLedger.appendEvent(

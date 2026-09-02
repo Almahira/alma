@@ -373,6 +373,23 @@ export declare const itemProducts: import("drizzle-orm/pg-core").PgTableWithColu
             identity: undefined;
             generated: undefined;
         }, {}, {}>;
+        uomConversions: import("drizzle-orm/pg-core").PgColumn<{
+            name: "uom_conversions";
+            tableName: "item_products";
+            dataType: "json";
+            columnType: "PgJsonb";
+            data: unknown;
+            driverParam: unknown;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
         approvalStatus: import("drizzle-orm/pg-core").PgColumn<{
             name: "approval_status";
             tableName: "item_products";

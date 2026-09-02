@@ -18,7 +18,7 @@ import {
   Eye,
   CreditCard,
 } from "lucide-react";
-import { useOrgStore } from "./store";
+import { useOrgStore, useHasWriteAccess } from "./store";
 import { globalCommandBus } from "../../../../packages/core_unv/src/cqrs/CommandBus";
 import { useDictionaryStore } from "../../../../apps/client_unv/src/system-ui/dictionaryStore";
 import { globalBlobManager } from "../../../../packages/core_unv/src/io/BlobManager";
@@ -582,7 +582,8 @@ export function OrganizationPage() {
     openAlert,
   } = useUniversalModal();
   const { companies, regions, outlets, documents, bankAccounts } =
-    useOrgStore(); // <-- TAMBAHAN
+    useOrgStore();
+  const hasWriteAccess = useHasWriteAccess();
 
   const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>(
     {},
@@ -980,25 +981,27 @@ export function OrganizationPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => {
-              openSideOver({
-                title: "TAMBAH PERUSAHAAN",
-                width: "w-[450px]",
-                content: (
-                  <OrgForm
-                    modalType="COMPANY"
-                    isEditMode={false}
-                    initialData={{}}
-                    onClose={closeSideOver}
-                  />
-                ),
-              });
-            }}
-            className="flex items-center gap-2 px-4 py-2 text-xs font-black text-white bg-orange-500 rounded-lg hover:bg-orange-600 transition shadow-[0_4px_10px_rgba(249,115,22,0.3)] cursor-pointer"
-          >
-            <Plus className="w-4 h-4" /> TAMBAH PERUSAHAAN
-          </button>
+          {hasWriteAccess && (
+            <button
+              onClick={() => {
+                openSideOver({
+                  title: "TAMBAH PERUSAHAAN",
+                  width: "w-[450px]",
+                  content: (
+                    <OrgForm
+                      modalType="COMPANY"
+                      isEditMode={false}
+                      initialData={{}}
+                      onClose={closeSideOver}
+                    />
+                  ),
+                });
+              }}
+              className="flex items-center gap-2 px-4 py-2 text-xs font-black text-white bg-orange-500 rounded-lg hover:bg-orange-600 transition shadow-[0_4px_10px_rgba(249,115,22,0.3)] cursor-pointer"
+            >
+              <Plus className="w-4 h-4" /> TAMBAH PERUSAHAAN
+            </button>
+          )}
         </div>
       </div>
       {/* Tabs */}
@@ -1060,56 +1063,62 @@ export function OrganizationPage() {
                         </span>
                       </div>
                       <div className="flex items-center gap-3">
-                        <button
-                          onClick={() => {
-                            openSideOver({
-                              title: "TAMBAH REGIONAL",
-                              width: "w-[450px]",
-                              content: (
-                                <OrgForm
-                                  modalType="REGION"
-                                  isEditMode={false}
-                                  initialData={{ companyId: company.id }}
-                                  onClose={closeSideOver}
-                                />
-                              ),
-                            });
-                          }}
-                          className="text-[10px] font-black text-orange-600 bg-orange-100 px-3 py-1.5 rounded hover:bg-orange-200 cursor-pointer"
-                        >
-                          + REGIONAL
-                        </button>
-                        <button
-                          onClick={() => {
-                            openSideOver({
-                              title: "EDIT PERUSAHAAN",
-                              width: "w-[450px]",
-                              content: (
-                                <OrgForm
-                                  modalType="COMPANY"
-                                  isEditMode={true}
-                                  initialData={{
-                                    id: company.id,
-                                    name: company.name,
-                                    legalName: company.legalName,
-                                  }}
-                                  onClose={closeSideOver}
-                                />
-                              ),
-                            });
-                          }}
-                          className="p-1.5 text-(--text-secondary) hover:text-blue-500 rounded cursor-pointer"
-                          title="Edit Data"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleArchive(company.id, "COMPANY")}
-                          className="p-1.5 text-(--text-secondary) hover:text-rose-500 rounded cursor-pointer"
-                          title="Arsipkan"
-                        >
-                          <Archive className="w-4 h-4" />
-                        </button>
+                        {hasWriteAccess && (
+                          <button
+                            onClick={() => {
+                              openSideOver({
+                                title: "TAMBAH REGIONAL",
+                                width: "w-[450px]",
+                                content: (
+                                  <OrgForm
+                                    modalType="REGION"
+                                    isEditMode={false}
+                                    initialData={{ companyId: company.id }}
+                                    onClose={closeSideOver}
+                                  />
+                                ),
+                              });
+                            }}
+                            className="text-[10px] font-black text-orange-600 bg-orange-100 px-3 py-1.5 rounded hover:bg-orange-200 cursor-pointer"
+                          >
+                            + REGIONAL
+                          </button>
+                        )}
+                        {hasWriteAccess && (
+                          <button
+                            onClick={() => {
+                              openSideOver({
+                                title: "EDIT PERUSAHAAN",
+                                width: "w-[450px]",
+                                content: (
+                                  <OrgForm
+                                    modalType="COMPANY"
+                                    isEditMode={true}
+                                    initialData={{
+                                      id: company.id,
+                                      name: company.name,
+                                      legalName: company.legalName,
+                                    }}
+                                    onClose={closeSideOver}
+                                  />
+                                ),
+                              });
+                            }}
+                            className="p-1.5 text-(--text-secondary) hover:text-blue-500 rounded cursor-pointer"
+                            title="Edit Data"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                        )}
+                        {hasWriteAccess && (
+                          <button
+                            onClick={() => handleArchive(company.id, "COMPANY")}
+                            className="p-1.5 text-(--text-secondary) hover:text-rose-500 rounded cursor-pointer"
+                            title="Arsipkan"
+                          >
+                            <Archive className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </div>
                     {expandedNodes[company.id] && (
@@ -1177,28 +1186,30 @@ export function OrganizationPage() {
                                     </span>
                                   </div>
                                   <div className="flex items-center gap-3">
-                                    <button
-                                      onClick={() => {
-                                        openSideOver({
-                                          title: "TAMBAH OUTLET",
-                                          width: "w-[450px]",
-                                          content: (
-                                            <OrgForm
-                                              modalType="OUTLET"
-                                              isEditMode={false}
-                                              initialData={{
-                                                companyId: company.id,
-                                                regionId: region.id,
-                                              }}
-                                              onClose={closeSideOver}
-                                            />
-                                          ),
-                                        });
-                                      }}
-                                      className="text-[10px] font-black text-teal-600 bg-teal-100 px-3 py-1.5 rounded hover:bg-teal-200 cursor-pointer"
-                                    >
-                                      + OUTLET
-                                    </button>
+                                    {hasWriteAccess && (
+                                      <button
+                                        onClick={() => {
+                                          openSideOver({
+                                            title: "TAMBAH OUTLET",
+                                            width: "w-[450px]",
+                                            content: (
+                                              <OrgForm
+                                                modalType="OUTLET"
+                                                isEditMode={false}
+                                                initialData={{
+                                                  companyId: company.id,
+                                                  regionId: region.id,
+                                                }}
+                                                onClose={closeSideOver}
+                                              />
+                                            ),
+                                          });
+                                        }}
+                                        className="text-[10px] font-black text-teal-600 bg-teal-100 px-3 py-1.5 rounded hover:bg-teal-200 cursor-pointer"
+                                      >
+                                        + OUTLET
+                                      </button>
+                                    )}
                                     <button
                                       onClick={() => {
                                         openSideOver({
@@ -1219,40 +1230,44 @@ export function OrganizationPage() {
                                     >
                                       + REKENING
                                     </button>
-                                    <button
-                                      onClick={() => {
-                                        openSideOver({
-                                          title: "EDIT REGIONAL",
-                                          width: "w-[450px]",
-                                          content: (
-                                            <OrgForm
-                                              modalType="REGION"
-                                              isEditMode={true}
-                                              initialData={{
-                                                id: region.id,
-                                                companyId: region.companyId,
-                                                name: region.name,
-                                                address: region.address,
-                                              }}
-                                              onClose={closeSideOver}
-                                            />
-                                          ),
-                                        });
-                                      }}
-                                      className="p-1.5 text-(--text-secondary) hover:text-blue-500 rounded cursor-pointer"
-                                      title="Edit Data"
-                                    >
-                                      <Edit2 className="w-4 h-4" />
-                                    </button>
-                                    <button
-                                      onClick={() =>
-                                        handleArchive(region.id, "REGION")
-                                      }
-                                      className="p-1.5 text-(--text-secondary) hover:text-rose-500 rounded cursor-pointer"
-                                      title="Arsipkan"
-                                    >
-                                      <Archive className="w-4 h-4" />
-                                    </button>
+                                    {hasWriteAccess && (
+                                      <button
+                                        onClick={() => {
+                                          openSideOver({
+                                            title: "EDIT REGIONAL",
+                                            width: "w-[450px]",
+                                            content: (
+                                              <OrgForm
+                                                modalType="REGION"
+                                                isEditMode={true}
+                                                initialData={{
+                                                  id: region.id,
+                                                  companyId: region.companyId,
+                                                  name: region.name,
+                                                  address: region.address,
+                                                }}
+                                                onClose={closeSideOver}
+                                              />
+                                            ),
+                                          });
+                                        }}
+                                        className="p-1.5 text-(--text-secondary) hover:text-blue-500 rounded cursor-pointer"
+                                        title="Edit Data"
+                                      >
+                                        <Edit2 className="w-4 h-4" />
+                                      </button>
+                                    )}
+                                    {hasWriteAccess && (
+                                      <button
+                                        onClick={() =>
+                                          handleArchive(region.id, "REGION")
+                                        }
+                                        className="p-1.5 text-(--text-secondary) hover:text-rose-500 rounded cursor-pointer"
+                                        title="Arsipkan"
+                                      >
+                                        <Archive className="w-4 h-4" />
+                                      </button>
+                                    )}
                                   </div>
                                 </div>
                                 {expandedNodes[region.id] && (
@@ -1354,49 +1369,55 @@ export function OrganizationPage() {
                                               >
                                                 + REKENING
                                               </button>
-                                              <button
-                                                onClick={() => {
-                                                  openSideOver({
-                                                    title: "EDIT OUTLET",
-                                                    width: "w-[450px]",
-                                                    content: (
-                                                      <OrgForm
-                                                        modalType="OUTLET"
-                                                        isEditMode={true}
-                                                        initialData={{
-                                                          id: outlet.id,
-                                                          companyId:
-                                                            outlet.companyId,
-                                                          regionId:
-                                                            outlet.regionId,
-                                                          name: outlet.name,
-                                                          address:
-                                                            outlet.address,
-                                                          industry:
-                                                            outlet.industry,
-                                                        }}
-                                                        onClose={closeSideOver}
-                                                      />
-                                                    ),
-                                                  });
-                                                }}
-                                                className="p-1.5 text-(--text-secondary) hover:text-blue-500 rounded cursor-pointer"
-                                                title="Edit Data"
-                                              >
-                                                <Edit2 className="w-4 h-4" />
-                                              </button>
-                                              <button
-                                                onClick={() =>
-                                                  handleArchive(
-                                                    outlet.id,
-                                                    "OUTLET",
-                                                  )
-                                                }
-                                                className="p-1.5 text-(--text-secondary) hover:text-rose-500 rounded cursor-pointer"
-                                                title="Arsipkan"
-                                              >
-                                                <Archive className="w-4 h-4" />
-                                              </button>
+                                              {hasWriteAccess && (
+                                                <button
+                                                  onClick={() => {
+                                                    openSideOver({
+                                                      title: "EDIT OUTLET",
+                                                      width: "w-[450px]",
+                                                      content: (
+                                                        <OrgForm
+                                                          modalType="OUTLET"
+                                                          isEditMode={true}
+                                                          initialData={{
+                                                            id: outlet.id,
+                                                            companyId:
+                                                              outlet.companyId,
+                                                            regionId:
+                                                              outlet.regionId,
+                                                            name: outlet.name,
+                                                            address:
+                                                              outlet.address,
+                                                            industry:
+                                                              outlet.industry,
+                                                          }}
+                                                          onClose={
+                                                            closeSideOver
+                                                          }
+                                                        />
+                                                      ),
+                                                    });
+                                                  }}
+                                                  className="p-1.5 text-(--text-secondary) hover:text-blue-500 rounded cursor-pointer"
+                                                  title="Edit Data"
+                                                >
+                                                  <Edit2 className="w-4 h-4" />
+                                                </button>
+                                              )}
+                                              {hasWriteAccess && (
+                                                <button
+                                                  onClick={() =>
+                                                    handleArchive(
+                                                      outlet.id,
+                                                      "OUTLET",
+                                                    )
+                                                  }
+                                                  className="p-1.5 text-(--text-secondary) hover:text-rose-500 rounded cursor-pointer"
+                                                  title="Arsipkan"
+                                                >
+                                                  <Archive className="w-4 h-4" />
+                                                </button>
+                                              )}
                                             </div>
                                           </div>
                                           {expandedNodes[outlet.id] && (
@@ -1492,18 +1513,20 @@ export function OrganizationPage() {
                         {item.doc}
                       </td>
                       <td className="px-6 py-4 text-right">
-                        <button
-                          onClick={() =>
-                            handleRestore(
-                              item.restoreId,
-                              item.type,
-                              item.targetId,
-                            )
-                          }
-                          className="inline-flex items-center gap-1 px-3 py-1.5 text-[10px] font-black text-emerald-600 bg-emerald-100 rounded hover:bg-emerald-200 transition uppercase cursor-pointer"
-                        >
-                          <RotateCcw className="w-3 h-3" /> Restore
-                        </button>
+                        {hasWriteAccess && (
+                          <button
+                            onClick={() =>
+                              handleRestore(
+                                item.restoreId,
+                                item.type,
+                                item.targetId,
+                              )
+                            }
+                            className="inline-flex items-center gap-1 px-3 py-1.5 text-[10px] font-black text-emerald-600 bg-emerald-100 rounded hover:bg-emerald-200 transition uppercase cursor-pointer"
+                          >
+                            <RotateCcw className="w-3 h-3" /> Restore
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))

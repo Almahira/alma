@@ -2,6 +2,14 @@
 import { ProjectionHandler } from "../../../../packages/core_unv/src/cqrs/types";
 import { LedgerEventDoc } from "../../../../packages/core_unv/src/ledger/schema";
 
+export interface UomConversionItem {
+  id: string;
+  value: number; // Nilai kapasitas, misal: 25
+  uom: string; // Satuan standar, misal: "KG"
+  label?: string; // Label display, misal: "25 KG"
+  isDefault?: boolean;
+}
+
 export interface ItemState {
   categories: any[];
   uoms: any[];
@@ -43,6 +51,9 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
           id: aggregateId,
           ...payload,
           isExpense: Boolean(payload.isExpense),
+          uomConversions: Array.isArray(payload.uomConversions)
+            ? payload.uomConversions
+            : [],
           status: "Aktif",
         });
         break;
@@ -57,6 +68,10 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
               payload.isExpense !== undefined
                 ? Boolean(payload.isExpense)
                 : existing.isExpense,
+            uomConversions:
+              payload.uomConversions !== undefined
+                ? payload.uomConversions
+                : existing.uomConversions || [],
             approvalStatus: payload.nameChanged
               ? "PENDING"
               : existing.approvalStatus,
@@ -116,6 +131,11 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
         this.products.set(p.id, {
           ...p,
           isExpense: Boolean(p.isExpense ?? p.is_expense),
+          uomConversions: Array.isArray(p.uomConversions)
+            ? p.uomConversions
+            : Array.isArray(p.uom_conversions)
+              ? p.uom_conversions
+              : [],
         });
       });
     }

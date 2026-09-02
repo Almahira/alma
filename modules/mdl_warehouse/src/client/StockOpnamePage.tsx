@@ -203,7 +203,8 @@ export function StockOpnamePage() {
         );
 
       // 5. Sisa Stok Sistem Riil (Termasuk Pengurangan Spoil & Waste)
-      const systemStock = initialStock + stockIn - stockOut - spoilWasteQty;
+      const rawSystemStock = initialStock + stockIn - stockOut - spoilWasteQty;
+      const systemStock = parseFloat(rawSystemStock.toFixed(2));
 
       // 6. Harga HPP Terbaru & Trend Harga
       const scopeKey =
@@ -234,6 +235,7 @@ export function StockOpnamePage() {
         itemName: p.name,
         categoryName: catName,
         uomName,
+        uomConversions: p.uomConversions || [],
         initialStock,
         stockIn,
         stockOut,
@@ -556,7 +558,14 @@ export function StockOpnamePage() {
 
                       {/* UOM */}
                       <td className="px-3 py-2.5 text-center font-mono text-(--text-secondary)">
-                        {item.uomName}
+                        <span className="font-bold block">{item.uomName}</span>
+                        {Array.isArray(item.uomConversions) &&
+                          item.uomConversions.length > 0 && (
+                            <span className="text-[9px] text-orange-500 block">
+                              ({item.uomConversions[0].value}{" "}
+                              {item.uomConversions[0].uom})
+                            </span>
+                          )}
                       </td>
 
                       {/* STOK AWAL (BISA DI-SET JIKA BELUM PERNAH OPNAME / READ-ONLY JIKA SUDAH) */}
@@ -628,6 +637,7 @@ export function StockOpnamePage() {
                       <td className="px-4 py-2.5 text-center">
                         <input
                           type="number"
+                          step="any"
                           data-unv-numpad="true"
                           value={item.physicalStock}
                           onChange={(e) =>

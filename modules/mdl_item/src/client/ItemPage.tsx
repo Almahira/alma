@@ -18,6 +18,7 @@ import {
   Layers,
   ChevronDown,
   Wrench,
+  Star,
 } from "lucide-react";
 import { useItemStore } from "./store";
 import { useOrgStore } from "../../../mdl_organization/src/client/store";
@@ -34,6 +35,25 @@ import {
   productExcelSchema,
 } from "./features/excel-item";
 import { exportPdfItem } from "./features/pdf-item";
+
+// Daftar pilihan satuan standar untuk konversi isi kemasan
+const CONVERSION_UOM_OPTIONS = [
+  { value: "KG", label: "Kilogram (KG)" },
+  { value: "GRAM", label: "Gram (GRAM)" },
+  { value: "ONS", label: "Ons (100 Gram)" },
+  { value: "LITER", label: "Liter (LITER)" },
+  { value: "ML", label: "Mililiter (ML)" },
+  { value: "PCS", label: "Pieces (PCS)" },
+  { value: "BTL", label: "Botol (BTL)" },
+  { value: "PORSI", label: "Porsi (PORSI)" },
+];
+
+interface ConversionRow {
+  id: string;
+  value: number | "";
+  uom: string;
+  isDefault?: boolean;
+}
 
 // =========================================================================
 // 1. MODAL FORM: PRODUK BARANG & JASA (OTOMASI LOKASI DARI DEVICE ID)
@@ -69,6 +89,58 @@ const ProductForm: React.FC<{
     name: initialData?.name || "",
     isExpense: isExpenseMode,
   });
+
+  // State Varian Konversi Isi Kemasan (Multi-UOM)
+  const [uomConversions, setUomConversions] = useState<ConversionRow[]>(() => {
+    if (
+      Array.isArray(initialData?.uomConversions) &&
+      initialData.uomConversions.length > 0
+    ) {
+      return initialData.uomConversions;
+    }
+    return [];
+  });
+
+  const handleAddConversion = () => {
+    const newRow: ConversionRow = {
+      id: `UOMC_${ulid()}`,
+      value: 1,
+      uom: "KG",
+      isDefault: uomConversions.length === 0,
+    };
+    setUomConversions((prev) => [...prev, newRow]);
+  };
+
+  const handleRemoveConversion = (index: number) => {
+    setUomConversions((prev) => {
+      const updated = prev.filter((_, i) => i !== index);
+      if (updated.length > 0 && !updated.some((r) => r.isDefault)) {
+        updated[0].isDefault = true;
+      }
+      return updated;
+    });
+  };
+
+  const handleUpdateConversion = (
+    index: number,
+    field: "value" | "uom",
+    val: any,
+  ) => {
+    setUomConversions((prev) => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], [field]: val };
+      return updated;
+    });
+  };
+
+  const handleSetDefaultConversion = (index: number) => {
+    setUomConversions((prev) =>
+      prev.map((r, i) => ({
+        ...r,
+        isDefault: i === index,
+      })),
+    );
+  };
 
   const [isCustomCategory, setIsCustomCategory] = useState(false);
   const [customCategoryName, setCustomCategoryName] = useState("");
@@ -176,6 +248,24 @@ const ProductForm: React.FC<{
         }
       }
 
+      // Bersihkan dan format array varian konversi sebelum dikirim
+      const cleanConversions = uomConversions
+        .filter((c) => Number(c.value) > 0 && c.uom)
+        .map((c, i) => ({
+          id: c.id || `UOMC_${ulid()}`,
+          value: Number(c.value),
+          uom: c.uom.toUpperCase().trim(),
+          label: `${Number(c.value)} ${c.uom.toUpperCase().trim()}`,
+          isDefault: c.isDefault ?? i === 0,
+        }));
+
+      if (
+        cleanConversions.length > 0 &&
+        !cleanConversions.some((c) => c.isDefault)
+      ) {
+        cleanConversions[0].isDefault = true;
+      }
+
       const isNameChanged = isEditMode && formData.name !== initialData?.name;
       const commandPayload = {
         ...formData,
@@ -183,6 +273,7 @@ const ProductForm: React.FC<{
         uomId: finalUomId,
         isExpense: isExpenseMode,
         pricing: pricingMap,
+        uomConversions: cleanConversions, // <--- TERIKUT KE COMMAND PAYLOAD
         nameChanged: isNameChanged,
       };
 
@@ -326,6 +417,116 @@ const ProductForm: React.FC<{
             </div>
           )}
         </div>
+
+        {/* PANEL VARIAN KONVERSI ISI KEMASAN (MULTI-UOM) */}
+        {!isExpenseMode && (
+          <div className="bg-(--surface-hover) p-3.5 rounded-xl border border-(--border-color) space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div>
+                {/* Ukuran teks judul diubah di sini: text-[11px] → text-[10px] */}
+                <span className="text-[10px] font-black text-orange-500 uppercase tracking-wider block">
+                  VARIAN KONVERSI ISI (MULTI-UOM)
+                </span>
+                <span className="text-[9px] text-(--text-secondary)">
+                  Misal: 1 Karung = 25 KG atau 5 KG (untuk takaran resep &amp;
+                  timbangan dapur)
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={handleAddConversion}
+                className="px-2.5 py-1 text-[10px] font-black bg-orange-500/10 text-orange-500 hover:bg-orange-500/20 border border-orange-500/20 rounded-lg transition flex items-center gap-1 cursor-pointer"
+              >
+                <Plus className="w-3 h-3" /> TAMBAH VARIAN
+              </button>
+            </div>
+
+            {uomConversions.map((conv, idx) => {
+              const currentUomName =
+                uoms.find((u) => u.id === formData.uomId)?.name || "KEMASAN";
+
+              return (
+                <div
+                  key={conv.id || idx}
+                  className="p-2 bg-(--bg-card) border border-(--border-color) rounded-lg space-y-1.5"
+                >
+                  {/* Baris pertama: label dan tombol hapus */}
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-(--text-secondary) whitespace-nowrap">
+                      1 {currentUomName}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveConversion(idx)}
+                      className="text-slate-400 hover:text-rose-500 p-0.5 cursor-pointer"
+                      title="Hapus varian ini"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  {/* Baris kedua: input, select, tombol default */}
+                  <div className="flex items-center gap-1.5">
+                    {/* Input angka: lebar tetap w-14 (56px) – bisa diubah ke w-16 jika butuh sedikit lebih lebar */}
+                    <input
+                      type="number"
+                      step="any"
+                      min={0.001}
+                      required
+                      value={conv.value}
+                      onChange={(e) =>
+                        handleUpdateConversion(
+                          idx,
+                          "value",
+                          e.target.value === "" ? "" : Number(e.target.value),
+                        )
+                      }
+                      placeholder="Nilai"
+                      className="w-14 shrink-0 text-xs font-mono font-black text-center p-1.5 bg-(--bg-input) border border-(--border-color) rounded-md text-(--text-primary) outline-none focus:border-orange-500"
+                    />
+                    {/* Dropdown UOM: flex-1 agar mengambil sisa ruang dan teks tidak terpotong */}
+                    <select
+                      value={conv.uom}
+                      onChange={(e) =>
+                        handleUpdateConversion(idx, "uom", e.target.value)
+                      }
+                      className="flex-1 min-w-0 text-xs font-black p-1.5 bg-(--bg-input) text-orange-500 border border-(--border-color) rounded-md outline-none cursor-pointer"
+                    >
+                      {CONVERSION_UOM_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => handleSetDefaultConversion(idx)}
+                      className={`p-1.5 rounded-md border transition cursor-pointer ${
+                        conv.isDefault
+                          ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/30"
+                          : "text-(--text-secondary) border-(--border-color) hover:text-(--text-primary)"
+                      }`}
+                      title="Jadikan varian default untuk resep & timbangan"
+                    >
+                      <Star
+                        className={`w-3.5 h-3.5 ${
+                          conv.isDefault ? "fill-emerald-500" : ""
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+
+            {uomConversions.length === 0 && (
+              <div className="text-[10px] text-(--text-secondary) italic text-center py-2">
+                Belum ada varian konversi. Klik "+ TAMBAH VARIAN" jika barang
+                ini dibeli per karung/dus/jerigen.
+              </div>
+            )}
+          </div>
+        )}
 
         {/* STRUKTUR HARGA & BIAYA */}
         <div className="bg-orange-500/5 p-3.5 rounded-xl border border-orange-500/20 mt-4">
@@ -793,6 +994,25 @@ export function ItemPage() {
           DEFAULT: { basePrice, marginPercentage, sellingPrice },
         };
 
+        // ====== PERUBAHAN: Deteksi nilai konversi dari file Excel ======
+        const convValue = Number(row.conversionValue);
+        const convUom = String(row.conversionUom || "")
+          .toUpperCase()
+          .trim();
+        const uomConversions =
+          convValue > 0 && convUom
+            ? [
+                {
+                  id: `UOMC_${ulid()}`,
+                  value: convValue,
+                  uom: convUom,
+                  label: `${convValue} ${convUom}`,
+                  isDefault: true,
+                },
+              ]
+            : [];
+        // ============================================================
+
         await globalCommandBus.execute({
           type: "CREATE_PRODUCT",
           payload: {
@@ -802,6 +1022,7 @@ export function ItemPage() {
             companyId,
             isExpense: false,
             pricing,
+            uomConversions, // <--- Otomatis tersimpan dari Excel
           },
         });
         successCount++;
@@ -1102,6 +1323,32 @@ export function ItemPage() {
                           <td className="px-4 py-3">
                             <div className="font-bold text-(--text-primary) flex items-center gap-2">
                               {p.name}
+                              {/* BADGE VARIAN KONVERSI ISI */}
+                              {Array.isArray(p.uomConversions) &&
+                                p.uomConversions.length > 0 && (
+                                  <div className="flex gap-1 mt-1 flex-wrap">
+                                    {p.uomConversions.map(
+                                      (conv: any, i: number) => (
+                                        <span
+                                          key={i}
+                                          className={`px-1.5 py-0.2 rounded text-[8px] font-mono font-black border ${
+                                            conv.isDefault
+                                              ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/30"
+                                              : "bg-(--surface-hover) text-(--text-secondary) border-(--border-color)"
+                                          }`}
+                                          title={
+                                            conv.isDefault
+                                              ? "Varian Default"
+                                              : "Varian Tambahan"
+                                          }
+                                        >
+                                          {conv.value} {conv.uom}
+                                          {conv.isDefault && " ★"}
+                                        </span>
+                                      ),
+                                    )}
+                                  </div>
+                                )}
                               {aliases.length > 0 && (
                                 <button
                                   onClick={() => toggleAlias(p.id)}

@@ -24,7 +24,12 @@ import {
   Box,
   ShieldCheck,
   Key,
+  Minimize2,
+  Download,
+  Store,
+  Building2,
   LayoutDashboard,
+  Maximize2,
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { createPortal } from "react-dom";
@@ -34,6 +39,8 @@ import { VirtualNumpad } from "./VirtualNumpad";
 import { UniversalToast } from "./UniversalToast";
 import { manager } from "../pluginRegistry";
 import { sysToast } from "./useToastStore";
+import { useOrgStore } from "../../../../modules/mdl_organization/src/client/store";
+import { globalLedger } from "../../../../packages/core_unv/src/ledger/UniversalLedger";
 
 export interface MenuConfig {
   id: string;
@@ -659,17 +666,80 @@ export function UniversalLayout({
   workspaceName = "Modul Control",
 }: UniversalLayoutProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
-  // PERBAIKAN: inisialisasi expandedMenus agar semua submenu tertutup secara default
   const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>(
     {},
   );
   const [radialOpenId, setRadialOpenId] = useState<string | null>(null);
   const [closingRadialId, setClosingRadialId] = useState<string | null>(null);
   const [radialPosition, setRadialPosition] = useState({ x: 0, y: 0 });
-  // PERBAIKAN: default theme menjadi "light" (darkMode = false)
   const [darkMode, setDarkMode] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [pingMs, setPingMs] = useState<number | null>(null);
+  // 1. DETEKSI NAMA OUTLET & CABANG AKTIF DARI STORAGE & MASTER
+  const { outlets, companies } = useOrgStore();
+  const currentOutletName = React.useMemo(() => {
+    const outId = localStorage.getItem("__unv_outletId");
+    if (!outId) return "Holding Pusat";
+    return outlets.find((o) => o.id === outId)?.name || "Cabang Outlet";
+  }, [outlets]);
+
+  // 2. DETEKSI JUMLAH ANTREAN TRANSAKSI OFFLINE (OUTBOX PENDING SYNC)
+  const [pendingSyncCount, setPendingSyncCount] = useState(0);
+  useEffect(() => {
+    let sub: any;
+    const rxdb = globalLedger.getRxDatabase();
+    if (rxdb && rxdb.collections.outbox) {
+      sub = rxdb.collections.outbox.find().$.subscribe((docs: any[]) => {
+        setPendingSyncCount(docs.length);
+      });
+    }
+    return () => {
+      if (sub) sub.unsubscribe();
+    };
+  }, []);
+
+  // 3. FITUR KIOSK / FULLSCREEN LAYAR PENUH UNTUK KASIR
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {});
+      setIsFullscreen(true);
+    } else {
+      document.exitFullscreen().catch(() => {});
+      setIsFullscreen(false);
+    }
+  };
+  useEffect(() => {
+    const handleFsChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", handleFsChange);
+    return () =>
+      document.removeEventListener("fullscreenchange", handleFsChange);
+  }, []);
+
+  // 4. SMART PWA INSTALL BUTTON (HANYA MUNCUL JIKA BELUM TERPASANG)
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  useEffect(() => {
+    const handleBeforeInstall = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener("beforeinstallprompt", handleBeforeInstall);
+    return () =>
+      window.removeEventListener("beforeinstallprompt", handleBeforeInstall);
+  }, []);
+
+  const handleInstallPWA = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const choice = await deferredPrompt.userChoice;
+    if (choice.outcome === "accepted") {
+      setDeferredPrompt(null);
+      sysToast.success(
+        "Aplikasi Terpasang",
+        "ALMA ERP siap dibuka dari Desktop.",
+      );
+    }
+  };
 
   // REAL PING LATENCY DETECTOR (Pemeriksaan Setiap 10 Detik)
   useEffect(() => {
@@ -689,7 +759,8 @@ export function UniversalLayout({
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 4000);
         const serverUrl =
-          localStorage.getItem("__unv_serverUrl") || "https://api.almazain.my.id";
+          localStorage.getItem("__unv_serverUrl") ||
+          "https://api.almazain.my.id";
 
         const res = await fetch(`${serverUrl.replace(/\/+$/, "")}/api/health`, {
           method: "GET",
@@ -1060,6 +1131,16 @@ export function UniversalLayout({
             </span>
           </div>
 
+          <div
+            className={`hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl ${glassInputStyle} border-orange-500/20 shrink-0`}
+            title="Lokasi Operasional Perangkat Ini"
+          >
+            <Store className="w-4 h-4 text-orange-500 shrink-0" />
+            <span className="text-xs font-black text-(--text-primary) uppercase tracking-wide">
+              {currentOutletName}
+            </span>
+          </div>
+
           <div className="flex-1 max-w-xl mx-4 relative">
             <div
               className={`flex items-center gap-2 px-4 py-2 rounded-full ${glassInputStyle} focus-within:border-orange-500/40 focus-within:shadow-[0_0_15px_rgba(244,121,62,0.2),inset_0_1px_1px_rgba(255,255,255,0.25)]`}
@@ -1109,7 +1190,34 @@ export function UniversalLayout({
                 <Moon className="w-5 h-5" />
               )}
             </button>
+            {/* TOMBOL SMART INSTALL PWA (HANYA MUNCUL JIKA BELUM TERPASANG) */}
+            {deferredPrompt && (
+              <button
+                onClick={handleInstallPWA}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black uppercase text-emerald-500 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 transition cursor-pointer shadow-xs animate-bounce"
+                title="Pasang Aplikasi ALMA ke Layar Desktop / Home"
+              >
+                <Download className="w-3.5 h-3.5 text-emerald-500" />
+                <span className="hidden sm:inline">Install App</span>
+              </button>
+            )}
 
+            {/* TOMBOL FULLSCREEN / KIOSK MODE KASIR */}
+            <button
+              onClick={toggleFullscreen}
+              className={`p-2 rounded-full text-(--text-secondary) hover:text-(--text-primary) hover:bg-(--surface-hover) ${glassInputStyle} cursor-pointer`}
+              title={
+                isFullscreen
+                  ? "Keluar Layar Penuh"
+                  : "Layar Penuh (Kiosk Kasir)"
+              }
+            >
+              {isFullscreen ? (
+                <Minimize2 className="w-5 h-5 text-orange-500" />
+              ) : (
+                <Maximize2 className="w-5 h-5" />
+              )}
+            </button>
             <button
               onClick={() => setIsDrawerOpen(true)}
               className={`relative p-2 rounded-full text-(--text-secondary) hover:text-(--text-primary) hover:bg-(--surface-hover) ${glassInputStyle} cursor-pointer`}
@@ -1118,23 +1226,71 @@ export function UniversalLayout({
               <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 rounded-full border-2 border-(--bg-header)" />
             </button>
 
-            <div
-              className={`flex items-center gap-2 pl-1 pr-3 rounded-full cursor-pointer ${glassInputStyle}`}
-            >
-              <div className="w-8 h-8 rounded-full bg-linear-to-br from-orange-500 to-teal-500 flex items-center justify-center font-['Syne',sans-serif] font-bold text-white text-xs">
-                RF
-              </div>
-              <div className="hidden lg:block text-left leading-tight">
-                <div className="text-xs font-semibold text-(--text-primary)">
-                  Rendi Faizal
-                </div>
-                <div className="text-[10px] text-(--text-secondary) uppercase">
-                  Superadmin
-                </div>
-              </div>
-            </div>
+            {/* PROFIL AKTOR AKTIF DINAMIS */}
+            {(() => {
+              let activeUser = {
+                fullName: "Rendi Faizal",
+                role: "Superadmin",
+                initials: "RF",
+              };
 
-            <button className="w-9 h-9 flex items-center justify-center rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500/20 transition-all cursor-pointer shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)]">
+              try {
+                const raw = localStorage.getItem("__unv_activeUser");
+                if (raw) {
+                  const parsed = JSON.parse(raw);
+                  const name = parsed.fullName || parsed.username || "Karyawan";
+                  const parts = name.trim().split(" ");
+                  const initials =
+                    parts.length > 1
+                      ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+                      : name.slice(0, 2).toUpperCase();
+
+                  activeUser = {
+                    fullName: name,
+                    role: parsed.role || "STAFF",
+                    initials,
+                  };
+                }
+              } catch {}
+
+              return (
+                <div
+                  className={`flex items-center gap-2 pl-1 pr-3 rounded-full cursor-pointer ${glassInputStyle}`}
+                  title={`Sedang bertugas: ${activeUser.fullName} (${activeUser.role})`}
+                >
+                  <div className="w-8 h-8 rounded-full bg-linear-to-br from-orange-500 to-teal-500 flex items-center justify-center font-['Syne',sans-serif] font-bold text-white text-xs shadow-xs">
+                    {activeUser.initials}
+                  </div>
+                  <div className="hidden lg:block text-left leading-tight">
+                    <div className="text-xs font-semibold text-(--text-primary)">
+                      {activeUser.fullName}
+                    </div>
+                    <div className="text-[10px] text-(--text-secondary) uppercase font-mono font-bold">
+                      {activeUser.role}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* TOMBOL LOGOUT / KUNCI LAYAR */}
+            <button
+              onClick={() => {
+                modalApi.openAlert({
+                  title: "Kunci Sesi / Ganti Shift",
+                  message:
+                    "Apakah Anda yakin ingin keluar dari sesi kerja saat ini? Layar akan dikunci untuk shift kasir berikutnya.",
+                  confirmText: "KUNCI & KELUAR",
+                  cancelText: "BATAL",
+                  onConfirm: () => {
+                    localStorage.removeItem("__unv_activeUser");
+                    window.location.reload();
+                  },
+                });
+              }}
+              className="w-9 h-9 flex items-center justify-center rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500/20 hover:text-rose-300 transition-all cursor-pointer shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)]"
+              title="Kunci Layar / Logout Kasir"
+            >
               <LogOut className="w-4 h-4" />
             </button>
           </div>
@@ -1291,6 +1447,22 @@ export function UniversalLayout({
                   {isOnline && pingMs !== null ? `${pingMs} ms` : "-- ms"}
                 </span>
               </div>
+              {/* INDIKATOR ANTREAN NOTA OFFLINE (OUTBOX PENDING SYNC) */}
+              {pendingSyncCount > 0 ? (
+                <div
+                  className="flex items-center gap-1.5 ml-2 px-2 py-0.5 bg-amber-500/10 rounded border border-amber-500/30 text-amber-500 font-mono text-[11px] font-black animate-pulse"
+                  title="Transaksi tersimpan aman di memori lokal kasir, sedang mengantre terkirim ke server"
+                >
+                  <span>⏳ {pendingSyncCount} Pending Sync</span>
+                </div>
+              ) : (
+                <div
+                  className="hidden sm:flex items-center gap-1 ml-2 px-2 py-0.5 bg-emerald-500/10 rounded border border-emerald-500/20 text-emerald-500 font-mono text-[10px] font-bold"
+                  title="Seluruh data lokal tersinkronisasi 100% ke server cloud"
+                >
+                  <span>✓ 0 Pending</span>
+                </div>
+              )}
             </div>
           </div>
 

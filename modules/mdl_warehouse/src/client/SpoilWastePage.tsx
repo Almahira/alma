@@ -1,13 +1,29 @@
 // File: modules/mdl_warehouse/src/client/SpoilWastePage.tsx
-import React, { useState, useMemo } from "react";
-import { Flame, Trash2, Filter, UtensilsCrossed } from "lucide-react";
+import React, { useState, useMemo, useEffect } from "react";
+import {
+  Flame,
+  Trash2,
+  Filter,
+  UtensilsCrossed,
+  Calculator,
+} from "lucide-react";
 import { useWarehouseStore } from "./store";
 import { useItemStore } from "../../../mdl_item/src/client/store";
 import { useOrgStore } from "../../../mdl_organization/src/client/store";
 import { globalCommandBus } from "../../../../packages/core_unv/src/cqrs/CommandBus";
 import { sysToast } from "../../../../apps/client_unv/src/shared-ui/useToastStore";
 import { UniversalCombobox } from "../../../../apps/client_unv/src/shared-ui/UniversalCombobox";
-import { STANDARD_UOMS, calculateLossCost } from "../shared/uomConverter";
+import { calculatePackagingLossCost } from "../shared/uomConverter";
+
+// SATUAN UKUR MURNI MATEMATIS (BERSIH DARI SATUAN KEMASAN)
+const MEASURE_UOMS = [
+  { value: "GRAM", label: "Gram (g)" },
+  { value: "KG", label: "Kilogram (kg)" },
+  { value: "ONS", label: "Ons (100g)" },
+  { value: "ML", label: "Mililiter (ml)" },
+  { value: "LITER", label: "Liter (L)" },
+  { value: "PCS", label: "Pieces (pcs)" },
+];
 
 export function SpoilWastePage() {
   const { spoilWastes, recipes } = useWarehouseStore();
@@ -22,7 +38,7 @@ export function SpoilWastePage() {
     ? currentOutlet.name.toUpperCase()
     : "GUDANG OUTLET";
 
-  // Toggle Mode: SPOIL (Bahan Mentah Basi) vs WASTE (Menu Jadi Gagal)
+  // Toggle Mode: SPOIL (Bahan Baku Rusak) vs WASTE (Menu Jadi Gagal)
   const [entryMode, setEntryMode] = useState<"SPOIL" | "WASTE">("SPOIL");
   const [viewStatus, setViewStatus] = useState<"AKTIF" | "ARSIP">("AKTIF");
 
@@ -32,18 +48,18 @@ export function SpoilWastePage() {
   );
   const [stickyDivisionId, setStickyDivisionId] = useState("");
 
-  // Input Spoil (Bahan Baku Langsung)
+  // Input Mode Spoil (Bahan Mentah Langsung)
   const [spoilItemId, setSpoilItemId] = useState("");
+  const [spoilVariantId, setSpoilVariantId] = useState("");
   const [spoilQty, setSpoilQty] = useState<number | "">(1);
   const [spoilUom, setSpoilUom] = useState("GRAM");
   const [spoilNote, setSpoilNote] = useState("");
 
-  // Input Waste (Menu Jadi yang Terurai via Resep BOM)
+  // Input Mode Waste (Menu Jadi Gagal Masak)
   const [wasteRecipeId, setWasteRecipeId] = useState("");
   const [wastePortionQty, setWastePortionQty] = useState<number | "">(1);
   const [wasteNote, setWasteNote] = useState("");
 
-  // Filter List
   const [filterType, setFilterType] = useState<"ALL" | "SPOIL" | "WASTE">(
     "ALL",
   );
@@ -58,20 +74,18 @@ export function SpoilWastePage() {
       .map((d) => ({ value: d.id, label: d.name }));
   }, [divisions, localCompanyId]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (!stickyDivisionId && divisionOptions.length > 0) {
       setStickyDivisionId(divisionOptions[0].value);
     }
   }, [divisionOptions, stickyDivisionId]);
 
-  // Opsi Bahan Mentah (Hanya Barang Stok)
   const rawMaterialOptions = useMemo(() => {
     return products
       .filter((p) => p.status === "Aktif" && !p.isExpense)
       .map((p) => ({ value: p.id, label: p.name }));
   }, [products]);
 
-  // ---> PERBAIKAN TS: Membaca r.name dan r.totalHppCost <---
   const availableRecipeOptions = useMemo(() => {
     return recipes
       .filter((r) => r.isActive !== false)
@@ -89,7 +103,37 @@ export function SpoilWastePage() {
     return recipes.find((r) => r.id === wasteRecipeId);
   }, [recipes, wasteRecipeId]);
 
-  // Base HPP Produk Terpilih
+  // DETEKSI VARIAN DARI MASTER ITEM
+  const availableVariants = useMemo(() => {
+    if (
+      !selectedSpoilProduct?.uomConversions ||
+      !Array.isArray(selectedSpoilProduct.uomConversions)
+    ) {
+      return [];
+    }
+    return selectedSpoilProduct.uomConversions.filter(
+      (c: any) => Number(c.value) > 0 && c.uom,
+    );
+  }, [selectedSpoilProduct]);
+
+  useEffect(() => {
+    if (availableVariants.length > 0) {
+      const def =
+        availableVariants.find((v: any) => v.isDefault) || availableVariants[0];
+      setSpoilVariantId(def.id);
+    } else {
+      setSpoilVariantId("");
+    }
+  }, [availableVariants]);
+
+  const selectedVariant = useMemo(() => {
+    return (
+      availableVariants.find((v: any) => v.id === spoilVariantId) ||
+      availableVariants[0] ||
+      null
+    );
+  }, [availableVariants, spoilVariantId]);
+
   const spoilBaseUnitCost = useMemo(() => {
     if (!selectedSpoilProduct?.pricing) return 0;
     const scopeKey =
@@ -108,6 +152,27 @@ export function SpoilWastePage() {
     return uoms.find((u) => u.id === selectedSpoilProduct.uomId)?.name || "KG";
   }, [selectedSpoilProduct, uoms]);
 
+  // LIVE PREVIEW KALKULASI TRANSPARAN
+  const spoilCalculationPreview = useMemo(() => {
+    if (!selectedSpoilProduct || Number(spoilQty) <= 0) return null;
+    return calculatePackagingLossCost(
+      Number(spoilQty),
+      spoilUom,
+      spoilBaseUomName,
+      spoilBaseUnitCost,
+      selectedVariant
+        ? { value: selectedVariant.value, uom: selectedVariant.uom }
+        : null,
+    );
+  }, [
+    selectedSpoilProduct,
+    spoilQty,
+    spoilUom,
+    spoilBaseUomName,
+    spoilBaseUnitCost,
+    selectedVariant,
+  ]);
+
   // SUBMIT FORM SPOIL / WASTE
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -119,11 +184,14 @@ export function SpoilWastePage() {
         return sysToast.error("Error", "Pilih bahan baku dan isi jumlah qty!");
       }
 
-      const { convertedQty, totalCost } = calculateLossCost(
+      const lossResult = calculatePackagingLossCost(
         Number(spoilQty),
         spoilUom,
         spoilBaseUomName,
         spoilBaseUnitCost,
+        selectedVariant
+          ? { value: selectedVariant.value, uom: selectedVariant.uom }
+          : null,
       );
 
       try {
@@ -137,7 +205,7 @@ export function SpoilWastePage() {
             type: "SPOIL",
             divisionId: stickyDivisionId,
             divisionName,
-            totalLossCost: totalCost,
+            totalLossCost: lossResult.totalCost,
             spoilItems: [
               {
                 id: `SPW_${Date.now()}`,
@@ -145,10 +213,13 @@ export function SpoilWastePage() {
                 itemName: selectedSpoilProduct?.name || "Bahan",
                 inputQty: Number(spoilQty),
                 inputUom: spoilUom,
-                convertedBaseQty: convertedQty,
+                convertedBaseQty: lossResult.convertedBaseQty,
                 baseUom: spoilBaseUomName,
+                variantInfo: selectedVariant
+                  ? `${selectedVariant.value} ${selectedVariant.uom}`
+                  : null,
                 unitCost: spoilBaseUnitCost,
-                totalLossCost: totalCost,
+                totalLossCost: lossResult.totalCost,
                 notes: spoilNote.trim()
                   ? spoilNote.toUpperCase().trim()
                   : "Bahan Basi/Rusak",
@@ -159,7 +230,7 @@ export function SpoilWastePage() {
 
         sysToast.success(
           "Spoil Tercatat",
-          `Kerugian bahan ${Number(spoilQty)} ${spoilUom} "${selectedSpoilProduct?.name}" (Rp ${totalCost.toLocaleString()}) dicatat.`,
+          `Kerugian ${Number(spoilQty)} ${spoilUom} "${selectedSpoilProduct?.name}" (Rp ${lossResult.totalCost.toLocaleString()}) dicatat.`,
         );
 
         setSpoilItemId("");
@@ -181,20 +252,35 @@ export function SpoilWastePage() {
 
       const convertedIngredients: any[] = [];
 
-      // 1. Uraikan Bahan Baku Mentah
+      // 1. URAIKAN BAHAN BAKU MENTAH (LENGKAP DENGAN LOOKUP MASTER & KONVERSI)
       (selectedRecipe.rawMaterials || []).forEach((ing: any) => {
         const ingProduct = products.find((p) => p.id === ing.itemId);
         const ingBaseUom =
           uoms.find((u) => u.id === ingProduct?.uomId)?.name ||
+          ing.baseUom ||
           ing.uomName ||
           "KG";
+
+        // Deteksi varian kemasan dari master jika ada
+        const matchingVariant = Array.isArray(ingProduct?.uomConversions)
+          ? ingProduct.uomConversions.find(
+              (v: any) =>
+                ing.variantInfo && `${v.value} ${v.uom}` === ing.variantInfo,
+            ) ||
+            ingProduct.uomConversions.find((v: any) => v.isDefault) ||
+            ingProduct.uomConversions[0]
+          : null;
+
         const requiredQty = Number(ing.qty) * portionMultiplier;
 
-        const { convertedQty, totalCost } = calculateLossCost(
+        const { convertedBaseQty, totalCost } = calculatePackagingLossCost(
           requiredQty,
           ing.uomName,
           ingBaseUom,
-          ing.unitCost,
+          Number(ing.unitCost || 0),
+          matchingVariant
+            ? { value: matchingVariant.value, uom: matchingVariant.uom }
+            : null,
         );
 
         convertedIngredients.push({
@@ -206,7 +292,7 @@ export function SpoilWastePage() {
           itemName: ing.itemName,
           inputQty: requiredQty,
           inputUom: ing.uomName,
-          convertedBaseQty: convertedQty,
+          convertedBaseQty,
           baseUom: ingBaseUom,
           unitCost: ing.unitCost,
           totalLossCost: totalCost,
@@ -214,10 +300,10 @@ export function SpoilWastePage() {
         });
       });
 
-      // 2. Uraikan Sub-Resep Jadi (jika ada)
+      // 2. URAIKAN SUB-RESEP (SUB-BOM) SECARA LENGKAP
       (selectedRecipe.subRecipes || []).forEach((sub: any) => {
         const subQty = Number(sub.qty) * portionMultiplier;
-        const subLoss = Math.round(Number(sub.unitCost) * subQty);
+        const subLoss = Math.round(Number(sub.unitCost || 0) * subQty);
 
         convertedIngredients.push({
           id: `SPW_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
@@ -284,7 +370,7 @@ export function SpoilWastePage() {
 
   return (
     <div className="relative h-full flex flex-col overflow-hidden bg-(--bg-card)">
-      {/* HEADER & TOGGLE INPUT FORM */}
+      {/* HEADER & FORM QUICK-ADD */}
       <div className="p-5 bg-(--surface-hover) border-b border-(--border-color) shrink-0 shadow-xs">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-3">
@@ -300,7 +386,6 @@ export function SpoilWastePage() {
             </div>
           </div>
 
-          {/* TOGGLE PILIH INPUT: SPOIL BAHAN vs WASTE MENU */}
           <div className="flex items-center bg-(--bg-input) p-1 rounded-xl border border-(--border-color)">
             <button
               onClick={() => setEntryMode("SPOIL")}
@@ -327,167 +412,221 @@ export function SpoilWastePage() {
         </div>
 
         {/* FORM QUICK-ADD */}
-        <form
-          onSubmit={handleSubmit}
-          className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end"
-        >
-          <div className="sm:col-span-2">
-            <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-1">
-              Tanggal (Sticky)
-            </label>
-            <input
-              type="date"
-              required
-              value={stickyDate}
-              onChange={(e) => setStickyDate(e.target.value)}
-              className="w-full text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none"
-            />
-          </div>
+        <form onSubmit={handleSubmit} className="space-y-2.5">
+          <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end">
+            <div className="sm:col-span-2">
+              <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-1">
+                Tanggal (Sticky)
+              </label>
+              <input
+                type="date"
+                required
+                value={stickyDate}
+                onChange={(e) => setStickyDate(e.target.value)}
+                className="w-full text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none"
+              />
+            </div>
 
-          <div className="sm:col-span-2">
-            <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-1">
-              Divisi Terkait
-            </label>
-            <select
-              value={stickyDivisionId}
-              onChange={(e) => setStickyDivisionId(e.target.value)}
-              required
-              className="w-full text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none"
-            >
-              {divisionOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
+            <div className="sm:col-span-2">
+              <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-1">
+                Divisi Terkait
+              </label>
+              <select
+                value={stickyDivisionId}
+                onChange={(e) => setStickyDivisionId(e.target.value)}
+                required
+                className="w-full text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none"
+              >
+                {divisionOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-          {/* FORM MODE 1: SPOIL BAHAN BAKU */}
-          {entryMode === "SPOIL" ? (
-            <>
-              <div className="sm:col-span-3">
-                <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-1">
-                  Pilih Bahan Baku (Basi/Rusak)
-                </label>
-                <UniversalCombobox
-                  options={rawMaterialOptions}
-                  value={spoilItemId}
-                  onChange={setSpoilItemId}
-                  placeholder="Pilih nama bahan..."
-                />
-              </div>
-
-              <div className="sm:col-span-2 flex gap-1">
-                <div className="w-16">
+            {/* FORM MODE 1: SPOIL BAHAN MENTAH */}
+            {entryMode === "SPOIL" ? (
+              <>
+                <div
+                  className={
+                    availableVariants.length > 0
+                      ? "sm:col-span-3"
+                      : "sm:col-span-4"
+                  }
+                >
                   <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-1">
-                    Qty
+                    Pilih Bahan Baku
+                  </label>
+                  <UniversalCombobox
+                    options={rawMaterialOptions}
+                    value={spoilItemId}
+                    onChange={setSpoilItemId}
+                    placeholder="Pilih nama bahan..."
+                  />
+                </div>
+
+                {/* FORM TAMBAHAN: VARIAN KEMASAN (HANYA JIKA MEMILIKI VARIAN) */}
+                {availableVariants.length > 0 && (
+                  <div className="sm:col-span-2">
+                    <label className="block text-[9px] font-black text-orange-500 uppercase mb-1">
+                      Kemasan Master
+                    </label>
+                    <select
+                      value={spoilVariantId}
+                      onChange={(e) => setSpoilVariantId(e.target.value)}
+                      className="w-full text-xs font-black p-2 bg-(--bg-input) text-orange-500 border border-orange-500/30 rounded-lg outline-none cursor-pointer"
+                    >
+                      {availableVariants.map((v: any) => (
+                        <option key={v.id} value={v.id}>
+                          {v.value} {v.uom} {v.isDefault ? "★" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* TAKARAN & SATUAN UKUR MURNI MATEMATIS */}
+                <div className="sm:col-span-2 flex gap-1">
+                  <div className="w-18">
+                    <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-1">
+                      Takaran
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      min={0.001}
+                      step="any"
+                      value={spoilQty}
+                      onChange={(e) =>
+                        setSpoilQty(
+                          e.target.value === "" ? "" : Number(e.target.value),
+                        )
+                      }
+                      className="w-full text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none text-center font-mono"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-1">
+                      Satuan Takar
+                    </label>
+                    <select
+                      value={spoilUom}
+                      onChange={(e) => setSpoilUom(e.target.value)}
+                      className="w-full text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none cursor-pointer"
+                    >
+                      {MEASURE_UOMS.map((u) => (
+                        <option key={u.value} value={u.value}>
+                          {u.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div
+                  className={
+                    availableVariants.length > 0
+                      ? "sm:col-span-2"
+                      : "sm:col-span-3"
+                  }
+                >
+                  <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-1">
+                    Alasan / Catatan
+                  </label>
+                  <input
+                    type="text"
+                    value={spoilNote}
+                    onChange={(e) => setSpoilNote(e.target.value)}
+                    placeholder="Basi / Jatuh / Tumpah..."
+                    className="w-full text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none placeholder:text-[11px]"
+                  />
+                </div>
+              </>
+            ) : (
+              /* FORM MODE 2: WASTE MENU GAGAL */
+              <>
+                <div className="sm:col-span-4">
+                  <label className="block text-[9px] font-black text-orange-500 uppercase mb-1">
+                    Pilih Menu Hidangan Gagal (Resep BOM)
+                  </label>
+                  <UniversalCombobox
+                    options={availableRecipeOptions}
+                    value={wasteRecipeId}
+                    onChange={setWasteRecipeId}
+                    placeholder="Pilih menu hidangan gagal..."
+                  />
+                </div>
+
+                <div className="sm:col-span-1">
+                  <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-1">
+                    Porsi
                   </label>
                   <input
                     type="number"
                     required
-                    min={0.001}
+                    min={0.1}
                     step="any"
-                    value={spoilQty}
+                    value={wastePortionQty}
                     onChange={(e) =>
-                      setSpoilQty(
+                      setWastePortionQty(
                         e.target.value === "" ? "" : Number(e.target.value),
                       )
                     }
                     className="w-full text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none text-center font-mono"
                   />
                 </div>
-                <div className="flex-1">
+
+                <div className="sm:col-span-4">
                   <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-1">
-                    UOM Terkunci
+                    Penyebab Gagal
                   </label>
-                  <select
-                    value={spoilUom}
-                    onChange={(e) => setSpoilUom(e.target.value)}
-                    className="w-full text-xs font-black p-2 bg-(--bg-input) text-orange-500 border border-(--border-color) rounded-lg outline-none"
-                  >
-                    {STANDARD_UOMS.map((u) => (
-                      <option key={u.value} value={u.value}>
-                        {u.value}
-                      </option>
-                    ))}
-                  </select>
+                  <input
+                    type="text"
+                    value={wasteNote}
+                    onChange={(e) => setWasteNote(e.target.value)}
+                    placeholder="Gosong / Terlalu asin..."
+                    className="w-full text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none placeholder:text-[11px]"
+                  />
                 </div>
-              </div>
+              </>
+            )}
 
-              <div className="sm:col-span-2">
-                <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-1">
-                  Alasan / Catatan
-                </label>
-                <input
-                  type="text"
-                  value={spoilNote}
-                  onChange={(e) => setSpoilNote(e.target.value)}
-                  placeholder="Basi / Jamuran / Jatuh..."
-                  className="w-full text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none placeholder:text-[11px]"
-                />
-              </div>
-            </>
-          ) : (
-            /* FORM MODE 2: WASTE MENU JADI */
-            <>
-              <div className="sm:col-span-4">
-                <label className="block text-[9px] font-black text-orange-500 uppercase mb-1">
-                  Pilih Menu Gagal Masak (Data Resep BOM)
-                </label>
-                <UniversalCombobox
-                  options={availableRecipeOptions}
-                  value={wasteRecipeId}
-                  onChange={setWasteRecipeId}
-                  placeholder="Pilih menu hidangan gagal..."
-                />
-              </div>
-
-              <div className="sm:col-span-1">
-                <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-1">
-                  Porsi
-                </label>
-                <input
-                  type="number"
-                  required
-                  min={0.1}
-                  step="any"
-                  value={wastePortionQty}
-                  onChange={(e) =>
-                    setWastePortionQty(
-                      e.target.value === "" ? "" : Number(e.target.value),
-                    )
-                  }
-                  className="w-full text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none text-center font-mono"
-                />
-              </div>
-
-              <div className="sm:col-span-2">
-                <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-1">
-                  Penyebab Gagal
-                </label>
-                <input
-                  type="text"
-                  value={wasteNote}
-                  onChange={(e) => setWasteNote(e.target.value)}
-                  placeholder="Gosong / Tumpah..."
-                  className="w-full text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none placeholder:text-[11px]"
-                />
-              </div>
-            </>
-          )}
-
-          <div className="sm:col-span-1">
-            <button
-              type="submit"
-              className={`w-full py-2 text-white font-black text-xs rounded-lg transition shadow-md cursor-pointer ${
-                entryMode === "SPOIL"
-                  ? "bg-rose-500 hover:bg-rose-600"
-                  : "bg-orange-500 hover:bg-orange-600"
-              }`}
-            >
-              SIMPAN
-            </button>
+            <div className="sm:col-span-1">
+              <button
+                type="submit"
+                className={`w-full py-2 text-white font-black text-xs rounded-lg transition shadow-md cursor-pointer ${
+                  entryMode === "SPOIL"
+                    ? "bg-rose-500 hover:bg-rose-600"
+                    : "bg-orange-500 hover:bg-orange-600"
+                }`}
+              >
+                SIMPAN
+              </button>
+            </div>
           </div>
+
+          {/* LIVE PREVIEW KALKULASI TRANSPARAN */}
+          {entryMode === "SPOIL" && spoilCalculationPreview && (
+            <div className="p-2.5 bg-rose-500/10 border border-rose-500/20 rounded-xl flex items-center justify-between text-xs font-bold animate-in fade-in duration-150">
+              <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400">
+                <Calculator className="w-4 h-4 text-orange-500" />
+                <span>Kalkulasi Terhitung:</span>
+                <span className="font-mono font-black">
+                  {spoilCalculationPreview.convertedStandardQty}{" "}
+                  {spoilCalculationPreview.standardUom}
+                </span>
+                <span className="text-slate-400 font-normal">
+                  (= memotong {spoilCalculationPreview.convertedBaseQty}{" "}
+                  {spoilBaseUomName} di stok gudang)
+                </span>
+              </div>
+              <div className="font-mono font-black text-rose-500 text-sm">
+                Beban Rugi: Rp{" "}
+                {spoilCalculationPreview.totalCost.toLocaleString()}
+              </div>
+            </div>
+          )}
         </form>
       </div>
 
@@ -570,6 +709,7 @@ export function SpoilWastePage() {
 
                   <td className="px-4 py-2.5 text-center font-mono font-bold text-rose-500">
                     {doc.inputQty} {doc.inputUom}
+                    {/* HANYA TAMPILKAN JIKA INPUT UOM BEDA DENGAN BASE UOM */}
                     {doc.inputUom !== doc.baseUom && (
                       <span className="text-[9px] text-(--text-secondary) block">
                         (= {doc.convertedBaseQty} {doc.baseUom})

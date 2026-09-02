@@ -13,7 +13,8 @@ interface UniversalComboboxProps {
   onChange: (value: string) => void;
   placeholder?: string;
   disabled?: boolean;
-  onEnterPressed?: () => void; // Hook untuk memindahkan fokus ke form berikutnya
+  onEnterPressed?: () => void;
+  dropdownDirection?: "bottom" | "left" | "right";
 }
 
 export const UniversalCombobox = forwardRef<
@@ -28,6 +29,7 @@ export const UniversalCombobox = forwardRef<
       placeholder = "Pilih atau ketik...",
       disabled = false,
       onEnterPressed,
+      dropdownDirection = "bottom",
     },
     ref,
   ) => {
@@ -38,27 +40,22 @@ export const UniversalCombobox = forwardRef<
     const containerRef = useRef<HTMLDivElement>(null);
     const listboxRef = useRef<HTMLUListElement>(null);
 
-    // Dapatkan label dari nilai yang terpilih saat ini
     const selectedOption = options.find((opt) => opt.value === value);
 
-    // Filter opsi berdasarkan input pengguna (Real-time filter)
     const filteredOptions = options.filter((opt) =>
       opt.label.toLowerCase().includes(searchTerm.toLowerCase()),
     );
 
-    // Reset state pencarian saat dropdown dibuka/ditutup
     useEffect(() => {
       if (!isOpen) {
         setSearchTerm("");
         setHighlightedIndex(0);
       } else {
-        // Jika dibuka dan sudah ada nilai terpilih, sorot nilai tersebut
         const index = filteredOptions.findIndex((opt) => opt.value === value);
         setHighlightedIndex(index >= 0 ? index : 0);
       }
     }, [isOpen, value]);
 
-    // Handle klik di luar komponen untuk menutup dropdown
     useEffect(() => {
       const handleOutsideClick = (e: MouseEvent) => {
         if (
@@ -73,7 +70,6 @@ export const UniversalCombobox = forwardRef<
         document.removeEventListener("mousedown", handleOutsideClick);
     }, []);
 
-    // Auto-scroll agar item yang disorot dengan keyboard tetap terlihat di layar (viewport)
     useEffect(() => {
       if (isOpen && listboxRef.current && filteredOptions.length > 0) {
         const activeItem = listboxRef.current.children[
@@ -110,22 +106,17 @@ export const UniversalCombobox = forwardRef<
       } else if (e.key === "Enter") {
         e.preventDefault();
         if (isOpen && filteredOptions.length > 0) {
-          // Pilih data yang sedang disorot
           onChange(filteredOptions[highlightedIndex].value);
           setIsOpen(false);
-          // Beri tahu parent agar memindahkan fokus ke form berikutnya
           if (onEnterPressed) setTimeout(() => onEnterPressed(), 50);
         } else if (!isOpen) {
-          // Jika sudah tertutup dan Enter ditekan, langsung pindah ke form berikutnya
           if (onEnterPressed) onEnterPressed();
         }
       } else if (e.key === "Escape") {
         setIsOpen(false);
       } else if (e.key === "Tab") {
-        // Tab tetap berjalan normal (pindah fokus browser)
         setIsOpen(false);
       } else {
-        // Jika mengetik huruf biasa, pastikan dropdown terbuka
         if (!isOpen) setIsOpen(true);
       }
     };
@@ -136,9 +127,14 @@ export const UniversalCombobox = forwardRef<
       if (onEnterPressed) setTimeout(() => onEnterPressed(), 50);
     };
 
+    const dropdownPositionClass = {
+      bottom: "top-full left-0 mt-1 w-full",
+      left: "top-0 left-full ml-2 w-64",
+      right: "top-0 right-full mr-2 w-64",
+    }[dropdownDirection];
+
     return (
       <div ref={containerRef} className="relative w-full text-left">
-        {/* INPUT FIELD */}
         <div
           className={`relative flex items-center w-full px-3 py-2 bg-(--bg-input) border rounded-lg transition-colors focus-within:border-orange-500 focus-within:ring-1 focus-within:ring-orange-500/50 ${
             disabled
@@ -157,7 +153,7 @@ export const UniversalCombobox = forwardRef<
             }
             onChange={(e) => {
               setSearchTerm(e.target.value);
-              setHighlightedIndex(0); // Reset sorotan ke paling atas saat mengetik
+              setHighlightedIndex(0);
             }}
             onFocus={() => !disabled && setIsOpen(true)}
             onKeyDown={handleKeyDown}
@@ -171,9 +167,10 @@ export const UniversalCombobox = forwardRef<
           />
         </div>
 
-        {/* DROPDOWN LIST */}
         {isOpen && (
-          <div className="absolute z-50 w-full mt-1 bg-(--bg-card) border border-(--border-color) rounded-lg shadow-xl overflow-hidden animate-in fade-in slide-in-from-top-1 duration-150">
+          <div
+            className={`absolute z-50 ${dropdownPositionClass} bg-(--bg-card) border border-(--border-color) rounded-lg shadow-xl overflow-hidden animate-in fade-in slide-in-from-top-1 duration-150`}
+          >
             {filteredOptions.length === 0 ? (
               <div className="px-4 py-3 text-xs font-semibold text-(--text-secondary) text-center flex flex-col items-center gap-1">
                 <Search className="w-4 h-4 opacity-50" />
@@ -194,7 +191,6 @@ export const UniversalCombobox = forwardRef<
                       key={opt.value}
                       role="option"
                       aria-selected={isSelected}
-                      // Menggunakan onMouseDown alih-alih onClick agar input onBlur tidak terbajak
                       onMouseDown={(e) => {
                         e.preventDefault();
                         handleSelect(opt.value);

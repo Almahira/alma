@@ -39,10 +39,18 @@ function getActiveActor(): { userId: string; role: string } {
   return { userId: "RENDI FAIZAL", role: "SUPER_ADMIN" };
 }
 
+function validateWriteAccess() {
+  const actor = getActiveActor();
+  if (!["SUPER_ADMIN", "OUTLET_MANAGER", "ADMIN"].includes(actor.role)) {
+    throw new Error("Akses Ditolak: Anda hanya memiliki izin Read-Only.");
+  }
+}
+
 export const organizationCommandHandlers: CommandHandler[] = [
   {
     commandType: "ATTACH_EMPLOYEE_DOCUMENT",
     execute: async (cmd: Command) => {
+      validateWriteAccess();
       const employeeId = cmd.payload.employeeId;
       const nextVer = (await globalLedger.getAggregateVersion(employeeId)) + 1;
       const documentId = `EDOC_${ulid()}`;
@@ -84,6 +92,7 @@ export const organizationCommandHandlers: CommandHandler[] = [
   {
     commandType: "CREATE_COMPANY",
     execute: async (cmd: Command) => {
+      validateWriteAccess();
       const companyId = `AGG_${ulid()}`;
       const code =
         cmd.payload.code ||
@@ -108,6 +117,7 @@ export const organizationCommandHandlers: CommandHandler[] = [
   {
     commandType: "UPDATE_COMPANY",
     execute: async (cmd: Command) => {
+      validateWriteAccess();
       const nextVer =
         (await globalLedger.getAggregateVersion(cmd.payload.id)) + 1;
       await globalLedger.appendEvent(
@@ -127,6 +137,7 @@ export const organizationCommandHandlers: CommandHandler[] = [
   {
     commandType: "CREATE_REGION",
     execute: async (cmd: Command) => {
+      validateWriteAccess();
       const newId = `AGG_${ulid()}`;
       const payload = {
         companyId: cmd.payload.companyId,
@@ -151,6 +162,7 @@ export const organizationCommandHandlers: CommandHandler[] = [
   {
     commandType: "UPDATE_REGION",
     execute: async (cmd: Command) => {
+      validateWriteAccess();
       const nextVer =
         (await globalLedger.getAggregateVersion(cmd.payload.id)) + 1;
       await globalLedger.appendEvent(
@@ -166,6 +178,7 @@ export const organizationCommandHandlers: CommandHandler[] = [
   {
     commandType: "CREATE_OUTLET",
     execute: async (cmd: Command) => {
+      validateWriteAccess();
       const newId = `AGG_${ulid()}`;
       const payload = {
         companyId: cmd.payload.companyId,
@@ -191,6 +204,7 @@ export const organizationCommandHandlers: CommandHandler[] = [
   {
     commandType: "UPDATE_OUTLET",
     execute: async (cmd: Command) => {
+      validateWriteAccess();
       const nextVer =
         (await globalLedger.getAggregateVersion(cmd.payload.id)) + 1;
       await globalLedger.appendEvent(
@@ -210,6 +224,7 @@ export const organizationCommandHandlers: CommandHandler[] = [
   {
     commandType: "ATTACH_DOCUMENT",
     execute: async (cmd: Command) => {
+      validateWriteAccess();
       const targetId = cmd.payload.targetId;
       const nextVer = (await globalLedger.getAggregateVersion(targetId)) + 1;
       const documentId = `DOC_${ulid()}`;
@@ -246,6 +261,7 @@ export const organizationCommandHandlers: CommandHandler[] = [
   {
     commandType: "UPDATE_DOCUMENT",
     execute: async (cmd: Command) => {
+      validateWriteAccess();
       const targetId = cmd.payload.targetId;
       const documentId = cmd.payload.documentId;
       const nextVer = (await globalLedger.getAggregateVersion(targetId)) + 1;
@@ -285,6 +301,7 @@ export const organizationCommandHandlers: CommandHandler[] = [
   {
     commandType: "ADD_BANK_ACCOUNT",
     execute: async (cmd: Command) => {
+      validateWriteAccess();
       const targetId = cmd.payload.targetId;
       const nextVer = (await globalLedger.getAggregateVersion(targetId)) + 1;
       const bankAccountId = `BNK_${ulid()}`;
@@ -310,6 +327,7 @@ export const organizationCommandHandlers: CommandHandler[] = [
   {
     commandType: "UPDATE_BANK_ACCOUNT",
     execute: async (cmd: Command) => {
+      validateWriteAccess();
       const targetId = cmd.payload.targetId;
       const nextVer = (await globalLedger.getAggregateVersion(targetId)) + 1;
 
@@ -338,6 +356,7 @@ export const organizationCommandHandlers: CommandHandler[] = [
   {
     commandType: "CREATE_DIVISION",
     execute: async (cmd: Command) => {
+      validateWriteAccess();
       const newId = `AGG_${ulid()}`;
       await globalLedger.appendEvent(
         "DIVISION_CREATED",
@@ -352,6 +371,7 @@ export const organizationCommandHandlers: CommandHandler[] = [
   {
     commandType: "UPDATE_DIVISION",
     execute: async (cmd: Command) => {
+      validateWriteAccess();
       const nextVer =
         (await globalLedger.getAggregateVersion(cmd.payload.id)) + 1;
       await globalLedger.appendEvent(
@@ -367,6 +387,7 @@ export const organizationCommandHandlers: CommandHandler[] = [
   {
     commandType: "CREATE_POSITION",
     execute: async (cmd: Command) => {
+      validateWriteAccess();
       const newId = `AGG_${ulid()}`;
       await globalLedger.appendEvent(
         "POSITION_CREATED",
@@ -381,6 +402,7 @@ export const organizationCommandHandlers: CommandHandler[] = [
   {
     commandType: "UPDATE_POSITION",
     execute: async (cmd: Command) => {
+      validateWriteAccess();
       const nextVer =
         (await globalLedger.getAggregateVersion(cmd.payload.id)) + 1;
       await globalLedger.appendEvent(
@@ -400,6 +422,7 @@ export const organizationCommandHandlers: CommandHandler[] = [
   {
     commandType: "CREATE_DOCUMENT_TYPE",
     execute: async (cmd: Command) => {
+      validateWriteAccess();
       const newId = `AGG_${ulid()}`;
       await globalLedger.appendEvent(
         "DOCUMENT_TYPE_CREATED",
@@ -418,6 +441,7 @@ export const organizationCommandHandlers: CommandHandler[] = [
   {
     commandType: "CREATE_EMPLOYEE",
     execute: async (cmd: Command) => {
+      validateWriteAccess();
       const employeeId = `AGG_${ulid()}`;
       const empNumber =
         cmd.payload.employeeNumber ||
@@ -470,6 +494,7 @@ export const organizationCommandHandlers: CommandHandler[] = [
   {
     commandType: "UPDATE_EMPLOYEE",
     execute: async (cmd: Command) => {
+      validateWriteAccess();
       const nextVer =
         (await globalLedger.getAggregateVersion(cmd.payload.id)) + 1;
       await globalLedger.appendEvent(
@@ -485,6 +510,7 @@ export const organizationCommandHandlers: CommandHandler[] = [
   {
     commandType: "ASSIGN_EMPLOYMENT",
     execute: async (cmd: Command) => {
+      validateWriteAccess();
       const nextVer =
         (await globalLedger.getAggregateVersion(cmd.payload.employeeId)) + 1;
       const assignmentId = `ASN_${ulid()}`;
@@ -509,6 +535,7 @@ export const organizationCommandHandlers: CommandHandler[] = [
   {
     commandType: "CREATE_USER_ACCOUNT",
     execute: async (cmd: Command) => {
+      validateWriteAccess();
       const userId = `AGG_${ulid()}`;
       await globalLedger.appendEvent(
         "USER_ACCOUNT_CREATED",
@@ -523,6 +550,7 @@ export const organizationCommandHandlers: CommandHandler[] = [
   {
     commandType: "UPDATE_USER_ACCOUNT",
     execute: async (cmd: Command) => {
+      validateWriteAccess();
       const nextVer =
         (await globalLedger.getAggregateVersion(cmd.payload.id)) + 1;
       await globalLedger.appendEvent(
@@ -542,6 +570,7 @@ export const organizationCommandHandlers: CommandHandler[] = [
   {
     commandType: "ARCHIVE_DATA",
     execute: async (cmd: Command) => {
+      validateWriteAccess();
       const { id, type, documentId, bankAccountId, assignmentId } = cmd.payload;
       const nextVer = (await globalLedger.getAggregateVersion(id)) + 1;
       if (type === "DOCUMENT") {
@@ -591,6 +620,7 @@ export const organizationCommandHandlers: CommandHandler[] = [
   {
     commandType: "RESTORE_DATA",
     execute: async (cmd: Command) => {
+      validateWriteAccess();
       const { id, type, targetId } = cmd.payload;
       const aggregateId =
         type === "DOCUMENT" || type === "BANK_ACCOUNT" ? targetId : id;

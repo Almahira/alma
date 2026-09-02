@@ -18,7 +18,7 @@ import {
   Printer,
   ShieldCheck,
 } from "lucide-react";
-import { useOrgStore } from "./store";
+import { useOrgStore, useHasWriteAccess } from "./store";
 import { globalCommandBus } from "../../../../packages/core_unv/src/cqrs/CommandBus";
 import { useUniversalModal } from "../../../../apps/client_unv/src/shared-ui/UniversalLayout";
 import { globalBlobManager } from "../../../../packages/core_unv/src/io/BlobManager";
@@ -907,6 +907,7 @@ export const EmployeePage: React.FC = () => {
     employeeDocuments,
     outlets,
   } = useOrgStore();
+  const hasWriteAccess = useHasWriteAccess();
 
   const [activeTab, setActiveTab] = useState<
     "DIV_POS" | "EMPLOYEES" | "ASSIGNMENTS" | "DOCUMENTS"
@@ -958,45 +959,50 @@ export const EmployeePage: React.FC = () => {
         <div className="flex items-center gap-2">
           {activeTab === "DIV_POS" && (
             <>
-              <button
-                onClick={() => {
-                  openSideOver({
-                    title: "TAMBAH DIVISI",
-                    width: "w-[450px]",
-                    content: (
-                      <DivisionForm
-                        isEditMode={false}
-                        initialData={{}}
-                        onClose={closeSideOver}
-                      />
-                    ),
-                  });
-                }}
-                className="flex items-center gap-2 px-3.5 py-2 text-xs font-black text-white bg-slate-800 rounded-lg hover:bg-slate-700 transition cursor-pointer"
-              >
-                <Plus className="w-4 h-4" /> + DIVISI
-              </button>
-              <button
-                onClick={() => {
-                  openSideOver({
-                    title: "TAMBAH JABATAN",
-                    width: "w-[450px]",
-                    content: (
-                      <PositionForm
-                        isEditMode={false}
-                        initialData={{}}
-                        onClose={closeSideOver}
-                      />
-                    ),
-                  });
-                }}
-                className="flex items-center gap-2 px-3.5 py-2 text-xs font-black text-white bg-orange-500 rounded-lg hover:bg-orange-600 transition shadow-md cursor-pointer"
-              >
-                <Plus className="w-4 h-4" /> + JABATAN
-              </button>
+              {hasWriteAccess && (
+                <button
+                  onClick={() => {
+                    openSideOver({
+                      title: "TAMBAH DIVISI",
+                      width: "w-[450px]",
+                      content: (
+                        <DivisionForm
+                          isEditMode={false}
+                          initialData={{}}
+                          onClose={closeSideOver}
+                        />
+                      ),
+                    });
+                  }}
+                  className="flex items-center gap-2 px-3.5 py-2 text-xs font-black text-white bg-slate-800 rounded-lg hover:bg-slate-700 transition cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" /> + DIVISI
+                </button>
+              )}
+              {hasWriteAccess && (
+                <button
+                  onClick={() => {
+                    openSideOver({
+                      title: "TAMBAH JABATAN",
+                      width: "w-[450px]",
+                      content: (
+                        <PositionForm
+                          isEditMode={false}
+                          initialData={{}}
+                          onClose={closeSideOver}
+                        />
+                      ),
+                    });
+                  }}
+                  className="flex items-center gap-2 px-3.5 py-2 text-xs font-black text-white bg-orange-500 rounded-lg hover:bg-orange-600 transition shadow-md cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" /> + JABATAN
+                </button>
+              )}
             </>
           )}
-          {activeTab === "EMPLOYEES" && (
+
+          {activeTab === "EMPLOYEES" && hasWriteAccess && (
             <button
               onClick={() => {
                 openSideOver({
@@ -1016,7 +1022,8 @@ export const EmployeePage: React.FC = () => {
               <Plus className="w-4 h-4" /> + KARYAWAN BARU
             </button>
           )}
-          {activeTab === "ASSIGNMENTS" && (
+
+          {activeTab === "ASSIGNMENTS" && hasWriteAccess && (
             <button
               onClick={() => {
                 openSideOver({
@@ -1030,7 +1037,8 @@ export const EmployeePage: React.FC = () => {
               <UserCheck className="w-4 h-4" /> + TUGASKAN KE CABANG
             </button>
           )}
-          {activeTab === "DOCUMENTS" && (
+
+          {activeTab === "DOCUMENTS" && hasWriteAccess && (
             <button
               onClick={() => {
                 openSideOver({
@@ -1095,26 +1103,30 @@ export const EmployeePage: React.FC = () => {
 
         {/* Filter Aktif / Arsip */}
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setViewStatus("AKTIF")}
-            className={`px-3 py-1 text-[11px] font-bold rounded-lg transition ${
-              viewStatus === "AKTIF"
-                ? "bg-orange-500/10 text-orange-500 font-black"
-                : "text-(--text-secondary)"
-            }`}
-          >
-            AKTIF
-          </button>
-          <button
-            onClick={() => setViewStatus("ARSIP")}
-            className={`px-3 py-1 text-[11px] font-bold rounded-lg transition ${
-              viewStatus === "ARSIP"
-                ? "bg-slate-800 text-white font-black"
-                : "text-(--text-secondary)"
-            }`}
-          >
-            ARSIP
-          </button>
+          {hasWriteAccess && (
+            <button
+              onClick={() => setViewStatus("AKTIF")}
+              className={`px-3 py-1 text-[11px] font-bold rounded-lg transition ${
+                viewStatus === "AKTIF"
+                  ? "bg-orange-500/10 text-orange-500 font-black"
+                  : "text-(--text-secondary)"
+              }`}
+            >
+              AKTIF
+            </button>
+          )}
+          {hasWriteAccess && (
+            <button
+              onClick={() => setViewStatus("ARSIP")}
+              className={`px-3 py-1 text-[11px] font-bold rounded-lg transition ${
+                viewStatus === "ARSIP"
+                  ? "bg-slate-800 text-white font-black"
+                  : "text-(--text-secondary)"
+              }`}
+            >
+              ARSIP
+            </button>
+          )}
         </div>
       </div>
 
@@ -1174,42 +1186,49 @@ export const EmployeePage: React.FC = () => {
                                 <div className="flex items-center gap-1">
                                   {viewStatus === "AKTIF" ? (
                                     <>
-                                      <button
-                                        onClick={() =>
-                                          openSideOver({
-                                            title: "EDIT DIVISI",
-                                            width: "w-[450px]",
-                                            content: (
-                                              <DivisionForm
-                                                isEditMode={true}
-                                                initialData={div}
-                                                onClose={closeSideOver}
-                                              />
-                                            ),
-                                          })
-                                        }
-                                        className="p-1 text-(--text-secondary) hover:text-blue-500"
-                                      >
-                                        <Edit2 className="w-3.5 h-3.5" />
-                                      </button>
-                                      <button
-                                        onClick={() =>
-                                          handleArchive(div.id, "DIVISION")
-                                        }
-                                        className="p-1 text-(--text-secondary) hover:text-rose-500"
-                                      >
-                                        <Archive className="w-3.5 h-3.5" />
-                                      </button>
+                                      {hasWriteAccess && (
+                                        <button
+                                          onClick={() =>
+                                            openSideOver({
+                                              title: "EDIT DIVISI",
+                                              width: "w-[450px]",
+                                              content: (
+                                                <DivisionForm
+                                                  isEditMode={true}
+                                                  initialData={div}
+                                                  onClose={closeSideOver}
+                                                />
+                                              ),
+                                            })
+                                          }
+                                          className="p-1 text-(--text-secondary) hover:text-blue-500"
+                                        >
+                                          <Edit2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      )}
+                                      {hasWriteAccess && (
+                                        <button
+                                          onClick={() =>
+                                            handleArchive(div.id, "DIVISION")
+                                          }
+                                          className="p-1 text-(--text-secondary) hover:text-rose-500"
+                                        >
+                                          <Archive className="w-3.5 h-3.5" />
+                                        </button>
+                                      )}
                                     </>
                                   ) : (
-                                    <button
-                                      onClick={() =>
-                                        handleRestore(div.id, "DIVISION")
-                                      }
-                                      className="text-[10px] font-bold text-emerald-500 flex items-center gap-1"
-                                    >
-                                      <RotateCcw className="w-3 h-3" /> RESTORE
-                                    </button>
+                                    hasWriteAccess && (
+                                      <button
+                                        onClick={() =>
+                                          handleRestore(div.id, "DIVISION")
+                                        }
+                                        className="text-[10px] font-bold text-emerald-500 flex items-center gap-1"
+                                      >
+                                        <RotateCcw className="w-3 h-3" />{" "}
+                                        RESTORE
+                                      </button>
+                                    )
                                   )}
                                 </div>
                               </div>
@@ -1226,42 +1245,51 @@ export const EmployeePage: React.FC = () => {
                                     <div className="flex items-center gap-1">
                                       {viewStatus === "AKTIF" ? (
                                         <>
-                                          <button
-                                            onClick={() =>
-                                              openSideOver({
-                                                title: "EDIT JABATAN",
-                                                width: "w-[450px]",
-                                                content: (
-                                                  <PositionForm
-                                                    isEditMode={true}
-                                                    initialData={pos}
-                                                    onClose={closeSideOver}
-                                                  />
-                                                ),
-                                              })
-                                            }
-                                            className="p-1 text-(--text-secondary) hover:text-blue-500"
-                                          >
-                                            <Edit2 className="w-3 h-3" />
-                                          </button>
-                                          <button
-                                            onClick={() =>
-                                              handleArchive(pos.id, "POSITION")
-                                            }
-                                            className="p-1 text-(--text-secondary) hover:text-rose-500"
-                                          >
-                                            <Archive className="w-3 h-3" />
-                                          </button>
+                                          {hasWriteAccess && (
+                                            <button
+                                              onClick={() =>
+                                                openSideOver({
+                                                  title: "EDIT JABATAN",
+                                                  width: "w-[450px]",
+                                                  content: (
+                                                    <PositionForm
+                                                      isEditMode={true}
+                                                      initialData={pos}
+                                                      onClose={closeSideOver}
+                                                    />
+                                                  ),
+                                                })
+                                              }
+                                              className="p-1 text-(--text-secondary) hover:text-blue-500"
+                                            >
+                                              <Edit2 className="w-3 h-3" />
+                                            </button>
+                                          )}
+                                          {hasWriteAccess && (
+                                            <button
+                                              onClick={() =>
+                                                handleArchive(
+                                                  pos.id,
+                                                  "POSITION",
+                                                )
+                                              }
+                                              className="p-1 text-(--text-secondary) hover:text-rose-500"
+                                            >
+                                              <Archive className="w-3 h-3" />
+                                            </button>
+                                          )}
                                         </>
                                       ) : (
-                                        <button
-                                          onClick={() =>
-                                            handleRestore(pos.id, "POSITION")
-                                          }
-                                          className="text-[9px] font-bold text-emerald-500"
-                                        >
-                                          RESTORE
-                                        </button>
+                                        hasWriteAccess && (
+                                          <button
+                                            onClick={() =>
+                                              handleRestore(pos.id, "POSITION")
+                                            }
+                                            className="text-[9px] font-bold text-emerald-500"
+                                          >
+                                            RESTORE
+                                          </button>
+                                        )
                                       )}
                                     </div>
                                   </div>
@@ -1334,38 +1362,46 @@ export const EmployeePage: React.FC = () => {
                       <td className="px-6 py-4 text-right space-x-2">
                         {viewStatus === "AKTIF" ? (
                           <>
-                            <button
-                              onClick={() =>
-                                openSideOver({
-                                  title: "EDIT KARYAWAN",
-                                  width: "w-[500px]",
-                                  content: (
-                                    <EmployeeForm
-                                      isEditMode={true}
-                                      initialData={emp}
-                                      onClose={closeSideOver}
-                                    />
-                                  ),
-                                })
-                              }
-                              className="p-1.5 text-(--text-secondary) hover:text-blue-500 rounded"
-                            >
-                              <Edit2 className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              onClick={() => handleArchive(emp.id, "EMPLOYEE")}
-                              className="p-1.5 text-(--text-secondary) hover:text-rose-500 rounded"
-                            >
-                              <Archive className="w-3.5 h-3.5" />
-                            </button>
+                            {hasWriteAccess && (
+                              <button
+                                onClick={() =>
+                                  openSideOver({
+                                    title: "EDIT KARYAWAN",
+                                    width: "w-[500px]",
+                                    content: (
+                                      <EmployeeForm
+                                        isEditMode={true}
+                                        initialData={emp}
+                                        onClose={closeSideOver}
+                                      />
+                                    ),
+                                  })
+                                }
+                                className="p-1.5 text-(--text-secondary) hover:text-blue-500 rounded"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            {hasWriteAccess && (
+                              <button
+                                onClick={() =>
+                                  handleArchive(emp.id, "EMPLOYEE")
+                                }
+                                className="p-1.5 text-(--text-secondary) hover:text-rose-500 rounded"
+                              >
+                                <Archive className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                           </>
                         ) : (
-                          <button
-                            onClick={() => handleRestore(emp.id, "EMPLOYEE")}
-                            className="px-3 py-1 text-[10px] font-bold text-emerald-500 bg-emerald-500/10 rounded"
-                          >
-                            RESTORE
-                          </button>
+                          hasWriteAccess && (
+                            <button
+                              onClick={() => handleRestore(emp.id, "EMPLOYEE")}
+                              className="px-3 py-1 text-[10px] font-bold text-emerald-500 bg-emerald-500/10 rounded"
+                            >
+                              RESTORE
+                            </button>
+                          )
                         )}
                       </td>
                     </tr>
@@ -1442,7 +1478,7 @@ export const EmployeePage: React.FC = () => {
                           {asn.startDate}
                         </td>
                         <td className="px-6 py-4 text-right">
-                          {viewStatus === "AKTIF" && (
+                          {viewStatus === "AKTIF" && hasWriteAccess && (
                             <button
                               onClick={() =>
                                 handleArchive(

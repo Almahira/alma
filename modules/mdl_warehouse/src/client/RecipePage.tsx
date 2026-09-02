@@ -1,5 +1,5 @@
 // File: modules/mdl_warehouse/src/client/RecipePage.tsx
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   CookingPot,
   Plus,
@@ -7,21 +7,29 @@ import {
   Edit2,
   Eye,
   RotateCcw,
-  Sparkles,
-  Layers,
-  Percent,
   CheckCircle2,
   X,
+  Calculator,
 } from "lucide-react";
 import { useWarehouseStore } from "./store";
 import { useItemStore } from "../../../mdl_item/src/client/store";
 import { globalCommandBus } from "../../../../packages/core_unv/src/cqrs/CommandBus";
 import { sysToast } from "../../../../apps/client_unv/src/shared-ui/useToastStore";
 import { useUniversalModal } from "../../../../apps/client_unv/src/shared-ui/UniversalLayout";
-import { STANDARD_UOMS, calculateLossCost } from "../shared/uomConverter";
+import { calculatePackagingLossCost } from "../shared/uomConverter";
+
+// SATUAN TAKAR MURNI MATEMATIS
+const MEASURE_UOMS = [
+  { value: "GRAM", label: "Gram (g)" },
+  { value: "KG", label: "Kilogram (kg)" },
+  { value: "ONS", label: "Ons (100g)" },
+  { value: "ML", label: "Mililiter (ml)" },
+  { value: "LITER", label: "Liter (L)" },
+  { value: "PCS", label: "Pieces (pcs)" },
+];
 
 // =========================================================================
-// 1. MODAL DETAIL RESEP LENGKAP (HIGH CONTRAST)
+// 1. MODAL DETAIL RESEP LENGKAP
 // =========================================================================
 const RecipeDetailModal: React.FC<{ recipe: any; onClose: () => void }> = ({
   recipe,
@@ -65,7 +73,14 @@ const RecipeDetailModal: React.FC<{ recipe: any; onClose: () => void }> = ({
             <tbody className="divide-y divide-(--border-color)">
               {(recipe.rawMaterials || []).map((it: any, i: number) => (
                 <tr key={i}>
-                  <td className="p-2 font-bold">{it.itemName}</td>
+                  <td className="p-2 font-bold">
+                    {it.itemName}
+                    {it.variantInfo && (
+                      <span className="text-[9px] text-slate-400 font-normal block font-mono">
+                        Kemasan: {it.variantInfo}
+                      </span>
+                    )}
+                  </td>
                   <td className="p-2 text-center font-mono text-orange-500 font-bold">
                     {it.qty} {it.uomName}
                   </td>
@@ -89,7 +104,7 @@ const RecipeDetailModal: React.FC<{ recipe: any; onClose: () => void }> = ({
         </div>
       </div>
 
-      {/* Tabel 2: Sub-Resep / Menu Jadi */}
+      {/* Tabel 2: Sub-Resep */}
       {(recipe.subRecipes || []).length > 0 && (
         <div className="space-y-1.5 pt-2">
           <span className="text-[11px] font-black text-orange-500 uppercase tracking-wider block">
@@ -145,7 +160,7 @@ const RecipeDetailModal: React.FC<{ recipe: any; onClose: () => void }> = ({
 };
 
 // =========================================================================
-// 2. MODAL FORM BUILDER RESEP BERJENJANG
+// 2. MODAL FORM BUILDER RESEP BERJENJANG (DENGAN VARIAN KEMASAN)
 // =========================================================================
 const RecipeFormModal: React.FC<{
   isEditMode: boolean;
@@ -158,32 +173,29 @@ const RecipeFormModal: React.FC<{
   const localCompanyId = localStorage.getItem("__unv_companyId") || "";
   const localOutletId = localStorage.getItem("__unv_outletId") || null;
 
-  // Header State
   const [recipeName, setRecipeName] = useState(initialData?.name || "");
   const [uomName, setUomName] = useState(initialData?.uomName || "PORSI");
   const [foodCostPct, setFoodCostPct] = useState<number>(
     initialData?.foodCostPercentage || 30,
   );
 
-  // Komposisi 1: Bahan Baku Mentah
   const [rawMaterials, setRawMaterials] = useState<any[]>(
     initialData?.rawMaterials || [],
   );
-  // Komposisi 2: Menu Jadi / Sub-Resep
   const [subRecipes, setSubRecipes] = useState<any[]>(
     initialData?.subRecipes || [],
   );
 
   // Form Baris Bahan Baku
   const [selectedRawId, setSelectedRawId] = useState("");
+  const [selectedRawVariantId, setSelectedRawVariantId] = useState("");
   const [rawQty, setRawQty] = useState<number | "">("");
   const [rawUom, setRawUom] = useState("GRAM");
 
-  // Form Baris Menu Jadi / Sub-Resep
+  // Form Baris Sub-Resep
   const [selectedSubRecipeId, setSelectedSubRecipeId] = useState("");
   const [subRecipeQty, setSubRecipeQty] = useState<number | "">("");
 
-  // Filter Bahan Baku (Hanya Barang Mentah)
   const rawProductOptions = useMemo(() => {
     return products
       .filter((p) => p.status === "Aktif" && !p.isExpense)
@@ -192,10 +204,44 @@ const RecipeFormModal: React.FC<{
         name: p.name,
         uomId: p.uomId,
         pricing: p.pricing,
+        uomConversions: p.uomConversions || [],
       }));
   }, [products]);
 
-  // Filter Sub-Resep yang Tersedia (Kecuali Resep yang Sedang Diedit Sendiri)
+  const selectedItemObj = useMemo(() => {
+    return rawProductOptions.find((p) => p.id === selectedRawId);
+  }, [rawProductOptions, selectedRawId]);
+
+  // Varian Kemasan Bahan Terpilih
+  const itemVariants = useMemo(() => {
+    if (
+      !selectedItemObj?.uomConversions ||
+      !Array.isArray(selectedItemObj.uomConversions)
+    ) {
+      return [];
+    }
+    return selectedItemObj.uomConversions.filter(
+      (c: any) => Number(c.value) > 0 && c.uom,
+    );
+  }, [selectedItemObj]);
+
+  useEffect(() => {
+    if (itemVariants.length > 0) {
+      const def = itemVariants.find((v: any) => v.isDefault) || itemVariants[0];
+      setSelectedRawVariantId(def.id);
+    } else {
+      setSelectedRawVariantId("");
+    }
+  }, [itemVariants]);
+
+  const activeRawVariant = useMemo(() => {
+    return (
+      itemVariants.find((v: any) => v.id === selectedRawVariantId) ||
+      itemVariants[0] ||
+      null
+    );
+  }, [itemVariants, selectedRawVariantId]);
+
   const availableSubRecipes = useMemo(() => {
     return recipes.filter(
       (r) => r.isActive !== false && (!isEditMode || r.id !== initialData?.id),
@@ -204,33 +250,42 @@ const RecipeFormModal: React.FC<{
 
   // Tambah Bahan Baku Mentah
   const handleAddRawMaterial = () => {
-    if (!selectedRawId || Number(rawQty) <= 0) {
+    if (!selectedItemObj || Number(rawQty) <= 0) {
       return sysToast.error("Error", "Pilih bahan baku dan isi takaran!");
     }
-    const itemObj = rawProductOptions.find((p) => p.id === selectedRawId);
-    if (!itemObj) return;
 
-    const baseUomName = uoms.find((u) => u.id === itemObj.uomId)?.name || "KG";
+    const baseUomName =
+      uoms.find((u) => u.id === selectedItemObj.uomId)?.name || "KG";
     const pricing =
-      itemObj.pricing?.[localOutletId || "DEFAULT"] ||
-      itemObj.pricing?.[Object.keys(itemObj.pricing || {})[0]] ||
+      selectedItemObj.pricing?.[localOutletId || "DEFAULT"] ||
+      selectedItemObj.pricing?.[
+        Object.keys(selectedItemObj.pricing || {})[0]
+      ] ||
       {};
     const basePrice = pricing.basePrice || 0;
 
-    const { totalCost } = calculateLossCost(
+    const calcResult = calculatePackagingLossCost(
       Number(rawQty),
       rawUom,
       baseUomName,
       basePrice,
+      activeRawVariant
+        ? { value: activeRawVariant.value, uom: activeRawVariant.uom }
+        : null,
     );
 
     const newRow = {
-      itemId: itemObj.id,
-      itemName: itemObj.name,
+      itemId: selectedItemObj.id,
+      itemName: selectedItemObj.name,
       qty: Number(rawQty),
       uomName: rawUom,
-      unitCost: basePrice,
-      subtotalCost: totalCost,
+      baseUom: baseUomName,
+      convertedBaseQty: calcResult.convertedBaseQty,
+      variantInfo: activeRawVariant
+        ? `${activeRawVariant.value} ${activeRawVariant.uom}`
+        : null,
+      unitCost: calcResult.unitCostPerStandard,
+      subtotalCost: calcResult.totalCost,
     };
 
     setRawMaterials((prev) => [...prev, newRow]);
@@ -238,7 +293,7 @@ const RecipeFormModal: React.FC<{
     setRawQty("");
   };
 
-  // Tambah Menu Jadi / Sub-Resep
+  // Tambah Sub-Resep
   const handleAddSubRecipe = () => {
     if (!selectedSubRecipeId || Number(subRecipeQty) <= 0) {
       return sysToast.error("Error", "Pilih menu jadi dan isi jumlah porsi!");
@@ -266,7 +321,6 @@ const RecipeFormModal: React.FC<{
     setSubRecipeQty("");
   };
 
-  // Kalkulasi Total HPP & Harga Jual Ideal
   const totalHpp = useMemo(() => {
     const rawTotal = rawMaterials.reduce(
       (sum, it) => sum + (it.subtotalCost || 0),
@@ -284,7 +338,6 @@ const RecipeFormModal: React.FC<{
     return Math.round(totalHpp / (foodCostPct / 100));
   }, [totalHpp, foodCostPct]);
 
-  // Submit Simpan Resep
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!recipeName.trim()) {
@@ -329,7 +382,6 @@ const RecipeFormModal: React.FC<{
   return (
     <div className="fixed inset-0 z-100 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
       <div className="bg-(--bg-card) w-full max-w-3xl rounded-2xl shadow-2xl border border-(--border-color) overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-150 text-(--text-primary)">
-        {/* Header */}
         <div className="px-6 py-3.5 border-b border-(--border-color) flex items-center justify-between bg-(--surface-hover) shrink-0">
           <div className="flex items-center gap-2.5">
             <CookingPot className="w-5 h-5 text-orange-500" />
@@ -347,13 +399,12 @@ const RecipeFormModal: React.FC<{
           </button>
         </div>
 
-        {/* Form Body Scrollable */}
         <form
           onSubmit={handleSave}
           className="flex flex-col flex-1 overflow-hidden"
         >
           <div className="p-6 overflow-y-auto custom-scrollbar space-y-4 flex-1">
-            {/* IDENTITAS MENU & SATUAN */}
+            {/* IDENTITAS RESEP */}
             <div className="grid grid-cols-3 gap-3 bg-(--surface-hover) p-3.5 rounded-xl border border-(--border-color)">
               <div className="col-span-2">
                 <label className="block text-[10px] font-black text-(--text-secondary) uppercase mb-1">
@@ -365,7 +416,7 @@ const RecipeFormModal: React.FC<{
                   autoFocus
                   value={recipeName}
                   onChange={(e) => setRecipeName(e.target.value.toUpperCase())}
-                  placeholder="CONTOH: AYAM COBEK / SAMBEL DADAK / PAKET LIWET AYAM..."
+                  placeholder="CONTOH: AYAM GORENG SPESIAL / SAMBEL TERASI..."
                   className="w-full text-xs font-bold p-2 bg-(--bg-input) border border-(--border-color) rounded-lg outline-none focus:border-orange-500 text-(--text-primary)"
                 />
               </div>
@@ -378,26 +429,28 @@ const RecipeFormModal: React.FC<{
                   required
                   value={uomName}
                   onChange={(e) => setUomName(e.target.value.toUpperCase())}
-                  placeholder="POTONG / PORSI / PAKET..."
-                  className="w-full text-xs font-bold p-2 bg-(--bg-input) border border-(--border-color) rounded-lg outline-none text-center text-orange-500"
+                  placeholder="PORSI / POTONG / CUP..."
+                  className="w-full text-xs font-bold p-2 bg-(--bg-input) border border-(--border-color) rounded-lg outline-none text-center text-orange-500 font-mono"
                 />
               </div>
             </div>
 
-            {/* ============================================================= */}
-            {/* BAGIAN 1: BAHAN BAKU MENTAH */}
-            {/* ============================================================= */}
+            {/* KOMPOSISI BAHAN BAKU */}
             <div className="p-3.5 bg-(--bg-input)/50 rounded-xl border border-(--border-color) space-y-2">
               <span className="text-[10px] font-black text-orange-500 uppercase tracking-wider block">
                 1. BAHAN BAKU MENTAH (DARI MASTER ITEM)
               </span>
 
               <div className="grid grid-cols-12 gap-2 items-end">
-                <div className="col-span-6">
+                <div
+                  className={
+                    itemVariants.length > 0 ? "col-span-4" : "col-span-6"
+                  }
+                >
                   <select
                     value={selectedRawId}
                     onChange={(e) => setSelectedRawId(e.target.value)}
-                    className="w-full text-xs font-bold p-2 bg-(--bg-card) text-(--text-primary) border border-(--border-color) rounded-lg outline-none"
+                    className="w-full text-xs font-bold p-2 bg-(--bg-card) text-(--text-primary) border border-(--border-color) rounded-lg outline-none cursor-pointer"
                   >
                     <option value="">-- PILIH BAHAN BAKU --</option>
                     {rawProductOptions.map((p) => (
@@ -408,11 +461,35 @@ const RecipeFormModal: React.FC<{
                   </select>
                 </div>
 
-                <div className="col-span-3 flex gap-1">
+                {/* FORM TAMBAHAN: VARIAN KEMASAN */}
+                {itemVariants.length > 0 && (
+                  <div className="col-span-2">
+                    <select
+                      value={selectedRawVariantId}
+                      onChange={(e) => setSelectedRawVariantId(e.target.value)}
+                      className="w-full text-xs font-black p-2 bg-(--bg-card) text-orange-500 border border-orange-500/30 rounded-lg outline-none cursor-pointer"
+                    >
+                      {itemVariants.map((v: any) => (
+                        <option key={v.id} value={v.id}>
+                          {v.value} {v.uom}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* TAKARAN & SATUAN UKUR MURNI MATEMATIS */}
+                <div
+                  className={
+                    itemVariants.length > 0
+                      ? "col-span-4 flex gap-1"
+                      : "col-span-3 flex gap-1"
+                  }
+                >
                   <input
                     type="number"
                     step="any"
-                    min={0.01}
+                    min={0.001}
                     value={rawQty}
                     onChange={(e) =>
                       setRawQty(
@@ -420,28 +497,32 @@ const RecipeFormModal: React.FC<{
                       )
                     }
                     placeholder="Takaran"
-                    className="w-16 text-xs font-bold p-2 bg-(--bg-card) border border-(--border-color) rounded-lg outline-none text-center font-mono text-(--text-primary)"
+                    className="w-20 text-xs font-bold p-2 bg-(--bg-card) border border-(--border-color) rounded-lg outline-none text-center font-mono text-(--text-primary)"
                   />
                   <select
                     value={rawUom}
                     onChange={(e) => setRawUom(e.target.value)}
-                    className="flex-1 text-xs font-black p-2 bg-(--bg-card) text-orange-500 border border-(--border-color) rounded-lg outline-none"
+                    className="flex-1 text-xs font-bold p-2 bg-(--bg-card) text-(--text-primary) border border-(--border-color) rounded-lg outline-none cursor-pointer"
                   >
-                    {STANDARD_UOMS.map((u) => (
+                    {MEASURE_UOMS.map((u) => (
                       <option key={u.value} value={u.value}>
-                        {u.value}
+                        {u.label}
                       </option>
                     ))}
                   </select>
                 </div>
 
-                <div className="col-span-3">
+                <div
+                  className={
+                    itemVariants.length > 0 ? "col-span-2" : "col-span-3"
+                  }
+                >
                   <button
                     type="button"
                     onClick={handleAddRawMaterial}
-                    className="w-full py-2 bg-orange-500 hover:bg-orange-600 text-white font-black text-xs rounded-lg transition cursor-pointer"
+                    className="w-full py-2 bg-orange-500 hover:bg-orange-600 text-white font-black text-xs rounded-lg transition cursor-pointer shadow-xs"
                   >
-                    + TAMBAH BAHAN
+                    + TAMBAH
                   </button>
                 </div>
               </div>
@@ -454,9 +535,16 @@ const RecipeFormModal: React.FC<{
                       key={idx}
                       className="flex items-center justify-between p-2 bg-(--bg-card) rounded-lg border border-(--border-color) text-xs"
                     >
-                      <span className="font-bold text-(--text-primary)">
-                        {it.itemName}
-                      </span>
+                      <div>
+                        <span className="font-bold text-(--text-primary)">
+                          {it.itemName}
+                        </span>
+                        {it.variantInfo && (
+                          <span className="text-[9px] text-slate-400 font-normal font-mono block">
+                            Kemasan: {it.variantInfo}
+                          </span>
+                        )}
+                      </div>
                       <div className="flex items-center gap-3">
                         <span className="font-mono text-orange-500 font-bold">
                           {it.qty} {it.uomName}
@@ -482,9 +570,7 @@ const RecipeFormModal: React.FC<{
               )}
             </div>
 
-            {/* ============================================================= */}
-            {/* BAGIAN 2: MENU JADI / SUB-RESEP PRODUKSI */}
-            {/* ============================================================= */}
+            {/* KOMPOSISI SUB-RESEP */}
             <div className="p-3.5 bg-(--bg-input)/50 rounded-xl border border-(--border-color) space-y-2">
               <span className="text-[10px] font-black text-blue-500 uppercase tracking-wider block">
                 2. MENU JADI / PRODUKSI LAIN (SUB-RESEP BOM)
@@ -495,7 +581,7 @@ const RecipeFormModal: React.FC<{
                   <select
                     value={selectedSubRecipeId}
                     onChange={(e) => setSelectedSubRecipeId(e.target.value)}
-                    className="w-full text-xs font-bold p-2 bg-(--bg-card) text-(--text-primary) border border-(--border-color) rounded-lg outline-none"
+                    className="w-full text-xs font-bold p-2 bg-(--bg-card) text-(--text-primary) border border-(--border-color) rounded-lg outline-none cursor-pointer"
                   >
                     <option value="">-- PILIH SUB-RESEP MENU JADI --</option>
                     {availableSubRecipes.map((r) => (
@@ -518,7 +604,7 @@ const RecipeFormModal: React.FC<{
                         e.target.value === "" ? "" : Number(e.target.value),
                       )
                     }
-                    placeholder="Porsi / Jml"
+                    placeholder="Porsi"
                     className="w-full text-xs font-bold p-2 bg-(--bg-card) border border-(--border-color) rounded-lg outline-none text-center font-mono text-(--text-primary)"
                   />
                 </div>
@@ -527,14 +613,13 @@ const RecipeFormModal: React.FC<{
                   <button
                     type="button"
                     onClick={handleAddSubRecipe}
-                    className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs rounded-lg transition cursor-pointer"
+                    className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs rounded-lg transition cursor-pointer shadow-xs"
                   >
                     + TAMBAH SUB-MENU
                   </button>
                 </div>
               </div>
 
-              {/* List Sub-Resep */}
               {subRecipes.length > 0 && (
                 <div className="space-y-1 pt-1.5">
                   {subRecipes.map((it, idx) => (
@@ -568,9 +653,7 @@ const RecipeFormModal: React.FC<{
               )}
             </div>
 
-            {/* ============================================================= */}
-            {/* BAGIAN 3: KALKULATOR FOOD COST & HARGA JUAL IDEAL */}
-            {/* ============================================================= */}
+            {/* KALKULATOR FOOD COST & HARGA JUAL */}
             <div className="p-4 bg-emerald-500/10 rounded-xl border border-emerald-500/30 grid grid-cols-3 gap-4 items-center">
               <div>
                 <span className="text-[10px] font-black text-(--text-secondary) uppercase block">
@@ -611,7 +694,6 @@ const RecipeFormModal: React.FC<{
             </div>
           </div>
 
-          {/* Footer Tombol */}
           <div className="px-6 py-3.5 bg-(--surface-hover) border-t border-(--border-color) flex justify-end gap-3 shrink-0">
             <button
               type="button"
@@ -634,7 +716,7 @@ const RecipeFormModal: React.FC<{
 };
 
 // =========================================================================
-// 3. HALAMAN UTAMA: RECIPE MASTER PAGE
+// 3. HALAMAN UTAMA RECIPE PAGE
 // =========================================================================
 export function RecipePage() {
   const { recipes } = useWarehouseStore();
@@ -670,7 +752,6 @@ export function RecipePage() {
 
   return (
     <div className="relative h-full flex flex-col overflow-hidden bg-(--bg-card)">
-      {/* MODAL FORM BUILDER MANDIRI (BEBAS BUG POPUP) */}
       {isFormModalOpen && (
         <RecipeFormModal
           isEditMode={Boolean(editRecipeData)}
@@ -682,7 +763,6 @@ export function RecipePage() {
         />
       )}
 
-      {/* HEADER */}
       <div className="p-5 bg-(--surface-hover) border-b border-(--border-color) flex items-center justify-between shrink-0 shadow-xs">
         <div className="flex items-center gap-3">
           <CookingPot className="w-5 h-5 text-orange-500" />
@@ -735,7 +815,6 @@ export function RecipePage() {
         </div>
       </div>
 
-      {/* TABEL DATA RESEP */}
       <div className="flex-1 overflow-auto p-6 custom-scrollbar">
         <div className="bg-(--bg-card) border border-(--border-color) rounded-2xl shadow-xs overflow-hidden">
           <table className="w-full text-left border-collapse">
@@ -798,7 +877,6 @@ export function RecipePage() {
                     </td>
 
                     <td className="px-4 py-3 text-right space-x-1 whitespace-nowrap">
-                      {/* DETAIL (MATA) */}
                       <button
                         onClick={() =>
                           openCenterModal({
@@ -819,7 +897,6 @@ export function RecipePage() {
 
                       {viewStatus === "AKTIF" ? (
                         <>
-                          {/* EDIT */}
                           <button
                             onClick={() => {
                               setEditRecipeData(rcp);
@@ -831,7 +908,6 @@ export function RecipePage() {
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
 
-                          {/* ARSIP */}
                           <button
                             onClick={() => confirmArchive(rcp.id, rcp.name)}
                             className="p-1.5 text-(--text-secondary) hover:text-rose-500 bg-(--bg-card) border border-(--border-color) rounded cursor-pointer"

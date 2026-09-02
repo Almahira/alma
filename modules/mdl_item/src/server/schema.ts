@@ -35,8 +35,9 @@ export const itemProducts = pgTable("item_products", {
   regionId: text("region_id"), // Null jika item level Perusahaan
   outletId: text("outlet_id"), // Null jika item level Regional/Perusahaan
   name: text("name").notNull(),
-  isExpense: boolean("is_expense").notNull().default(false), // <--- KOLOM EKSPLISIT
+  isExpense: boolean("is_expense").notNull().default(false),
   pricing: jsonb("pricing").notNull().default({}), // Harga berjenjang (Key: regionId/outletId)
+  uomConversions: jsonb("uom_conversions").notNull().default([]), // <--- KOLOM VARIAN KONVERSI
   approvalStatus: varchar("approval_status", { length: 20 })
     .notNull()
     .default("PENDING"),

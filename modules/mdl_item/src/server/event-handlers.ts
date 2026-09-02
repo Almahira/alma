@@ -55,8 +55,9 @@ export const itemHandlers: Record<
       regionId: event.payload.regionId || null,
       outletId: event.payload.outletId || null,
       name: event.payload.name,
-      isExpense: Boolean(event.payload.isExpense), // <--- SIMPAN EKSPLISIT
+      isExpense: Boolean(event.payload.isExpense),
       pricing: event.payload.pricing || {},
+      uomConversions: event.payload.uomConversions || [], // <--- SIMPAN VARIAN BARU
       approvalStatus: event.payload.approvalStatus || "PENDING",
       validateId: event.payload.validateId || null,
       isActive: true,
@@ -76,6 +77,10 @@ export const itemHandlers: Record<
             ? Boolean(event.payload.isExpense)
             : undefined,
         pricing: event.payload.pricing,
+        uomConversions:
+          event.payload.uomConversions !== undefined
+            ? event.payload.uomConversions
+            : undefined, // <--- UPDATE VARIAN
         approvalStatus: event.payload.nameChanged ? "PENDING" : undefined,
         validateId: event.payload.nameChanged ? null : undefined,
         aggregateVersion: event.aggregateVersion,
