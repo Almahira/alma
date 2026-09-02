@@ -744,6 +744,8 @@ export const SetupWizard: React.FC<{ onComplete: () => void }> = ({
                     <div className="flex gap-2">
                       <input
                         type="text"
+                        id="licenseKeyInput"
+                        name="licenseKeyInput"
                         disabled={isFreeCommunity}
                         value={licenseKeyInput}
                         onChange={(e) =>
@@ -764,6 +766,8 @@ export const SetupWizard: React.FC<{ onComplete: () => void }> = ({
                     <label className="flex items-center gap-2 cursor-pointer pt-1 select-none">
                       <input
                         type="checkbox"
+                        id="isFreeCommunity"
+                        name="isFreeCommunity"
                         checked={isFreeCommunity}
                         onChange={(e) => {
                           setIsFreeCommunity(e.target.checked);
@@ -897,6 +901,8 @@ export const SetupWizard: React.FC<{ onComplete: () => void }> = ({
                       </label>
                       <input
                         type="text"
+                        id="companyName"
+                        name="companyName"
                         required
                         value={companyName}
                         onChange={(e) =>
@@ -912,6 +918,8 @@ export const SetupWizard: React.FC<{ onComplete: () => void }> = ({
                       </label>
                       <input
                         type="text"
+                        id="legalName"
+                        name="legalName"
                         value={legalName}
                         onChange={(e) =>
                           setLegalName(e.target.value.toUpperCase())
@@ -930,6 +938,8 @@ export const SetupWizard: React.FC<{ onComplete: () => void }> = ({
                         </label>
                         <input
                           type="text"
+                          id="regionName"
+                          name="regionName"
                           required
                           value={regionName}
                           onChange={(e) =>
@@ -946,6 +956,8 @@ export const SetupWizard: React.FC<{ onComplete: () => void }> = ({
                           </label>
                           <input
                             type="text"
+                            id="outletName"
+                            name="outletName"
                             required
                             value={outletName}
                             onChange={(e) =>
@@ -996,6 +1008,8 @@ export const SetupWizard: React.FC<{ onComplete: () => void }> = ({
                       </label>
                       <input
                         type="text"
+                        id="ownerName"
+                        name="ownerName"
                         required
                         value={ownerName}
                         onChange={(e) =>
@@ -1011,6 +1025,8 @@ export const SetupWizard: React.FC<{ onComplete: () => void }> = ({
                       </label>
                       <input
                         type="email"
+                        id="adminEmail"
+                        name="adminEmail"
                         required
                         value={adminEmail}
                         onChange={(e) => setAdminEmail(e.target.value)}
@@ -1027,6 +1043,8 @@ export const SetupWizard: React.FC<{ onComplete: () => void }> = ({
                       </label>
                       <input
                         type="password"
+                        id="adminPassword"
+                        name="adminPassword"
                         required
                         value={adminPassword}
                         onChange={(e) => setAdminPassword(e.target.value)}
@@ -1040,6 +1058,8 @@ export const SetupWizard: React.FC<{ onComplete: () => void }> = ({
                       </label>
                       <input
                         type="password"
+                        id="adminPin"
+                        name="adminPin"
                         maxLength={6}
                         value={adminPin}
                         onChange={(e) => setAdminPin(e.target.value)}
@@ -1055,6 +1075,8 @@ export const SetupWizard: React.FC<{ onComplete: () => void }> = ({
                     </label>
                     <input
                       type="text"
+                      id="deviceName"
+                      name="deviceName"
                       required
                       value={deviceName}
                       onChange={(e) =>
@@ -1126,6 +1148,8 @@ export const SetupWizard: React.FC<{ onComplete: () => void }> = ({
                     </label>
                     <input
                       type="email"
+                      id="loginEmail"
+                      name="loginEmail"
                       required
                       value={loginEmail}
                       onChange={(e) => setLoginEmail(e.target.value)}
@@ -1139,6 +1163,8 @@ export const SetupWizard: React.FC<{ onComplete: () => void }> = ({
                     </label>
                     <input
                       type="password"
+                      id="loginPassword"
+                      name="loginPassword"
                       required
                       value={loginPassword}
                       onChange={(e) => setLoginPassword(e.target.value)}
@@ -1237,6 +1263,8 @@ export const SetupWizard: React.FC<{ onComplete: () => void }> = ({
                       Pilih Perusahaan
                     </label>
                     <select
+                      id="selectedCompanyId"
+                      name="selectedCompanyId"
                       value={selectedCompanyId}
                       onChange={(e) => {
                         setSelectedCompanyId(e.target.value);
@@ -1259,6 +1287,8 @@ export const SetupWizard: React.FC<{ onComplete: () => void }> = ({
                         Pilih Regional
                       </label>
                       <select
+                        id="selectedRegionId"
+                        name="selectedRegionId"
                         value={selectedRegionId}
                         onChange={(e) => {
                           setSelectedRegionId(e.target.value);
@@ -1284,6 +1314,8 @@ export const SetupWizard: React.FC<{ onComplete: () => void }> = ({
                         Pilih Outlet
                       </label>
                       <select
+                        id="selectedOutletId"
+                        name="selectedOutletId"
                         value={selectedOutletId}
                         disabled={!selectedRegionId}
                         onChange={(e) => setSelectedOutletId(e.target.value)}
@@ -1403,6 +1435,8 @@ export const SetupWizard: React.FC<{ onComplete: () => void }> = ({
                         </label>
                         <input
                           type="text"
+                          id="deviceName"
+                          name="deviceName"
                           required
                           value={deviceName}
                           onChange={(e) =>
