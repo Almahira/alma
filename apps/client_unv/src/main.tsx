@@ -167,6 +167,31 @@ function SystemBootstrapper() {
   useEffect(() => {
     const bootEngine = async () => {
       try {
+        // ============================================================
+        // GUARD PEMBERSIH MODE DEMO (JIKA TAB PERNAH DITUTUP)
+        // Diletakkan paling awal sebelum RxDB dimuat untuk mencegah
+        // sisa data demo tertinggal saat user menutup tab dan kembali.
+        // ============================================================
+        const isDemoMarked =
+          localStorage.getItem("__unv_is_demo") === "true";
+        const hasActiveDemoSession = sessionStorage.getItem(
+          "__alma_demo_session",
+        );
+
+        // Jika localStorage bertanda demo tapi tab sebelumnya sudah ditutup (sessionStorage hilang)
+        if (isDemoMarked && !hasActiveDemoSession) {
+          console.warn(
+            "[DEMO RESET] Sesi demo telah berakhir. Membersihkan data...",
+          );
+          if (typeof window !== "undefined" && window.indexedDB) {
+            indexedDB.deleteDatabase("alma_unv_ledger");
+            indexedDB.deleteDatabase("ALMA_unv_blob_queue");
+          }
+          localStorage.clear();
+          window.location.href = "/";
+          return;
+        }
+
         // === PENGECEKAN PRESISI: SERVER VIRGIN VS SERVER OFFLINE ===
         const localToken = localStorage.getItem("__unv_deviceToken");
         if (localToken && navigator.onLine) {
