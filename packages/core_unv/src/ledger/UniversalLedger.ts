@@ -67,8 +67,13 @@ export class UniversalLedger {
       }
       this.secretKey = storedKey;
 
+     const isDemo =
+        typeof localStorage !== "undefined" &&
+        localStorage.getItem("__unv_is_demo") === "true";
+      const dbName = isDemo ? "alma_demo_ledger" : "alma_unv_ledger";
+
       this.db = await createRxDatabase({
-        name: "alma_unv_ledger",
+        name: dbName,
         storage: wrappedValidateZSchemaStorage({
           storage: getRxStorageDexie(),
         }),
