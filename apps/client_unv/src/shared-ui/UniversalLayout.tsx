@@ -1132,9 +1132,8 @@ export function UniversalLayout({
           </div>
 
           <div
-            className={`hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl ${glassInputStyle} border-orange-500/20 shrink-0`}
-            title="Lokasi Operasional Perangkat Ini"
-          >
+            className={`hidden md:flex items-center gap-2 ml-4 px-3 py-1.5 rounded-xl ${glassInputStyle} border-orange-500/20 shrink-0`}
+            title="Lokasi Operasional Perangkat Ini">
             <Store className="w-4 h-4 text-orange-500 shrink-0" />
             <span className="text-xs font-black text-(--text-primary) uppercase tracking-wide">
               {currentOutletName}
@@ -1502,9 +1501,6 @@ export function UniversalLayout({
               className="p-1 text-(--text-secondary) hover:text-orange-500 hover:bg-(--surface-hover) rounded transition-colors cursor-pointer flex items-center gap-1.5"
               title="Klik untuk Mengatur & Mengaktifkan Modul">
               <Settings className="w-3.5 h-3.5" />
-              <span className="font-bold tracking-wider text-[10px]">
-                MODUL CONTROL
-              </span>
               <span className="text-(--text-primary) font-bold">{workspaceName}</span>
             </button>
 
