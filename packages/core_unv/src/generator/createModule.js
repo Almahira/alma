@@ -526,6 +526,7 @@ export function ${PascalName}Page() {
                             title: "Arsipkan Data",
                             message: \`Arsipkan "\${it.name}"?\`,
                             confirmText: "ARSIPKAN",
+                            cancelText: "BATAL",
                             onConfirm: () =>
                               globalCommandBus.execute({
                                 type: "ARCHIVE_${UpperSlug}",
@@ -623,6 +624,16 @@ export const ${PascalName}Plugin: ClientPlugin & ServerPlugin = {
     },
   ],
   registerCommandHandlers: () => ${opt.slug}CommandHandlers,
+  registerValidationRules: () => [
+    {
+      commandType: "CREATE_${UpperSlug}",
+      targetAggregate: "${isTx ? `${UpperSlug}_DOCUMENT` : UpperSlug}",
+      collectionKey: "items",
+      matchFields: ["name"],
+      scopeBy: ["companyId"],
+      errorMessage: "${opt.displayName} dengan nama ini sudah terdaftar!",
+    },
+  ],
   registerEventHandlers: () => ${opt.slug}Handlers,
   onEnable: () => console.log("[${moduleDirName.toUpperCase()}] Aktif."),
   onDisable: () => console.log("[${moduleDirName.toUpperCase()}] Non-aktif."),
@@ -662,7 +673,7 @@ function autoRegisterToPluginRegistry(rootDir, opt, PascalName, moduleDirName) {
   }
 
   if (!content.includes(registerLine)) {
-    content += registerLine;
+    content = content.trimEnd() + "\n" + registerLine;
   }
 
   fs.writeFileSync(registryPath, content);

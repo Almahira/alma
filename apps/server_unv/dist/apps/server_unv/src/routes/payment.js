@@ -121,7 +121,7 @@ router.post("/create-snap", async (req, res) => {
             return res.status(400).json({ error: "Data pemesanan tidak lengkap." });
         }
         const orderId = `ALMA-ORD-${ulid()}`;
-        const amount = tier === "EXCLUSIVE" ? 1499000 : 499000;
+        const amount = tier === "EXCLUSIVE" ? 5489000 : 5489000;
         const tierName = tier === "EXCLUSIVE" ? "Paket Eksklusif AI" : "Paket Premium Enterprise";
         const maxOutlets = tier === "EXCLUSIVE" ? 100 : 50;
         const targetModules = [
@@ -138,7 +138,9 @@ router.post("/create-snap", async (req, res) => {
         ];
         const serverKey = process.env.MIDTRANS_SERVER_KEY;
         if (!serverKey) {
-            return res.status(500).json({ error: "MIDTRANS_SERVER_KEY belum diatur di .env" });
+            return res
+                .status(500)
+                .json({ error: "MIDTRANS_SERVER_KEY belum diatur di .env" });
         }
         const isProduction = process.env.MIDTRANS_IS_PRODUCTION === "true";
         const midtransSnapUrl = isProduction

@@ -23,7 +23,15 @@ function pascalCase(str) {
   );
 }
 
-const PROTECTED_MODULES = ["mdl_organization"];
+const PROTECTED_MODULES = [
+  "mdl_organization",
+  "mdl_item",
+  "mdl_vendor",
+  "mdl_receiving",
+  "mdl_warehouse",
+  "mdl_plusales",
+  "mdl_executivepanel",
+];
 
 async function runUninstallCLI() {
   console.clear();

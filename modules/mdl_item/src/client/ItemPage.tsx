@@ -36,6 +36,23 @@ import {
 } from "./features/excel-item";
 import { exportPdfItem } from "./features/pdf-item";
 
+function parseSmartNumber(val: any): number {
+  if (typeof val === "number") return isNaN(val) ? 0 : val;
+  if (!val) return 0;
+  let str = String(val).trim();
+  if (str.includes(".") && str.includes(",")) {
+    if (str.lastIndexOf(",") > str.lastIndexOf(".")) {
+      str = str.replace(/\./g, "").replace(",", ".");
+    } else {
+      str = str.replace(/,/g, "");
+    }
+  } else if (str.includes(",")) {
+    str = str.replace(",", ".");
+  }
+  const parsed = parseFloat(str);
+  return isNaN(parsed) ? 0 : parsed;
+}
+
 // Daftar pilihan satuan standar untuk konversi isi kemasan
 const CONVERSION_UOM_OPTIONS = [
   { value: "KG", label: "Kilogram (KG)" },
@@ -64,7 +81,7 @@ const ProductForm: React.FC<{
   initialData: any;
   onClose: () => void;
 }> = ({ isEditMode, isExpenseMode, initialData, onClose }) => {
-  const { categories, uoms } = useItemStore();
+  const { categories, uoms, products } = useItemStore();
   const { companies } = useOrgStore();
 
   // ---> DETEKSI IDENTITAS PERANGKAT OTOMATIS <---
@@ -170,7 +187,7 @@ const ProductForm: React.FC<{
       newPrice.sellingPrice = newPrice.basePrice;
       newPrice.marginPercentage = 0;
     } else {
-      if (field === "basePrice" || field === "marginPercentage") {
+      if (field === "marginPercentage") {
         newPrice.sellingPrice =
           newPrice.basePrice +
           newPrice.basePrice * (newPrice.marginPercentage / 100);
@@ -181,6 +198,19 @@ const ProductForm: React.FC<{
                 newPrice.basePrice) *
               100
             : 0;
+      } else if (field === "basePrice") {
+        if (newPrice.sellingPrice > 0) {
+          newPrice.marginPercentage =
+            newPrice.basePrice > 0
+              ? ((newPrice.sellingPrice - newPrice.basePrice) /
+                  newPrice.basePrice) *
+                100
+              : 0;
+        } else {
+          newPrice.sellingPrice =
+            newPrice.basePrice +
+            newPrice.basePrice * (newPrice.marginPercentage / 100);
+        }
       }
     }
     setPricingMap({ ...pricingMap, [activePricingKey]: newPrice });
@@ -188,20 +218,42 @@ const ProductForm: React.FC<{
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    const cleanProductName = formData.name.trim().toUpperCase();
+    const isDuplicateProduct = products.some(
+      (p) =>
+        p.name.trim().toUpperCase() === cleanProductName &&
+        (!isEditMode || p.id !== formData.id) &&
+        Boolean(p.isExpense) === isExpenseMode &&
+        p.status !== "Arsip",
+    );
+    if (isDuplicateProduct) {
+      return sysToast.error(
+        "Nama Duplikat",
+        `${isExpenseMode ? "Jasa/Biaya" : "Produk"} dengan nama "${cleanProductName}" sudah ada!`,
+      );
+    }
     try {
       let finalCategoryId = formData.categoryId;
       let finalUomId = formData.uomId;
 
-      // 1. Buat Kategori Baru jika inline
+      // 1. Buat Kategori Baru jika inline (cek apakah sudah ada terlebih dahulu)
       if (isCustomCategory && customCategoryName.trim()) {
-        finalCategoryId = `CAT_${ulid()}`;
-        await globalCommandBus.execute({
-          type: "CREATE_CATEGORY",
-          payload: {
-            id: finalCategoryId,
-            name: customCategoryName.toUpperCase().trim(),
-          },
-        });
+        const cleanCat = customCategoryName.toUpperCase().trim();
+        const existingCat = categories.find(
+          (c) => c.name.toUpperCase().trim() === cleanCat,
+        );
+        if (existingCat) {
+          finalCategoryId = existingCat.id;
+        } else {
+          finalCategoryId = `CAT_${ulid()}`;
+          await globalCommandBus.execute({
+            type: "CREATE_CATEGORY",
+            payload: {
+              id: finalCategoryId,
+              name: cleanCat,
+            },
+          });
+        }
       } else if (!finalCategoryId) {
         finalCategoryId = categories[0]?.id || `CAT_${ulid()}`;
         if (categories.length === 0) {
@@ -793,10 +845,32 @@ const MasterItemForm: React.FC<{
   initialData: any;
   onClose: () => void;
 }> = ({ type, isEditMode, initialData, onClose }) => {
+  const { categories, uoms } = useItemStore();
   const [name, setName] = useState(initialData?.name || "");
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    const cleanName = name.trim().toUpperCase();
+    if (type === "CATEGORY") {
+      const isDup = categories.some(
+        (c) =>
+          c.name.trim().toUpperCase() === cleanName &&
+          (!isEditMode || c.id !== initialData?.id),
+      );
+      if (isDup)
+        return sysToast.error("Duplikat", `Kategori "${cleanName}" sudah ada!`);
+    } else {
+      const isDup = uoms.some(
+        (u) =>
+          u.name.trim().toUpperCase() === cleanName &&
+          (!isEditMode || u.id !== initialData?.id),
+      );
+      if (isDup)
+        return sysToast.error(
+          "Duplikat",
+          `Satuan (UOM) "${cleanName}" sudah ada!`,
+        );
+    }
     try {
       const cmdType =
         type === "CATEGORY"
@@ -920,12 +994,20 @@ export function ItemPage() {
     type: "basePrice" | "marginPercentage" | "sellingPrice",
   ) => {
     if (!item.pricing) return 0;
+    const localOutletId = localStorage.getItem("__unv_outletId");
+    const localRegionId = localStorage.getItem("__unv_regionId");
+    const localCompanyId = localStorage.getItem("__unv_companyId");
+
     const fallbackKeys = [
+      localOutletId,
+      localRegionId,
+      localCompanyId,
       item.outletId,
       item.regionId,
       item.companyId,
       "DEFAULT",
     ].filter(Boolean);
+
     for (const key of fallbackKeys) {
       if (item.pricing[key]) return item.pricing[key][type] || 0;
     }
@@ -943,59 +1025,105 @@ export function ItemPage() {
         throw new Error("File Excel kosong atau format tidak sesuai.");
       }
 
-      const currentCats = useItemStore.getState().categories;
-      const currentUoms = useItemStore.getState().uoms;
+      const itemState = useItemStore.getState();
       const companyId = localStorage.getItem("__unv_companyId") || "";
 
+      // 1. Inisialisasi Map Pencarian Lokal
+      const categoryMap = new Map<string, string>();
+      itemState.categories.forEach((c) =>
+        categoryMap.set(c.name.trim().toUpperCase(), c.id),
+      );
+
+      const uomMap = new Map<string, string>();
+      itemState.uoms.forEach((u) =>
+        uomMap.set(u.name.trim().toUpperCase(), u.id),
+      );
+
+      // Set nama produk untuk cegah duplikasi
+      const existingProductNames = new Set(
+        itemState.products
+          .filter((p) => p.status !== "Arsip" && !p.isExpense)
+          .map((p) => p.name.trim().toUpperCase()),
+      );
+
+      // 2. Kategori Default Riil (Bukan String Fiktif)
+      let defaultCatId = itemState.categories[0]?.id;
+      if (!defaultCatId) {
+        defaultCatId = `CAT_${ulid()}`;
+        await globalCommandBus.execute({
+          type: "CREATE_CATEGORY",
+          payload: { id: defaultCatId, name: "BARANG UMUM" },
+        });
+        categoryMap.set("BARANG UMUM", defaultCatId);
+      }
+
+      // 3. UOM Default Riil (Bukan String Fiktif)
+      let defaultUomId = itemState.uoms[0]?.id;
+      if (!defaultUomId) {
+        defaultUomId = `UOM_${ulid()}`;
+        await globalCommandBus.execute({
+          type: "CREATE_UOM",
+          payload: { id: defaultUomId, name: "PCS" },
+        });
+        uomMap.set("PCS", defaultUomId);
+      }
+
       let successCount = 0;
+      let skippedCount = 0;
+
       for (const row of parsedData) {
         if (!row.name) continue;
+        const cleanProdName = String(row.name).trim().toUpperCase();
 
-        let cat = currentCats.find(
-          (c) =>
-            c.name.toUpperCase() ===
-            String(row.categoryName).toUpperCase().trim(),
-        );
-        let catId = cat ? cat.id : null;
-        if (!catId && row.categoryName) {
-          catId = `CAT_${ulid()}`;
-          await globalCommandBus.execute({
-            type: "CREATE_CATEGORY",
-            payload: {
-              id: catId,
-              name: String(row.categoryName).toUpperCase().trim(),
-            },
-          });
+        // Lewati jika produk sudah terdaftar
+        if (existingProductNames.has(cleanProdName)) {
+          skippedCount++;
+          continue;
         }
 
-        let uom = currentUoms.find(
-          (u) =>
-            u.name.toUpperCase() === String(row.uomName).toUpperCase().trim(),
-        );
-        let uomId = uom ? uom.id : null;
-        if (!uomId && row.uomName) {
-          uomId = `UOM_${ulid()}`;
-          await globalCommandBus.execute({
-            type: "CREATE_UOM",
-            payload: {
-              id: uomId,
-              name: String(row.uomName).toUpperCase().trim(),
-            },
-          });
+        // Resolusi Kategori via Map Lokal
+        let catId = defaultCatId;
+        if (row.categoryName) {
+          const cleanCat = String(row.categoryName).trim().toUpperCase();
+          if (categoryMap.has(cleanCat)) {
+            catId = categoryMap.get(cleanCat)!;
+          } else {
+            catId = `CAT_${ulid()}`;
+            await globalCommandBus.execute({
+              type: "CREATE_CATEGORY",
+              payload: { id: catId, name: cleanCat },
+            });
+            categoryMap.set(cleanCat, catId); // Simpan ke map lokal seketika
+          }
         }
 
-        const basePrice = Number(row.basePrice) || 0;
-        const marginPercentage = Number(row.marginPercentage) || 0;
+        // Resolusi UOM via Map Lokal
+        let uomId = defaultUomId;
+        if (row.uomName) {
+          const cleanUom = String(row.uomName).trim().toUpperCase();
+          if (uomMap.has(cleanUom)) {
+            uomId = uomMap.get(cleanUom)!;
+          } else {
+            uomId = `UOM_${ulid()}`;
+            await globalCommandBus.execute({
+              type: "CREATE_UOM",
+              payload: { id: uomId, name: cleanUom },
+            });
+            uomMap.set(cleanUom, uomId); // Simpan ke map lokal seketika
+          }
+        }
+
+        const basePrice = parseSmartNumber(row.basePrice);
+        const marginPercentage = parseSmartNumber(row.marginPercentage);
         const sellingPrice =
-          Number(row.sellingPrice) ||
+          parseSmartNumber(row.sellingPrice) ||
           basePrice + basePrice * (marginPercentage / 100);
 
         const pricing = {
           DEFAULT: { basePrice, marginPercentage, sellingPrice },
         };
 
-        // ====== PERUBAHAN: Deteksi nilai konversi dari file Excel ======
-        const convValue = Number(row.conversionValue);
+        const convValue = parseSmartNumber(row.conversionValue);
         const convUom = String(row.conversionUom || "")
           .toUpperCase()
           .trim();
@@ -1011,27 +1139,35 @@ export function ItemPage() {
                 },
               ]
             : [];
-        // ============================================================
 
         await globalCommandBus.execute({
           type: "CREATE_PRODUCT",
           payload: {
-            name: String(row.name).toUpperCase().trim(),
-            categoryId: catId || "CAT_DEFAULT",
-            uomId: uomId || "UOM_DEFAULT",
+            name: cleanProdName,
+            categoryId: catId,
+            uomId: uomId,
             companyId,
             isExpense: false,
             pricing,
-            uomConversions, // <--- Otomatis tersimpan dari Excel
+            uomConversions,
           },
         });
+
+        existingProductNames.add(cleanProdName);
         successCount++;
       }
 
-      sysToast.success(
-        "Import Berhasil",
-        `Sukses mengimpor ${successCount} produk dari file Excel!`,
-      );
+      if (successCount > 0) {
+        sysToast.success(
+          "Import Berhasil",
+          `Sukses mengimpor ${successCount} produk.${skippedCount > 0 ? ` (${skippedCount} produk dilewati karena sudah ada)` : ""}`,
+        );
+      } else if (skippedCount > 0) {
+        sysToast.warn(
+          "Import Dilewati",
+          `Semua (${skippedCount}) produk dalam file sudah terdaftar di sistem.`,
+        );
+      }
     } catch (err: any) {
       sysToast.error("Gagal Import Excel", err.message);
     } finally {
@@ -1092,8 +1228,19 @@ export function ItemPage() {
                       <div className="h-px bg-(--border-color) my-1"></div>
                       <button
                         onClick={() => {
+                          const exportableProducts = products.filter((p) => {
+                            const matchExpense =
+                              activeTab === "EXPENSE"
+                                ? p.isExpense === true
+                                : !p.isExpense;
+                            return (
+                              matchExpense &&
+                              p.status === "Aktif" &&
+                              p.approvalStatus !== "MERGED"
+                            );
+                          });
                           exportExcelItem(
-                            products,
+                            exportableProducts,
                             categories,
                             uoms,
                             getPriceDisplay,
@@ -1107,11 +1254,26 @@ export function ItemPage() {
                       </button>
                       <button
                         onClick={() => {
+                          const exportableProducts = products.filter((p) => {
+                            const matchExpense =
+                              activeTab === "EXPENSE"
+                                ? p.isExpense === true
+                                : !p.isExpense;
+                            return (
+                              matchExpense &&
+                              p.status === "Aktif" &&
+                              p.approvalStatus !== "MERGED"
+                            );
+                          });
+                          const activeCompName =
+                            companies[0]?.name || "ALMA ENTERPRISE";
                           exportPdfItem(
-                            products,
+                            exportableProducts,
                             categories,
                             uoms,
                             getPriceDisplay,
+                            activeCompName,
+                            activeTab === "EXPENSE" ? "EXPENSE" : "PRODUK",
                           );
                           setIsActionMenuOpen(false);
                         }}
@@ -1500,24 +1662,45 @@ export function ItemPage() {
                         className="p-3 border border-(--border-color) rounded-lg bg-(--surface-hover) flex justify-between items-center group"
                       >
                         {c.name}
-                        <button
-                          onClick={() =>
-                            openCenterModal({
-                              title: "EDIT KATEGORI",
-                              content: (
-                                <MasterItemForm
-                                  type="CATEGORY"
-                                  isEditMode={true}
-                                  initialData={c}
-                                  onClose={closeCenterModal}
-                                />
-                              ),
-                            })
-                          }
-                          className="text-blue-500 opacity-0 group-hover:opacity-100 transition cursor-pointer"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition">
+                          <button
+                            onClick={() =>
+                              openCenterModal({
+                                title: "EDIT KATEGORI",
+                                content: (
+                                  <MasterItemForm
+                                    type="CATEGORY"
+                                    isEditMode={true}
+                                    initialData={c}
+                                    onClose={closeCenterModal}
+                                  />
+                                ),
+                              })
+                            }
+                            className="text-blue-500 hover:text-blue-600 cursor-pointer p-1"
+                            title="Edit Kategori"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() =>
+                              openAlert({
+                                title: "Arsipkan Kategori",
+                                message: `Arsipkan kategori "${c.name}"?`,
+                                confirmText: "YA, ARSIPKAN",
+                                onConfirm: () =>
+                                  globalCommandBus.execute({
+                                    type: "ARCHIVE_CATEGORY",
+                                    payload: { id: c.id },
+                                  }),
+                              })
+                            }
+                            className="text-rose-500 hover:text-rose-600 cursor-pointer p-1"
+                            title="Arsipkan Kategori"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </li>
                     ))}
                 </ul>
@@ -1556,24 +1739,45 @@ export function ItemPage() {
                         className="p-3 border border-(--border-color) rounded-lg bg-(--surface-hover) flex justify-between items-center group"
                       >
                         {u.name}
-                        <button
-                          onClick={() =>
-                            openCenterModal({
-                              title: "EDIT UOM",
-                              content: (
-                                <MasterItemForm
-                                  type="UOM"
-                                  isEditMode={true}
-                                  initialData={u}
-                                  onClose={closeCenterModal}
-                                />
-                              ),
-                            })
-                          }
-                          className="text-blue-500 opacity-0 group-hover:opacity-100 transition cursor-pointer"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition">
+                          <button
+                            onClick={() =>
+                              openCenterModal({
+                                title: "EDIT UOM",
+                                content: (
+                                  <MasterItemForm
+                                    type="UOM"
+                                    isEditMode={true}
+                                    initialData={u}
+                                    onClose={closeCenterModal}
+                                  />
+                                ),
+                              })
+                            }
+                            className="text-blue-500 hover:text-blue-600 cursor-pointer p-1"
+                            title="Edit UOM"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() =>
+                              openAlert({
+                                title: "Arsipkan UOM",
+                                message: `Arsipkan satuan "${u.name}"?`,
+                                confirmText: "YA, ARSIPKAN",
+                                onConfirm: () =>
+                                  globalCommandBus.execute({
+                                    type: "ARCHIVE_UOM",
+                                    payload: { id: u.id },
+                                  }),
+                              })
+                            }
+                            className="text-rose-500 hover:text-rose-600 cursor-pointer p-1"
+                            title="Arsipkan UOM"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </li>
                     ))}
                 </ul>

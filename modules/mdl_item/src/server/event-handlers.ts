@@ -46,6 +46,47 @@ export const itemHandlers: Record<
       .where(eq(schema.itemUoms.id, event.aggregateId));
   },
 
+  CATEGORY_ARCHIVED: async (tx, event) => {
+    await tx
+      .update(schema.itemCategories)
+      .set({
+        isActive: false,
+        aggregateVersion: event.aggregateVersion,
+        lastEventId: event.id,
+      })
+      .where(eq(schema.itemCategories.id, event.aggregateId));
+  },
+  CATEGORY_RESTORED: async (tx, event) => {
+    await tx
+      .update(schema.itemCategories)
+      .set({
+        isActive: true,
+        aggregateVersion: event.aggregateVersion,
+        lastEventId: event.id,
+      })
+      .where(eq(schema.itemCategories.id, event.aggregateId));
+  },
+  UOM_ARCHIVED: async (tx, event) => {
+    await tx
+      .update(schema.itemUoms)
+      .set({
+        isActive: false,
+        aggregateVersion: event.aggregateVersion,
+        lastEventId: event.id,
+      })
+      .where(eq(schema.itemUoms.id, event.aggregateId));
+  },
+  UOM_RESTORED: async (tx, event) => {
+    await tx
+      .update(schema.itemUoms)
+      .set({
+        isActive: true,
+        aggregateVersion: event.aggregateVersion,
+        lastEventId: event.id,
+      })
+      .where(eq(schema.itemUoms.id, event.aggregateId));
+  },
+
   PRODUCT_CREATED: async (tx, event) => {
     await tx.insert(schema.itemProducts).values({
       id: event.aggregateId,

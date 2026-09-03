@@ -60,6 +60,44 @@ export const ItemPlugin: ClientPlugin & ServerPlugin = {
     return itemCommandHandlers;
   },
 
+  registerValidationRules: () => [
+    {
+      commandType: "CREATE_PRODUCT",
+      targetAggregate: "ITEM_DOMAIN",
+      collectionKey: "products",
+      matchFields: ["name"],
+      scopeBy: ["companyId"],
+      customFilter: (existing, payload) =>
+        Boolean(existing.isExpense) === Boolean(payload.isExpense),
+      errorMessage:
+        "Item/Jasa dengan nama ini sudah terdaftar di katalog perusahaan!",
+    },
+    {
+      commandType: "UPDATE_PRODUCT",
+      targetAggregate: "ITEM_DOMAIN",
+      collectionKey: "products",
+      matchFields: ["name"],
+      scopeBy: ["companyId"],
+      customFilter: (existing, payload) =>
+        Boolean(existing.isExpense) === Boolean(payload.isExpense),
+      errorMessage: "Nama produk/jasa tersebut sudah digunakan oleh item lain!",
+    },
+    {
+      commandType: "CREATE_CATEGORY",
+      targetAggregate: "ITEM_DOMAIN",
+      collectionKey: "categories",
+      matchFields: ["name"],
+      errorMessage: "Kategori dengan nama ini sudah ada!",
+    },
+    {
+      commandType: "CREATE_UOM",
+      targetAggregate: "ITEM_DOMAIN",
+      collectionKey: "uoms",
+      matchFields: ["name"],
+      errorMessage: "Satuan (UOM) dengan nama ini sudah ada!",
+    },
+  ],
+
   registerEventHandlers: () => {
     return itemHandlers;
   },

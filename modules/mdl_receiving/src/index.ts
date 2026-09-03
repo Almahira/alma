@@ -62,6 +62,28 @@ export const ReceivingPlugin: ClientPlugin & ServerPlugin = {
     return receivingCommandHandlers;
   },
 
+  registerValidationRules: () => [
+    {
+      commandType: "CREATE_RECEIVING",
+      targetAggregate: "RECEIVING_DOCUMENT",
+      collectionKey: "documents",
+      matchFields: ["invoiceNumber", "vendorId"],
+      scopeBy: ["companyId"],
+      errorMessage:
+        "Nomor faktur/nota dari vendor ini sudah pernah dicatat di sistem!",
+    },
+    {
+      commandType: "UPDATE_RECEIVING",
+      targetAggregate: "RECEIVING_DOCUMENT",
+      collectionKey: "documents",
+      matchFields: ["invoiceNumber", "vendorId"],
+      scopeBy: ["companyId"],
+      idField: "documentId",
+      errorMessage:
+        "Nomor faktur tersebut sudah digunakan pada transaksi lain!",
+    },
+  ],
+
   registerEventHandlers: () => {
     return receivingHandlers;
   },

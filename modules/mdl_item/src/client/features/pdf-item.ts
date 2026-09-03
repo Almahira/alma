@@ -8,21 +8,32 @@ export const exportPdfItem = (
   categories: any[],
   uoms: any[],
   getPriceDisplay: Function,
-  companyName: string = "UNIVERSAL",
+  companyName: string = "PERUSAHAAN",
+  reportType: "PRODUK" | "EXPENSE" = "PRODUK",
 ) => {
-  const rows = products.map((p) => {
+  const isExpense = reportType === "EXPENSE";
+
+  const rows = products.map((p, idx) => {
     const cat = categories.find((c) => c.id === p.categoryId)?.name || "-";
     const uom = uoms.find((u) => u.id === p.uomId)?.name || "-";
-    const sell = getPriceDisplay(p, "sellingPrice");
+    const basePrice = getPriceDisplay(p, "basePrice");
+    const sellPrice = getPriceDisplay(p, "sellingPrice");
 
-    return [p.name, cat, uom, `Rp ${sell.toLocaleString()}`];
+    if (isExpense) {
+      return [idx + 1, p.name, cat, `Rp ${basePrice.toLocaleString()}`];
+    }
+    return [idx + 1, p.name, cat, uom, `Rp ${sellPrice.toLocaleString()}`];
   });
 
   const config: PdfTableConfig = {
-    title: "LAPORAN KATALOG PRODUK",
-    subtitle: `Dicetak dari: ${companyName} | Tanggal: ${new Date().toLocaleDateString("id-ID")}`,
-    filename: "Katalog_Produk",
-    headers: ["NAMA PRODUK", "KATEGORI", "UOM", "HARGA JUAL"],
+    title: isExpense
+      ? "LAPORAN JASA & BIAYA OPERASIONAL"
+      : "LAPORAN KATALOG PRODUK BARANG",
+    subtitle: `Unit/Perusahaan : ${companyName} | Tanggal: ${new Date().toLocaleDateString("id-ID")}`,
+    filename: isExpense ? "Laporan_Jasa_Biaya" : "Katalog_Produk",
+    headers: isExpense
+      ? ["NO", "NAMA JASA / BIAYA", "KATEGORI", "ESTIMASI BIAYA (HPP)"]
+      : ["NO", "NAMA PRODUK", "KATEGORI", "UOM", "HARGA JUAL"],
     rows: rows,
   };
 

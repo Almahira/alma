@@ -25,6 +25,32 @@ import { dictionaryCommandHandlers } from "../../../packages/core_unv/src/dictio
 import { globalRegistry } from "../../../packages/core_unv/src/cqrs/UniversalRegistry";
 import { IntegrityChecker } from "../../../packages/core_unv/src/ledger/IntegrityChecker";
 import { InitialLoadingScreen } from "./shared-ui/InitialLoadingScreen";
+import { getApiUrl } from "../../../packages/core_unv/src/config/env";
+
+async function purgeLocalDataAndRedirect(targetUrl: string = "/") {
+  console.warn(
+    "[SYSTEM RESET] Terdeteksi server virgin. Membersihkan storage lokal...",
+  );
+  try {
+    const rxdb = globalLedger.getRxDatabase();
+    if (rxdb) {
+      await rxdb.remove().catch(() => {});
+    }
+  } catch {}
+
+  // Hapus semua IndexedDB secara fisik
+  if (typeof window !== "undefined" && window.indexedDB) {
+    indexedDB.deleteDatabase("alma_unv_ledger");
+    indexedDB.deleteDatabase("ALMA_unv_blob_queue");
+  }
+
+  // Bersihkan Sesi LocalStorage
+  if (typeof localStorage !== "undefined") {
+    localStorage.clear();
+  }
+
+  window.location.href = targetUrl;
+}
 
 // =========================================================================
 // GLOBAL LOG INTERCEPTOR (PRODUKSI BERSIH & ROUTING KE ACTIVITY DRAWER)
@@ -141,6 +167,34 @@ function SystemBootstrapper() {
   useEffect(() => {
     const bootEngine = async () => {
       try {
+        // === PENGECEKAN PRESISI: SERVER VIRGIN VS SERVER OFFLINE ===
+        const localToken = localStorage.getItem("__unv_deviceToken");
+        if (localToken && navigator.onLine) {
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 3500);
+            const res = await fetch(getApiUrl("/api/provision/system-status"), {
+              signal: controller.signal,
+            });
+            clearTimeout(timeoutId);
+
+            if (res.ok) {
+              const statusData = await res.json();
+              // Server ONLINE dan database-nya kosong (Virgin)
+              if (statusData.isVirgin === true) {
+                await purgeLocalDataAndRedirect(
+                  "https://alma-client-unv.vercel.app/",
+                );
+                return;
+              }
+            }
+          } catch (netErr) {
+            // Server OFFLINE atau timeout: Jangan hapus apapun, biarkan mode offline bekerja
+            console.info(
+              "[BOOT] Server tidak dapat dihubungi, melanjutkan mode OFFLINE-FIRST.",
+            );
+          }
+        }
         await manager.boot();
         await EventBus.bootAndReplay();
         globalFileDaemon.start();

@@ -67,6 +67,31 @@ export const OrganizationPlugin: ClientPlugin & ServerPlugin = {
     },
   ],
   registerCommandHandlers: () => organizationCommandHandlers,
+  registerValidationRules: () => [
+    {
+      commandType: "CREATE_OUTLET",
+      targetAggregate: "ORGANIZATION",
+      collectionKey: "outlets",
+      matchFields: ["name"],
+      scopeBy: ["companyId"],
+      errorMessage: "Outlet dengan nama ini sudah ada di perusahaan Anda!",
+    },
+    {
+      commandType: "CREATE_DIVISION",
+      targetAggregate: "ORGANIZATION",
+      collectionKey: "divisions",
+      matchFields: ["name"],
+      scopeBy: ["companyId"],
+      errorMessage: "Divisi dengan nama ini sudah terdaftar!",
+    },
+    {
+      commandType: "CREATE_USER_ACCOUNT",
+      targetAggregate: "ORGANIZATION",
+      collectionKey: "userAccounts",
+      matchFields: ["username"],
+      errorMessage: "Username ini sudah digunakan oleh pengguna lain!",
+    },
+  ],
   registerDictionaries: () => [
     { id: "INDUSTRY_TYPE", label: "Tipe Industri (Outlet)" },
   ],

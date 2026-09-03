@@ -31,6 +31,17 @@ export interface RouteConfig {
   lifecycle?: UILifecycle;
 }
 
+export interface UniquenessRule {
+  commandType: string;
+  targetAggregate: string;
+  collectionKey: string;
+  matchFields: string[];
+  scopeBy?: string[];
+  idField?: string;
+  customFilter?: (existingItem: any, payload: any) => boolean;
+  errorMessage: string;
+}
+
 export interface DictionaryCategory {
   id: string;
   label: string;
@@ -61,6 +72,7 @@ export interface ClientPlugin extends UniversalPlugin {
   registerCommandHandlers?: () => CommandHandler[];
   registerDictionaries?: () => DictionaryCategory[];
   registerUpcasters?: () => EventUpcaster[];
+  registerValidationRules?: () => UniquenessRule[];
 }
 
 export interface ServerPlugin extends UniversalPlugin {

@@ -1,5 +1,6 @@
 // File: packages/core_unv/src/cqrs/CommandBus.ts
 import { Command, CommandHandler } from "./types";
+import { CommandGuard } from "./CommandGuard";
 
 export class CommandBus {
   private handlers = new Map<string, CommandHandler>();
@@ -21,6 +22,8 @@ export class CommandBus {
         `[COMMAND BUS] Tidak ada handler untuk command: ${command.type}`,
       );
     }
+    // === PEMERIKSAAN SATPAM GEDUNG UNIVERSAL ===
+    CommandGuard.validate(command);
     await handler.execute(command);
   }
 }

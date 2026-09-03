@@ -124,7 +124,7 @@ const CheckoutModal: React.FC<{
   const [issuedKey, setIssuedKey] = useState<string | null>(null);
   const [isCopied, setIsCopied] = useState(false);
 
-  const price = tier === "EXCLUSIVE" ? "Rp 1.499.000" : "Rp 499.000";
+  const price = "Rp 5.489.000";
 
   const handleCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -156,12 +156,10 @@ const CheckoutModal: React.FC<{
           if ((window as any).snap) return resolve();
           const script = document.createElement("script");
           script.src = "https://app.midtrans.com/snap/snap.js";
-          script.setAttribute(
-            "data-client-key",
-            "Mid-client-7ZHoQPtcHnpcwglB",
-          );
+          script.setAttribute("data-client-key", "Mid-client-7ZHoQPtcHnpcwglB");
           script.onload = () => resolve();
-          script.onerror = () => reject(new Error("Gagal memuat sistem pembayaran Midtrans."));
+          script.onerror = () =>
+            reject(new Error("Gagal memuat sistem pembayaran Midtrans."));
           document.body.appendChild(script);
         });
       };
@@ -926,7 +924,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartSetup }) => {
             {/* Tier Premium */}
             <LiquidGlass className="p-7 rounded-3xl h-full flex flex-col justify-between relative border-2 border-orange-500/50 shadow-2xl shadow-orange-500/20 group">
               <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-linear-to-r from-orange-500 to-amber-500 text-white text-[9px] font-black uppercase rounded-full shadow">
-                PALING POPULER
+                HEMAT 1 BULAN (BAYAR 11 BLN)
               </div>
               <div className="space-y-4">
                 <span className="px-3 py-1 bg-orange-500/10 text-orange-400 border border-orange-500/20 rounded-full text-[10px] font-black uppercase">
@@ -935,22 +933,34 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartSetup }) => {
                 <h3 className="text-2xl font-black text-white">
                   Paket Premium
                 </h3>
-                <div className="text-2xl font-black font-mono text-orange-400">
-                  Rp 499.000{" "}
-                  <span className="text-xs text-slate-400 font-normal">
-                    / tahun
+
+                <div>
+                  <span className="text-xs text-slate-500 line-through">
+                    Rp 5.988.000
+                  </span>
+                  <div className="text-2xl font-black font-mono text-orange-400">
+                    Rp 5.489.000{" "}
+                    <span className="text-xs text-slate-400 font-normal">
+                      / tahun
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-emerald-400 font-bold block mt-0.5">
+                    Setara Rp 457.000/bln (Diskon 1 Bulan)
                   </span>
                 </div>
+
                 <p className="text-xs text-slate-400">
-                  Untuk grup bisnis multi-cabang, manufaktur, dan perusahaan
-                  yang membutuhkan fitur lanjutan berlisensi kriptografis.
+                  Untuk grup bisnis multi-cabang, gudang, dan perusahaan yang
+                  membutuhkan fitur lengkap berlisensi kriptografis.
                 </p>
+
                 <div className="space-y-2 text-xs font-semibold text-slate-300 pt-2">
                   {[
                     "Semua Fitur Paket Free",
-                    "Modul Multi-Gudang & Transfer",
-                    "Modul Manufaktur & Produksi",
-                    "Kunci Lisensi Ed25519 (Offline Safe)",
+                    "Kunci Lisensi Ed25519 (Offline-Safe)",
+                    "Kuota hingga 50 Perangkat / Kasir",
+                    "Modul Multi-Gudang, Transfer, & Produksi",
+                    "Priority Support & Pembaruan Sistem",
                   ].map((t, i) => (
                     <div key={i} className="flex items-center gap-2">
                       <CheckCircle2 className="w-4 h-4 text-orange-400" /> {t}
@@ -958,6 +968,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartSetup }) => {
                   ))}
                 </div>
               </div>
+
               <button
                 onClick={() => setCheckoutTier("PREMIUM")}
                 className="w-full py-3 bg-linear-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white rounded-xl text-xs font-black uppercase tracking-wider transition shadow-lg mt-6 cursor-pointer"
@@ -967,30 +978,32 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartSetup }) => {
             </LiquidGlass>
 
             {/* Tier Exclusive AI */}
-            <LiquidGlass className="p-7 rounded-3xl h-full flex flex-col justify-between group">
+            <LiquidGlass className="p-7 rounded-3xl h-full flex flex-col justify-between group border border-white/10 hover:border-blue-500/40 transition-all">
               <div className="space-y-4">
                 <span className="px-3 py-1 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-full text-[10px] font-black uppercase">
-                  AI CLOUD PLATFORM
+                  CUSTOM ENTERPRISE & AI
                 </span>
                 <h3 className="text-2xl font-black text-white">
-                  Paket Eksklusif
+                  Konsultasi Khusus
                 </h3>
-                <div className="text-2xl font-black font-mono text-blue-400">
-                  Rp 1.499.000{" "}
-                  <span className="text-xs text-slate-400 font-normal">
-                    / tahun
-                  </span>
+
+                <div className="text-2xl font-black text-blue-400">
+                  Hubungi Langsung
                 </div>
+
                 <p className="text-xs text-slate-400">
-                  Dilengkapi asisten kecerdasan buatan untuk prediksi omset,
-                  audit struk belanja otomatis, dan gateway notifikasi.
+                  Dapatkan solusi kustom holding, integrasi kecerdasan buatan
+                  (AI Forecasting & OCR), serta implementasi langsung bersama
+                  Alma.
                 </p>
+
                 <div className="space-y-2 text-xs font-semibold text-slate-300 pt-2">
                   {[
-                    "Semua Fitur Premium",
-                    "AI Sales & Stock Forecasting",
-                    "AI OCR Pindai Struk Pembelian",
-                    "WhatsApp Gateway Otomatis",
+                    "Solusi Khusus Sesuai SOP Perusahaan",
+                    "AI Sales & Inventory Forecasting",
+                    "Integrasi WhatsApp & Notifikasi Otomatis",
+                    "Pendampingan & Onboarding Khusus",
+                    "Perjanjian SLA & Skema Multi-Holding",
                   ].map((t, i) => (
                     <div key={i} className="flex items-center gap-2">
                       <CheckCircle2 className="w-4 h-4 text-blue-400" /> {t}
@@ -998,12 +1011,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartSetup }) => {
                   ))}
                 </div>
               </div>
-              <button
-                onClick={() => setCheckoutTier("EXCLUSIVE")}
-                className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black uppercase tracking-wider transition mt-6 cursor-pointer"
+
+              <a
+                href="https://wa.me/6285722027326?text=Halo%20Alma,%20saya%20ingin%20konsultasi%20langsung%20terkait%20solusi%20Enterprise%20ALMA%20ERP"
+                target="_blank"
+                rel="noreferrer"
+                className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black uppercase tracking-wider transition mt-6 flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-blue-500/25"
               >
-                Beli Lisensi Eksklusif AI
-              </button>
+                <Phone className="w-4 h-4" /> Konsultasi dengan Alma
+              </a>
             </LiquidGlass>
           </div>
         </section>

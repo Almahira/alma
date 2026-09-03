@@ -46,6 +46,18 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
         });
         break;
 
+      case "CATEGORY_ARCHIVED":
+        if (this.categories.has(aggregateId)) {
+          this.categories.get(aggregateId).status = "Arsip";
+        }
+        break;
+
+      case "UOM_ARCHIVED":
+        if (this.uoms.has(aggregateId)) {
+          this.uoms.get(aggregateId).status = "Arsip";
+        }
+        break;
+
       case "PRODUCT_CREATED":
         this.products.set(aggregateId, {
           id: aggregateId,

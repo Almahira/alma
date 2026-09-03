@@ -150,10 +150,10 @@ router.post("/create-snap", async (req: Request, res: Response) => {
     }
 
     const orderId = `ALMA-ORD-${ulid()}`;
-    const amount = tier === "EXCLUSIVE" ? 1499000 : 499000;
+    const amount = tier === "EXCLUSIVE" ? 5489000 : 5489000;
     const tierName =
       tier === "EXCLUSIVE" ? "Paket Eksklusif AI" : "Paket Premium Enterprise";
-    const maxOutlets = tier === "EXCLUSIVE" ? 100 : 50; 
+    const maxOutlets = tier === "EXCLUSIVE" ? 100 : 50;
 
     const targetModules = [
       "mdl_organization",
@@ -170,7 +170,9 @@ router.post("/create-snap", async (req: Request, res: Response) => {
 
     const serverKey = process.env.MIDTRANS_SERVER_KEY;
     if (!serverKey) {
-      return res.status(500).json({ error: "MIDTRANS_SERVER_KEY belum diatur di .env" });
+      return res
+        .status(500)
+        .json({ error: "MIDTRANS_SERVER_KEY belum diatur di .env" });
     }
 
     const isProduction = process.env.MIDTRANS_IS_PRODUCTION === "true";
@@ -179,7 +181,8 @@ router.post("/create-snap", async (req: Request, res: Response) => {
       : "https://app.sandbox.midtrans.com/snap/v1/transactions";
 
     const authString = Buffer.from(`${serverKey}:`).toString("base64");
-    const frontendUrl = process.env.FRONTEND_URL || "https://alma-client-unv.vercel.app";
+    const frontendUrl =
+      process.env.FRONTEND_URL || "https://alma-client-unv.vercel.app";
 
     const snapPayload = {
       transaction_details: {
@@ -290,7 +293,9 @@ router.post("/notification", async (req: Request, res: Response) => {
 
       const masterSecretKey = process.env.ALMA_MASTER_SECRET_KEY;
       if (!masterSecretKey || masterSecretKey === "ALMA_SECRET_DEV_KEY") {
-        throw new Error("FATAL ERROR: ALMA_MASTER_SECRET_KEY produksi belum dikonfigurasi di .env");
+        throw new Error(
+          "FATAL ERROR: ALMA_MASTER_SECRET_KEY produksi belum dikonfigurasi di .env",
+        );
       }
 
       const allowedModules = (order.allowedModules as string[]) || [
@@ -461,10 +466,12 @@ router.get("/order-status/:orderId", async (req: Request, res: Response) => {
       ];
 
       const maxOutlets = order.tier === "EXCLUSIVE" ? 100 : 50;
-      
+
       const masterSecretKey = process.env.ALMA_MASTER_SECRET_KEY;
       if (!masterSecretKey || masterSecretKey === "ALMA_SECRET_DEV_KEY") {
-        throw new Error("FATAL ERROR: ALMA_MASTER_SECRET_KEY produksi belum dikonfigurasi di .env");
+        throw new Error(
+          "FATAL ERROR: ALMA_MASTER_SECRET_KEY produksi belum dikonfigurasi di .env",
+        );
       }
 
       const token = LicenseManager.generateLicenseToken(

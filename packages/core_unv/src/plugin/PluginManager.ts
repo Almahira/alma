@@ -3,6 +3,7 @@ import { globalCommandBus } from "../cqrs/CommandBus";
 import { ClientPlugin, UniversalPlugin } from "./types";
 import { globalUpcaster } from "../cqrs/UpcasterRegistry";
 import { globalRegistry } from "../cqrs/UniversalRegistry";
+import { CommandGuard } from "../cqrs/CommandGuard";
 
 export class PluginManager<T extends UniversalPlugin> {
   private plugins = new Map<string, T>();
@@ -59,6 +60,10 @@ export class PluginManager<T extends UniversalPlugin> {
         clientPlugin
           .registerProjections()
           .forEach((p) => globalRegistry.register(p));
+      }
+
+      if (clientPlugin.registerValidationRules) {
+        CommandGuard.registerRules(clientPlugin.registerValidationRules());
       }
     }
 

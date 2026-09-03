@@ -47,6 +47,19 @@ export const PlusalesPlugin: ClientPlugin & ServerPlugin = {
     },
   ],
   registerCommandHandlers: () => plusalesCommandHandlers,
+
+  registerValidationRules: () => [
+    {
+      commandType: "CREATE_PLUSALES",
+      targetAggregate: "PLUSALES_DOCUMENT",
+      collectionKey: "documents",
+      matchFields: ["date"],
+      scopeBy: ["outletId"],
+      errorMessage:
+        "Rekapitulasi penjualan untuk tanggal ini sudah pernah diinput pada cabang ini!",
+    },
+  ],
+
   registerEventHandlers: () => plusalesHandlers,
   onEnable: () => console.log("[MDL_PLUSALES] Modul Aktif."),
   onDisable: () => console.log("[MDL_PLUSALES] Non-aktif."),

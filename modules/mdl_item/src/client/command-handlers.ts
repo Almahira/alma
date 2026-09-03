@@ -97,6 +97,68 @@ export const itemCommandHandlers: CommandHandler[] = [
       );
     },
   },
+
+  {
+    commandType: "ARCHIVE_CATEGORY",
+    execute: async (cmd: Command) => {
+      const nextVer =
+        (await globalLedger.getAggregateVersion(cmd.payload.id)) + 1;
+      await globalLedger.appendEvent(
+        "CATEGORY_ARCHIVED",
+        cmd.payload.id,
+        "ITEM_CATEGORY",
+        nextVer,
+        {},
+        getActiveActor(),
+      );
+    },
+  },
+  {
+    commandType: "ARCHIVE_UOM",
+    execute: async (cmd: Command) => {
+      const nextVer =
+        (await globalLedger.getAggregateVersion(cmd.payload.id)) + 1;
+      await globalLedger.appendEvent(
+        "UOM_ARCHIVED",
+        cmd.payload.id,
+        "ITEM_UOM",
+        nextVer,
+        {},
+        getActiveActor(),
+      );
+    },
+  },
+
+  {
+    commandType: "RESTORE_CATEGORY",
+    execute: async (cmd: Command) => {
+      const nextVer =
+        (await globalLedger.getAggregateVersion(cmd.payload.id)) + 1;
+      await globalLedger.appendEvent(
+        "CATEGORY_RESTORED",
+        cmd.payload.id,
+        "ITEM_CATEGORY",
+        nextVer,
+        {},
+        getActiveActor(),
+      );
+    },
+  },
+  {
+    commandType: "RESTORE_UOM",
+    execute: async (cmd: Command) => {
+      const nextVer =
+        (await globalLedger.getAggregateVersion(cmd.payload.id)) + 1;
+      await globalLedger.appendEvent(
+        "UOM_RESTORED",
+        cmd.payload.id,
+        "ITEM_UOM",
+        nextVer,
+        {},
+        getActiveActor(),
+      );
+    },
+  },
   // Di dalam modules/mdl_item/src/client/command-handlers.ts:
 
   {

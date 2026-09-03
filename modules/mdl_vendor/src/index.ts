@@ -59,6 +59,26 @@ export const VendorPlugin: ClientPlugin & ServerPlugin = {
     return vendorCommandHandlers;
   },
 
+  registerValidationRules: () => [
+    {
+      commandType: "CREATE_VENDOR",
+      targetAggregate: "VENDOR",
+      collectionKey: "vendors",
+      matchFields: ["name"],
+      scopeBy: ["companyId"],
+      errorMessage:
+        "Vendor dengan nama ini sudah terdaftar di perusahaan Anda!",
+    },
+    {
+      commandType: "UPDATE_VENDOR",
+      targetAggregate: "VENDOR",
+      collectionKey: "vendors",
+      matchFields: ["name"],
+      scopeBy: ["companyId"],
+      errorMessage: "Nama vendor tersebut sudah digunakan oleh vendor lain!",
+    },
+  ],
+
   registerEventHandlers: () => {
     return vendorHandlers;
   },
