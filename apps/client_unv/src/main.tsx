@@ -27,7 +27,12 @@ import { IntegrityChecker } from "../../../packages/core_unv/src/ledger/Integrit
 import { InitialLoadingScreen } from "./shared-ui/InitialLoadingScreen";
 import { getApiUrl } from "../../../packages/core_unv/src/config/env";
 
-async function purgeLocalDataAndRedirect(targetUrl: string = "/") {
+// =========================================================================
+// AUTO-PURGE DATABASE LOKAL (JIKA SERVER DI-RESET / VIRGIN STATE)
+// =========================================================================
+async function purgeLocalDataAndRedirect(
+  targetUrl: string = "https://alma-client-unv.vercel.app/",
+) {
   console.warn(
     "[SYSTEM RESET] Terdeteksi server virgin. Membersihkan storage lokal...",
   );
@@ -38,9 +43,10 @@ async function purgeLocalDataAndRedirect(targetUrl: string = "/") {
     }
   } catch {}
 
-  // Hapus semua IndexedDB secara fisik
+  // Hapus database lokal secara fisik
   if (typeof window !== "undefined" && window.indexedDB) {
     indexedDB.deleteDatabase("alma_unv_ledger");
+    indexedDB.deleteDatabase("alma_demo_ledger");
     indexedDB.deleteDatabase("ALMA_unv_blob_queue");
   }
 
@@ -168,33 +174,32 @@ function SystemBootstrapper() {
     const bootEngine = async () => {
       try {
         // ============================================================
-        // GUARD PEMBERSIH MODE DEMO (JIKA TAB PERNAH DITUTUP)
-        // Diletakkan paling awal sebelum RxDB dimuat untuk mencegah
-        // sisa data demo tertinggal saat user menutup tab dan kembali.
+        // 1. GUARD PEMBERSIH MODE DEMO (JIKA TAB PERNAH DITUTUP)
         // ============================================================
-        const isDemoMarked =
-          localStorage.getItem("__unv_is_demo") === "true";
+        const isDemoMarked = localStorage.getItem("__unv_is_demo") === "true";
         const hasActiveDemoSession = sessionStorage.getItem(
           "__alma_demo_session",
         );
 
-        // Jika localStorage bertanda demo tapi tab sebelumnya sudah ditutup (sessionStorage hilang)
+        // Jika localStorage bertanda demo tapi tab sebelumnya sudah ditutup
         if (isDemoMarked && !hasActiveDemoSession) {
           console.warn(
-            "[DEMO RESET] Sesi demo telah berakhir. Membersihkan data...",
+            "[DEMO RESET] Sesi demo telah berakhir. Membersihkan database demo...",
           );
           if (typeof window !== "undefined" && window.indexedDB) {
-            indexedDB.deleteDatabase("alma_unv_ledger");
-            indexedDB.deleteDatabase("ALMA_unv_blob_queue");
+            indexedDB.deleteDatabase("alma_demo_ledger");
           }
           localStorage.clear();
           window.location.href = "/";
           return;
         }
 
-        // === PENGECEKAN PRESISI: SERVER VIRGIN VS SERVER OFFLINE ===
+        // ============================================================
+        // 2. PENGECEKAN PRESISI: SERVER VIRGIN VS SERVER OFFLINE
+        // Hanya dieksekusi untuk aplikasi riil (dilewati saat mode demo)
+        // ============================================================
         const localToken = localStorage.getItem("__unv_deviceToken");
-        if (localToken && navigator.onLine) {
+        if (!isDemoMarked && localToken && navigator.onLine) {
           try {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 3500);
@@ -205,7 +210,7 @@ function SystemBootstrapper() {
 
             if (res.ok) {
               const statusData = await res.json();
-              // Server ONLINE dan database-nya kosong (Virgin)
+              // Server ONLINE dan database-nya kosong (Virgin State)
               if (statusData.isVirgin === true) {
                 await purgeLocalDataAndRedirect(
                   "https://alma-client-unv.vercel.app/",
@@ -214,12 +219,14 @@ function SystemBootstrapper() {
               }
             }
           } catch (netErr) {
-            // Server OFFLINE atau timeout: Jangan hapus apapun, biarkan mode offline bekerja
+            // Server OFFLINE atau timeout: Jangan hapus data, biarkan mode offline bekerja
             console.info(
               "[BOOT] Server tidak dapat dihubungi, melanjutkan mode OFFLINE-FIRST.",
             );
           }
         }
+
+        // 3. BOOTING ENGINE UTAMA
         await manager.boot();
         await EventBus.bootAndReplay();
         globalFileDaemon.start();
