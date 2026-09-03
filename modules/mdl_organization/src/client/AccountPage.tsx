@@ -22,16 +22,20 @@ const UserAccountForm: React.FC<{
 }> = ({ isEditMode, initialData, onClose }) => {
   const { openAlert } = useUniversalModal();
   const { employees, positions } = useOrgStore();
-  const [formData, setFormData] = useState<any>(
-    initialData || { role: "STAFF" },
-  );
+  const [formData, setFormData] = useState<any>({
+    role: "STAFF",
+    ...(initialData || {}),
+  });
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       await globalCommandBus.execute({
         type: isEditMode ? "UPDATE_USER_ACCOUNT" : "CREATE_USER_ACCOUNT",
-        payload: formData,
+        payload: {
+          ...formData,
+          role: formData.role || "STAFF",
+        },
       });
       onClose();
     } catch (err: any) {

@@ -423,6 +423,7 @@ export const organizationHandlers: Record<
 
   // 8. USER ACCOUNTS
   USER_ACCOUNT_CREATED: async (tx, event) => {
+    const validRole = event.payload.role || "STAFF";
     await tx
       .insert(schema.userAccounts)
       .values({
@@ -433,8 +434,8 @@ export const organizationHandlers: Record<
           event.payload.passwordHash ||
           event.payload.password ||
           "DEFAULT_HASH",
-        pin: event.payload.pin || null, // <-- SIMPAN PIN
-        role: event.payload.role,
+        pin: event.payload.pin || null,
+        role: validRole,
         positionId: event.payload.positionId || null,
         isActive: true,
         aggregateVersion: event.aggregateVersion,
@@ -443,11 +444,11 @@ export const organizationHandlers: Record<
       .onConflictDoUpdate({
         target: schema.userAccounts.id,
         set: {
-          role: event.payload.role,
+          role: validRole,
           positionId: event.payload.positionId || null,
           passwordHash:
             event.payload.passwordHash || event.payload.password || undefined,
-          pin: event.payload.pin || undefined, // <-- UPDATE PIN JIKA ADA
+          pin: event.payload.pin || undefined,
           aggregateVersion: event.aggregateVersion,
           lastEventId: event.id,
           updatedAt: new Date(),

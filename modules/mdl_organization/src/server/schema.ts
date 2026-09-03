@@ -214,7 +214,7 @@ export const userAccounts = pgTable("user_accounts", {
   username: varchar("username", { length: 50 }).notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   pin: varchar("pin", { length: 10 }),
-  role: varchar("role", { length: 50 }).notNull(),
+  role: varchar("role", { length: 50 }).notNull().default("STAFF"),
   positionId: text("position_id"),
   lastLogin: timestamp("last_login"),
   isActive: boolean("is_active").default(true),
