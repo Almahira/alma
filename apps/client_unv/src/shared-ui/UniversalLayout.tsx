@@ -1111,17 +1111,17 @@ export function UniversalLayout({
 
         <header className="h-16 bg-(--bg-header)/80 backdrop-blur-xl border-b border-(--border-color) flex items-center justify-between px-5 shrink-0 z-40 relative">
           <div
-            className={`flex items-center gap-3 w-64 shrink-0 cursor-pointer px-3 py-1.5 rounded-2xl ${glassInputStyle} hover:border-orange-500/30`}
+            className={`flex items-center gap-3 w-44 shrink-0 cursor-pointer px-3 py-1 rounded-2xl ${glassInputStyle} hover:border-orange-500/30`}
             onClick={() => setLogoAnim((prev) => !prev)}
           >
-            <div className="relative w-9 h-9 flex items-center justify-center perspective-200">
+            <div className="relative w-8 h-8 flex items-center justify-center perspective-200">
               <div
                 className={`w-full h-full flex items-center justify-center transform-style-3d ${logoAnim ? "animate-[logo-pop_0.8s_ease-out]" : "animate-[spin_18s_linear_infinite]"}`}
               >
                 <span className="absolute font-['Syne',sans-serif] font-extrabold text-3xl text-orange-500/30 -translate-z-2 blur-sm">
                   Z
                 </span>
-                <span className="absolute font-['Syne',sans-serif] font-extrabold text-3xl bg-linear-to-br from-orange-400 via-orange-500 to-yellow-400 bg-clip-text text-transparent drop-shadow-[0_0_10px_rgba(244,121,62,0.6)]">
+                <span className="absolute font-['Syne',sans-serif] font-extrabold text-3lg bg-linear-to-br from-orange-400 via-orange-500 to-yellow-400 bg-clip-text text-transparent drop-shadow-[0_0_10px_rgba(244,121,62,0.6)]">
                   Z
                 </span>
               </div>
@@ -1160,24 +1160,11 @@ export function UniversalLayout({
           <div className="flex items-center gap-3 shrink-0">
             <button
               onClick={() => navigate("/dashboard/executive")}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black uppercase text-orange-500 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 transition cursor-pointer shadow-xs"
-              title="Buka Executive Owner Dashboard"
-            >
-              <LayoutDashboard className="w-4 h-4 text-orange-500" />
-              <span className="hidden md:inline">Executive Portal</span>
+              className="p-2 rounded-full text-orange-500 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 transition cursor-pointer shadow-xs"
+              title="Buka Executive Owner Dashboard">
+              <LayoutDashboard className="w-4 h-4" />
             </button>
-            {/* ================================================================= */}
-            {/* KAPSUL "MODUL CONTROL" (KLIK UNTUK KONFIGURASI MODUL) */}
-            {/* ================================================================= */}
-            <button
-              onClick={() => setIsModuleManagerOpen(true)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium text-(--text-primary) ${glassInputStyle} hover:border-orange-500/40 cursor-pointer`}
-              title="Klik untuk Mengatur &amp; Mengaktifkan Modul"
-            >
-              <span className="w-2 h-2 rounded-full bg-teal-400 shadow-[0_0_8px_rgba(46,196,182,0.6)]"></span>
-              <span>{workspaceName}</span>
-            </button>
-
+           
             <div className="h-6 w-px bg-(--border-color)" />
 
             <button
@@ -1507,6 +1494,20 @@ export function UniversalLayout({
                 DATA MANAGER
               </span>
             </button>
+             {/* ================================================================= */}
+            {/* KAPSUL "MODUL CONTROL" (KLIK UNTUK KONFIGURASI MODUL) */}
+            {/* ================================================================= */}
+            <button
+              onClick={() => setIsModuleManagerOpen(true)}
+              className="p-1 text-(--text-secondary) hover:text-orange-500 hover:bg-(--surface-hover) rounded transition-colors cursor-pointer flex items-center gap-1.5"
+              title="Klik untuk Mengatur & Mengaktifkan Modul">
+              <Settings className="w-3.5 h-3.5" />
+              <span className="font-bold tracking-wider text-[10px]">
+                MODUL CONTROL
+              </span>
+              <span className="text-(--text-primary) font-bold">{workspaceName}</span>
+            </button>
+
           </div>
         </footer>
 
