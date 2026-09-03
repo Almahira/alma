@@ -376,6 +376,66 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartSetup }) => {
     }
   };
 
+  // ============================================================
+  // FUNGSI INSTANT DEMO MODE (BARU)
+  // ============================================================
+  const handleLaunchDemo = () => {
+    // 1. Bersihkan sisa data lama jika ada
+    localStorage.clear();
+
+    // 2. Set Konteks Perangkat & Sesi Demo
+    localStorage.setItem("__unv_is_demo", "true");
+    sessionStorage.setItem("__alma_demo_session", "true"); // Kunci pembersih tab
+    localStorage.setItem("__unv_serverUrl", "http://127.0.0.1:0"); // Isolasi dari server nyata
+    localStorage.setItem("__unv_deviceToken", "DEMO_TOKEN_GUEST");
+    localStorage.setItem("__unv_nodeId", "NODE_DEMO_BROWSER");
+    localStorage.setItem("__unv_companyId", "COMP_DEMO_RESTO");
+    localStorage.setItem("__unv_regionId", "REG_DEMO_PUSAT");
+    localStorage.setItem("__unv_outletId", "OUT_DEMO_CABANG");
+    localStorage.setItem("__unv_license_tier", "EXCLUSIVE");
+    localStorage.setItem(
+      "__unv_allowed_modules",
+      JSON.stringify([
+        "mdl_organization",
+        "mdl_item",
+        "mdl_vendor",
+        "mdl_receiving",
+        "mdl_warehouse",
+        "mdl_plusales",
+        "mdl_executivepanel",
+      ]),
+    );
+
+    // 3. Set Akun Aktif Otomatis (Tanpa Form Login)
+    localStorage.setItem(
+      "__unv_activeUser",
+      JSON.stringify({
+        id: "USR_DEMO",
+        employeeId: "EMP_DEMO",
+        username: "demo.owner@almazain.my.id",
+        fullName: "DEMO GUEST USER",
+        role: "SUPER_ADMIN",
+      }),
+    );
+
+    // 4. Langsung Lompat ke Dalam Sistem ERP
+    window.location.href = "/app";
+  };
+
+  // ============================================================
+  // FUNGSI NAVIGASI SCROLL HALAMAN
+  // ============================================================
+  const handleNavClick = (
+    tab: "FILOSOFI" | "BANDING" | "MODUL" | "PAKET",
+    sectionId: string,
+  ) => {
+    setActiveTab(tab);
+    const element = document.getElementById(sectionId);
+    if (element) {
+      element.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  };
+
   const comparisons: ComparisonItem[] = [
     {
       dimensi: "Filosofi Data",
@@ -538,35 +598,53 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartSetup }) => {
               </div>
             </div>
             <nav className="hidden md:flex items-center gap-6 text-xs font-bold text-slate-400">
-              {["FILOSOFI", "BANDING", "MODUL", "PAKET"].map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab as any)}
-                  className={`hover:text-orange-400 transition cursor-pointer ${
-                    activeTab === tab ? "text-orange-400" : ""
-                  }`}
-                >
-                  {tab === "BANDING"
-                    ? "Perbandingan"
-                    : tab === "MODUL"
-                      ? "Modul Bisnis"
-                      : tab === "PAKET"
-                        ? "Paket & Lisensi"
-                        : "Filosofi"}
-                </button>
-              ))}
+              <button
+                onClick={() => handleNavClick("FILOSOFI", "filosofi")}
+                className={`hover:text-orange-400 transition cursor-pointer ${
+                  activeTab === "FILOSOFI" ? "text-orange-400" : ""
+                }`}
+              >
+                Filosofi
+              </button>
+              <button
+                onClick={() => handleNavClick("BANDING", "perbandingan")}
+                className={`hover:text-orange-400 transition cursor-pointer ${
+                  activeTab === "BANDING" ? "text-orange-400" : ""
+                }`}
+              >
+                Perbandingan
+              </button>
+              <button
+                onClick={() => handleNavClick("MODUL", "modul")}
+                className={`hover:text-orange-400 transition cursor-pointer ${
+                  activeTab === "MODUL" ? "text-orange-400" : ""
+                }`}
+              >
+                Modul Bisnis
+              </button>
+              <button
+                onClick={() => handleNavClick("PAKET", "paket")}
+                className={`hover:text-orange-400 transition cursor-pointer ${
+                  activeTab === "PAKET" ? "text-orange-400" : ""
+                }`}
+              >
+                Paket & Lisensi
+              </button>
             </nav>
             <button
-              onClick={() => handleGoToSetup()}
+              onClick={handleLaunchDemo}
               className="px-5 py-2.5 bg-linear-to-r from-orange-500 to-orange-600 hover:from-orange-600 text-white rounded-xl text-xs font-black uppercase tracking-wider transition shadow-lg flex items-center gap-2 cursor-pointer"
             >
-              Aktivasi Mesin Kasir <ArrowRight className="w-4 h-4" />
+              Start Demo ERP <ArrowRight className="w-4 h-4" />
             </button>
           </header>
         </LiquidGlass>
 
-        {/* HERO SECTION */}
-        <section className="relative pt-24 pb-24 px-6 overflow-hidden">
+        {/* HERO SECTION (id="filosofi") */}
+        <section
+          id="filosofi"
+          className="relative pt-24 pb-24 px-6 overflow-hidden scroll-mt-24"
+        >
           <motion.div
             className="max-w-5xl mx-auto text-center relative z-10 space-y-6"
             style={{ y: textY }}
@@ -777,8 +855,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartSetup }) => {
           </div>
         </section>
 
-        {/* TABEL PERBANDINGAN */}
-        <section className="py-16 px-6 max-w-7xl mx-auto">
+        {/* TABEL PERBANDINGAN (id="perbandingan") */}
+        <section
+          id="perbandingan"
+          className="py-16 px-6 max-w-7xl mx-auto scroll-mt-24"
+        >
           <div className="text-center space-y-2 mb-8">
             <h2 className="text-3xl md:text-4xl font-black text-white uppercase tracking-tight">
               ALMA vs ERP Konvensional
@@ -833,8 +914,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartSetup }) => {
           </LiquidGlass>
         </section>
 
-        {/* MODUL BISNIS */}
-        <section className="py-16 px-6">
+        {/* MODUL BISNIS (id="modul") */}
+        <section id="modul" className="py-16 px-6 scroll-mt-24">
           <div className="max-w-6xl mx-auto space-y-8">
             <div className="text-center space-y-2">
               <h2 className="text-3xl md:text-4xl font-black text-white uppercase tracking-tight">
@@ -877,8 +958,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartSetup }) => {
           </div>
         </section>
 
-        {/* PAKET & LISENSI */}
-        <section className="py-16 px-6 max-w-6xl mx-auto space-y-8">
+        {/* PAKET & LISENSI (id="paket") */}
+        <section
+          id="paket"
+          className="py-16 px-6 max-w-6xl mx-auto space-y-8 scroll-mt-24"
+        >
           <div className="text-center space-y-2">
             <h2 className="text-3xl md:text-4xl font-black text-white uppercase tracking-tight">
               Pilihan Paket &amp; Lisensi
