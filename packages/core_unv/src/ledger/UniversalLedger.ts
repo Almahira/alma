@@ -205,39 +205,38 @@ export class UniversalLedger {
     if (this.isSyncing) return;
     this.isSyncing = true;
     let isBackpressureHold = false;
-
     try {
-      const txQueryParams = new URLSearchParams({
-        deviceId: this.nodeId,
-      });
       const companyId = localStorage.getItem("__unv_companyId");
       const regionId = localStorage.getItem("__unv_regionId");
       const outletId = localStorage.getItem("__unv_outletId");
 
-      if (companyId) txQueryParams.append("companyId", companyId);
-      if (regionId) txQueryParams.append("regionId", regionId);
-      if (outletId) txQueryParams.append("outletId", outletId);
+      // Siapkan Query Params Spasial yang Ketat
+      const queryParams = new URLSearchParams({
+        deviceId: this.nodeId,
+      });
+      if (companyId) queryParams.append("companyId", companyId);
+      if (regionId) queryParams.append("regionId", regionId);
+      if (outletId) queryParams.append("outletId", outletId);
 
       const serverEvents = await globalCircuitBreaker.fire(async () => {
         const [resSystem, resTx] = await Promise.all([
           fetch(
-            getApiUrl(`/api/events/pull/system?deviceId=${this.nodeId}`),
+            getApiUrl(`/api/events/pull/system?${queryParams.toString()}`),
           ).catch(() => null),
-          fetch(getApiUrl(`/api/events/pull/tx?deviceId=${this.nodeId}`)).catch(
-            () => null,
-          ),
+          // ---> GUNAKAN queryParams.toString() AGAR SERVER MENERIMA OUTLET_ID & REGION_ID <---
+          fetch(
+            getApiUrl(`/api/events/pull/tx?${queryParams.toString()}`),
+          ).catch(() => null),
         ]);
 
         let eventsSys: any[] = [];
         let eventsTx: any[] = [];
-
         if (resSystem && resSystem.ok) {
           eventsSys = await resSystem.json();
         }
         if (resTx && resTx.ok) {
           eventsTx = await resTx.json();
         }
-
         return [...(eventsSys || []), ...(eventsTx || [])];
       });
 

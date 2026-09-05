@@ -75,6 +75,7 @@ const InitialStockModal: React.FC<{
         </label>
         <input
           type="number"
+          step="any"
           required
           autoFocus
           value={qty}
@@ -135,18 +136,19 @@ export function StockOpnamePage() {
   );
   const [itemNotes, setItemNotes] = useState<Record<string, string>>({});
 
-  // Cek apakah hari ini sudah pernah dilakukan closing opname
+  // Cek apakah hari ini sudah pernah dilakukan closing opname di unit ini
   const isAlreadyAdjustedToday = useMemo(() => {
     return opnames.some(
       (o) =>
-        o.outletId === localOutletId &&
+        (!localOutletId || o.outletId === localOutletId) &&
+        (!localCompanyId || o.companyId === localCompanyId) &&
         o.date.startsWith(opnameDate) &&
         o.isActive !== false,
     );
-  }, [opnames, localOutletId, opnameDate]);
+  }, [opnames, localOutletId, localCompanyId, opnameDate]);
 
   // =========================================================================
-  // KALKULASI OTOMATIS MATRIKS INVENTORI PER ITEM
+  // KALKULASI OTOMATIS MATRIKS INVENTORI PER ITEM (TERISOLASI CABANG)
   // =========================================================================
   const opnameMatrix = useMemo(() => {
     // Hanya barang fisik (bukan jasa)
@@ -159,17 +161,22 @@ export function StockOpnamePage() {
       const catName =
         categories.find((c) => c.id === p.categoryId)?.name || "-";
 
-      // 1. Stok Awal (Baseline)
-      const initialStockKey = `${localOutletId}_${p.id}`;
+      // 1. Stok Awal (Baseline) per Outlet / Lokasi
+      const initialStockKey = `${localOutletId || localRegionId}_${p.id}`;
       const initialStock = initialStocks[initialStockKey] || 0;
 
-      // 2. Stok Masuk (Receiving)
+      // 2. Stok Masuk (Receiving) - Tersekat ketat per Cabang/Holding
       const receivingItemsForProduct = receivingDocs
         .filter((doc) => {
-          const matchOutlet = !localOutletId || doc.outletId === localOutletId;
+          const matchCompany =
+            !localCompanyId || doc.companyId === localCompanyId;
+          const matchOutlet = localOutletId
+            ? doc.outletId === localOutletId
+            : !doc.outletId &&
+              (!localRegionId || doc.regionId === localRegionId);
           const matchActive =
             doc.status !== "CANCELLED" && doc.isActive !== false;
-          return matchOutlet && matchActive;
+          return matchCompany && matchOutlet && matchActive;
         })
         .flatMap((doc) => doc.items || [])
         .filter((it) => it.itemId === p.id && !it.isExpense);
@@ -179,22 +186,24 @@ export function StockOpnamePage() {
         0,
       );
 
-      // 3. Stok Keluar (Distribusi Divisi)
+      // 3. Stok Keluar (Distribusi Divisi) - Tersekat ketat per Cabang
       const stockOut = distributions
         .filter(
           (d) =>
             d.itemId === p.id &&
-            d.outletId === localOutletId &&
+            (localOutletId ? d.outletId === localOutletId : !d.outletId) &&
+            (!localCompanyId || d.companyId === localCompanyId) &&
             d.isActive !== false,
         )
         .reduce((sum, d) => sum + Number(d.qty || 0), 0);
 
-      // 4. Stok Rusak / Basi / Terbuang (Spoil & Waste)
+      // 4. Stok Rusak / Basi / Terbuang (Spoil & Waste) - Tersekat ketat per Cabang
       const spoilWasteQty = spoilWastes
         .filter(
           (sw) =>
             sw.itemId === p.id &&
-            sw.outletId === localOutletId &&
+            (localOutletId ? sw.outletId === localOutletId : !sw.outletId) &&
+            (!localCompanyId || sw.companyId === localCompanyId) &&
             sw.isActive !== false,
         )
         .reduce(
@@ -204,7 +213,7 @@ export function StockOpnamePage() {
 
       // 5. Sisa Stok Sistem Riil (Termasuk Pengurangan Spoil & Waste)
       const rawSystemStock = initialStock + stockIn - stockOut - spoilWasteQty;
-      const systemStock = parseFloat(rawSystemStock.toFixed(2));
+      const systemStock = parseFloat(rawSystemStock.toFixed(4));
 
       // 6. Harga HPP Terbaru & Trend Harga
       const scopeKey =
@@ -213,20 +222,23 @@ export function StockOpnamePage() {
         p.pricing?.[scopeKey] ||
         p.pricing?.[Object.keys(p.pricing || {})[0]] ||
         {};
-      const currentPrice = pricing.basePrice || 0;
+      const currentPrice = Math.round(Number(pricing.basePrice || 0));
 
       let previousPrice = currentPrice;
       if (receivingItemsForProduct.length > 1) {
-        previousPrice =
-          receivingItemsForProduct[receivingItemsForProduct.length - 2].price ||
-          currentPrice;
+        previousPrice = Math.round(
+          Number(
+            receivingItemsForProduct[receivingItemsForProduct.length - 2]
+              .price || currentPrice,
+          ),
+        );
       }
 
       // 7. Hitungan Fisik & Selisih
       const physicalStock =
         physicalCounts[p.id] !== undefined ? physicalCounts[p.id] : systemStock;
-      const varianceQty = physicalStock - systemStock;
-      const varianceCost = varianceQty * currentPrice;
+      const varianceQty = parseFloat((physicalStock - systemStock).toFixed(4));
+      const varianceCost = Math.round(varianceQty * currentPrice);
       const note = itemNotes[p.id] || "";
 
       return {
@@ -273,13 +285,35 @@ export function StockOpnamePage() {
     );
   }, [opnameMatrix, searchTerm]);
 
+  // =========================================================================
+  // PERBAIKAN LEAK TAB 2: RIWAYAT BERITA ACARA TERSEKAT PER CABANG
+  // =========================================================================
+  const filteredOpnames = useMemo(() => {
+    return opnames.filter((o) => {
+      if (localOutletId && o.outletId && o.outletId !== localOutletId)
+        return false;
+      if (
+        !localOutletId &&
+        localRegionId &&
+        o.regionId &&
+        o.regionId !== localRegionId
+      )
+        return false;
+      if (localCompanyId && o.companyId && o.companyId !== localCompanyId)
+        return false;
+      return true;
+    });
+  }, [opnames, localOutletId, localRegionId, localCompanyId]);
+
   // Ringkasan Akumulasi Selisih
   const totalVarianceCost = useMemo(() => {
     return filteredMatrix.reduce((sum, it) => sum + it.varianceCost, 0);
   }, [filteredMatrix]);
 
   const totalVarianceQty = useMemo(() => {
-    return filteredMatrix.reduce((sum, it) => sum + it.varianceQty, 0);
+    return parseFloat(
+      filteredMatrix.reduce((sum, it) => sum + it.varianceQty, 0).toFixed(4),
+    );
   }, [filteredMatrix]);
 
   // Handle Input Fisik per Item
@@ -472,7 +506,7 @@ export function StockOpnamePage() {
                   : "text-(--text-secondary) hover:text-(--text-primary)"
               }`}
             >
-              RIWAYAT BERITA ACARA ({opnames.length})
+              RIWAYAT BERITA ACARA ({filteredOpnames.length})
             </button>
           </div>
 
@@ -568,7 +602,7 @@ export function StockOpnamePage() {
                           )}
                       </td>
 
-                      {/* STOK AWAL (BISA DI-SET JIKA BELUM PERNAH OPNAME / READ-ONLY JIKA SUDAH) */}
+                      {/* STOK AWAL */}
                       <td className="px-3 py-2.5 text-center font-mono">
                         {item.initialStock > 0 ? (
                           <span className="font-bold">{item.initialStock}</span>
@@ -633,7 +667,7 @@ export function StockOpnamePage() {
                         </div>
                       </td>
 
-                      {/* HITUNGAN FISIK RIIL (INPUT NUMBER) */}
+                      {/* HITUNGAN FISIK RIIL */}
                       <td className="px-4 py-2.5 text-center">
                         <input
                           type="number"
@@ -647,7 +681,7 @@ export function StockOpnamePage() {
                         />
                       </td>
 
-                      {/* SELISIH (VARIANCE QTY) */}
+                      {/* SELISIH */}
                       <td className="px-3 py-2.5 text-center font-mono font-black">
                         <span
                           className={`px-2 py-0.5 rounded text-[10px] ${
@@ -676,7 +710,7 @@ export function StockOpnamePage() {
                         Rp {item.varianceCost.toLocaleString()}
                       </td>
 
-                      {/* CATATAN ALASAN SELISIH */}
+                      {/* CATATAN */}
                       <td className="px-4 py-2.5">
                         <input
                           type="text"
@@ -695,7 +729,7 @@ export function StockOpnamePage() {
                 {filteredMatrix.length === 0 && (
                   <tr>
                     <td
-                      colSpan={11}
+                      colSpan={12}
                       className="p-12 text-center text-(--text-secondary) font-bold text-xs italic"
                     >
                       Belum ada katalog barang fisik untuk di-opname.
@@ -706,9 +740,7 @@ export function StockOpnamePage() {
             </table>
           </div>
         ) : (
-          /* ========================================================================= */
-          /* TAB 2: RIWAYAT BERITA ACARA STOK OPNAME LALU */
-          /* ========================================================================= */
+          /* TAB 2: RIWAYAT BERITA ACARA TERSEKAT PER CABANG */
           <div className="bg-(--bg-card) border border-(--border-color) rounded-2xl shadow-xs overflow-hidden">
             <table className="w-full text-left border-collapse">
               <thead>
@@ -723,7 +755,7 @@ export function StockOpnamePage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-(--border-color) text-xs font-semibold text-(--text-primary)">
-                {opnames.map((doc) => (
+                {filteredOpnames.map((doc) => (
                   <tr
                     key={doc.id}
                     className="hover:bg-(--surface-hover) transition"
@@ -771,13 +803,14 @@ export function StockOpnamePage() {
                     </td>
                   </tr>
                 ))}
-                {opnames.length === 0 && (
+                {filteredOpnames.length === 0 && (
                   <tr>
                     <td
                       colSpan={7}
                       className="p-12 text-center text-(--text-secondary) font-bold text-xs italic"
                     >
-                      Belum ada riwayat dokumen stok opname yang tersimpan.
+                      Belum ada riwayat dokumen stok opname yang tersimpan untuk
+                      unit ini.
                     </td>
                   </tr>
                 )}

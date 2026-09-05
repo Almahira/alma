@@ -162,6 +162,12 @@ export function WarehousePage() {
   // Filter Ledger Distribusi
   const filteredDistributions = useMemo(() => {
     return distributions.filter((d) => {
+      // ---> PENYEKATAN CABANG <---
+      if (localOutletId && d.outletId && d.outletId !== localOutletId)
+        return false;
+      if (localCompanyId && d.companyId && d.companyId !== localCompanyId)
+        return false;
+
       const matchStatus =
         viewStatus === "AKTIF" ? d.isActive !== false : d.isActive === false;
       const matchDivision =
@@ -170,7 +176,15 @@ export function WarehousePage() {
       const matchEnd = !dateEnd || new Date(d.date) <= new Date(dateEnd);
       return matchStatus && matchDivision && matchStart && matchEnd;
     });
-  }, [distributions, viewStatus, filterDivisionId, dateStart, dateEnd]);
+  }, [
+    distributions,
+    viewStatus,
+    filterDivisionId,
+    dateStart,
+    dateEnd,
+    localOutletId,
+    localCompanyId,
+  ]);
 
   // Statistik Total Biaya Serapan
   const totalCostPeriod = useMemo(() => {

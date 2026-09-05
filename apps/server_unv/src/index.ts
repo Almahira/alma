@@ -288,7 +288,6 @@ app.get("/api/events/pull/tx", async (req, res) => {
     );
 
     const txEventsRaw = await db.select().from(txEventJournal);
-
     const now = Date.now();
     const startOfCurrentMonth = getStartOfCurrentMonth();
     const twentyFourHoursAgo = now - 24 * 60 * 60 * 1000;
@@ -299,14 +298,42 @@ app.get("/api/events/pull/tx", async (req, res) => {
     const txAggregateMap = new Map<string, any[]>();
 
     txEventsRaw.forEach((evt) => {
-      // Filter Spasial: Jika level outlet, hanya tarik data outletnya
-      if (filterOutletId && evt.outletId && evt.outletId !== filterOutletId) {
-        return;
+      // ============================================================
+      // PENYEKATAN SPASIAL KETAT (ANTI KEBOCORAN DATA)
+      // ============================================================
+
+      // 1. FILTER PERUSAHAAN / HOLDING (MUTLAK)
+      if (filterCompanyId && evt.payload) {
+        try {
+          const p =
+            typeof evt.payload === "string"
+              ? JSON.parse(evt.payload)
+              : evt.payload;
+          const evtCompId = p.organization?.companyId || p.companyId;
+          if (evtCompId && evtCompId !== filterCompanyId) return;
+        } catch {}
       }
-      // Filter Spasial: Jika level region, hanya tarik data regionnya
-      if (filterRegionId && evt.regionId && evt.regionId !== filterRegionId) {
-        return;
+
+      // 2. JIKA PERANGKAT ADALAH CABANG OUTLET (Paling Ketat)
+      if (filterOutletId) {
+        // Outlet HANYA berhak menarik event miliknya sendiri!
+        // Event Gudang Region (outletId null) atau Outlet lain DITOLAK MUTLAK.
+        if (evt.outletId !== filterOutletId) {
+          return;
+        }
       }
+      // 3. JIKA PERANGKAT ADALAH GUDANG PUSAT / REGION (Tanpa Outlet)
+      else if (filterRegionId) {
+        // Gudang Region hanya berhak menarik event regionnya atau transaksi internalnya
+        if (evt.regionId !== filterRegionId) {
+          return;
+        }
+        // Jika event milik cabang spesifik, gudang pusat regional tidak perlu menarik transaksi kasir cabang
+        if (evt.outletId) {
+          return;
+        }
+      }
+
       if (!txAggregateMap.has(evt.aggregateId)) {
         txAggregateMap.set(evt.aggregateId, []);
       }

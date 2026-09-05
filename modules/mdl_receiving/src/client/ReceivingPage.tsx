@@ -283,6 +283,24 @@ export function ReceivingPage() {
   const filteredDocs = documents.filter((doc) => {
     if (doc.documentType !== activeTab) return false;
 
+    // ============================================================
+    // PERTAHANAN SPASIAL UI KASIR (DEFENSE IN DEPTH)
+    // ============================================================
+    const localOutletId = localStorage.getItem("__unv_outletId");
+    const localRegionId = localStorage.getItem("__unv_regionId");
+
+    // Jika mesin ini adalah Mesin Outlet Cabang:
+    if (localOutletId) {
+      // Wajib hanya menampilkan transaksi milik outlet ini
+      if (doc.outletId && doc.outletId !== localOutletId) return false;
+      // Jika doc.outletId kosong (milik Region/Gudang Pusat), sembunyikan dari cabang!
+      if (!doc.outletId) return false;
+    }
+    // Jika mesin ini adalah Mesin Gudang Region:
+    else if (localRegionId) {
+      if (doc.regionId && doc.regionId !== localRegionId) return false;
+    }
+
     // Filter Status Aktif vs Arsip
     const isDocActive = doc.isActive !== false;
     if (viewStatus === "AKTIF" && !isDocActive) return false;
@@ -296,7 +314,6 @@ export function ReceivingPage() {
     }
     if (dateStart && new Date(doc.date) < new Date(dateStart)) return false;
     if (dateEnd && new Date(doc.date) > new Date(dateEnd)) return false;
-
     const isPaid = doc.totalAmount - doc.paidAmount <= 0;
     if (filterStatus === "PAID" && !isPaid) return false;
     if (filterStatus === "UNPAID" && isPaid) return false;

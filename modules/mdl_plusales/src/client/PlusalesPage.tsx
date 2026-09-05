@@ -200,12 +200,20 @@ export function PlusalesPage() {
   // Filter Dokumen Berdasarkan Bulan & Status
   const filteredDocs = useMemo(() => {
     return documents.filter((d) => {
+      // ---> PENYEKATAN OUTLET MUTLAK <---
+      if (localOutletId && d.outletId && d.outletId !== localOutletId) {
+        return false;
+      }
+      if (localCompanyId && d.companyId && d.companyId !== localCompanyId) {
+        return false;
+      }
+
       const matchMonth = d.date && d.date.startsWith(selectedMonth);
       const matchStatus =
         viewStatus === "AKTIF" ? d.isActive !== false : d.isActive === false;
       return matchMonth && matchStatus;
     });
-  }, [documents, selectedMonth, viewStatus]);
+  }, [documents, selectedMonth, viewStatus, localOutletId, localCompanyId]);
 
   // Akumulasi Statistik Bulan Terpilih
   const monthlyStats = useMemo(() => {

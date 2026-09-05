@@ -357,12 +357,18 @@ export function SpoilWastePage() {
 
   const filteredList = useMemo(() => {
     return spoilWastes.filter((sw) => {
+      // ---> PENYEKATAN CABANG <---
+      if (localOutletId && sw.outletId && sw.outletId !== localOutletId)
+        return false;
+      if (localCompanyId && sw.companyId && sw.companyId !== localCompanyId)
+        return false;
+
       const matchStatus =
         viewStatus === "AKTIF" ? sw.isActive !== false : sw.isActive === false;
       const matchType = filterType === "ALL" ? true : sw.type === filterType;
       return matchStatus && matchType;
     });
-  }, [spoilWastes, viewStatus, filterType]);
+  }, [spoilWastes, viewStatus, filterType, localOutletId, localCompanyId]);
 
   const totalLossPeriod = useMemo(() => {
     return filteredList.reduce((sum, it) => sum + (it.totalLossCost || 0), 0);
