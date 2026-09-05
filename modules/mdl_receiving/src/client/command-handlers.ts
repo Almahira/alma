@@ -41,29 +41,42 @@ export const receivingCommandHandlers: CommandHandler[] = [
     execute: async (cmd: Command) => {
       const transactionId = `RCV_${ulid()}`;
       const activeActor = getActiveActor();
+
+      // Tanggal Nota Asli
       const documentDate = cmd.payload.date
         ? new Date(cmd.payload.date).toISOString()
         : new Date().toISOString();
-      const formattedItems = (cmd.payload.items || []).map((item: any) => ({
-        id: item.id || `RITM_${ulid()}`,
-        itemId: item.itemId,
-        name: item.name,
-        isExpense: item.isExpense || false,
-        qty: Number(item.qty) || 1,
-        receivedQty: Number(item.qty) || 1,
-        returnedQty: 0,
-        price: Number(item.price) || 0,
-        subtotal: (Number(item.qty) || 1) * (Number(item.price) || 0),
-        itemStatus: "RECEIVED",
-      }));
 
-      const totalQty = formattedItems.reduce(
+      // Format Item dengan pembulatan rupiah yang presisi
+      const formattedItems = (cmd.payload.items || []).map((item: any) => {
+        const itemQty = Number(item.qty) || 1;
+        const itemPrice = Math.round(Number(item.price) || 0);
+        const itemSubtotal = Math.round(
+          Number(item.subtotal) || itemQty * itemPrice,
+        );
+
+        return {
+          id: item.id || `RITM_${ulid()}`,
+          itemId: item.itemId,
+          name: item.name,
+          isExpense: item.isExpense || false,
+          qty: itemQty,
+          receivedQty: Number(item.receivedQty ?? itemQty) || 1,
+          returnedQty: Number(item.returnedQty) || 0,
+          price: itemPrice,
+          subtotal: itemSubtotal,
+          itemStatus: "RECEIVED",
+        };
+      });
+
+      const rawTotalQty = formattedItems.reduce(
         (sum: number, it: any) => sum + (it.isExpense ? 1 : it.qty),
         0,
       );
-      const grandTotal = formattedItems.reduce(
-        (sum: number, it: any) => sum + it.subtotal,
-        0,
+      const totalQty = parseFloat(rawTotalQty.toFixed(4));
+
+      const grandTotal = Math.round(
+        formattedItems.reduce((sum: number, it: any) => sum + it.subtotal, 0),
       );
 
       const companyId =
@@ -74,7 +87,7 @@ export const receivingCommandHandlers: CommandHandler[] = [
         cmd.payload.outletId || localStorage.getItem("__unv_outletId") || null;
       const isTempo = Boolean(cmd.payload.isTempo);
 
-      // BUNGKUS KE DALAM ALMA CANONICAL ENVELOPE DENGAN TANGGAL NOTA ASLI
+      // BUNGKUS KE DALAM ALMA CANONICAL ENVELOPE DENGAN TANGGAL NOTA ASLI & RUPIAH BULAT
       const canonicalPayload: AlmaTransactionEnvelope<{
         items: any[];
         isTempo: boolean;
@@ -85,7 +98,7 @@ export const receivingCommandHandlers: CommandHandler[] = [
         type: "RECEIVING",
         action: "CREATE_RECEIVING",
         status: isTempo ? "DRAFT" : "COMPLETED",
-        timestamp: documentDate, // <--- KUNCI: Gunakan documentDate
+        timestamp: documentDate,
         actor: {
           id: activeActor.userId,
           name: activeActor.userId,
@@ -187,6 +200,9 @@ export const receivingCommandHandlers: CommandHandler[] = [
       const paymentId = `RPAY_${ulid()}`;
       const activeActor = getActiveActor();
 
+      // Bulatkan nominal cicilan Rupiah
+      const paymentAmount = Math.round(Number(amount) || 0);
+
       let proofFileId: string | null = null;
       if (proofFileObj) {
         proofFileId = `PRF_${ulid()}`;
@@ -223,14 +239,14 @@ export const receivingCommandHandlers: CommandHandler[] = [
           outletId: localStorage.getItem("__unv_outletId") || null,
         },
         amount: {
-          subtotal: amount,
-          total: amount,
-          paid: amount,
+          subtotal: paymentAmount,
+          total: paymentAmount,
+          paid: paymentAmount,
           balance: 0,
         },
         data: {
           paymentId,
-          amount,
+          amount: paymentAmount,
           paymentMethod,
           paymentDate: paymentDate || new Date().toISOString(),
           proofFileId,
@@ -260,41 +276,53 @@ export const receivingCommandHandlers: CommandHandler[] = [
         date,
         invoiceNumber,
         vendorId,
+        paymentMethod,
       } = cmd.payload;
 
       const nextVer = (await globalLedger.getAggregateVersion(documentId)) + 1;
       const activeActor = getActiveActor();
 
-      // ---> PERBAIKAN: Gunakan tanggal form saat update <---
       const documentDate = date
         ? new Date(date).toISOString()
         : new Date().toISOString();
 
-      const formattedItems = (items || []).map((item: any) => ({
-        id: item.id || `RITM_${ulid()}`,
-        itemId: item.itemId,
-        name: item.name,
-        isExpense: item.isExpense || false,
-        qty: Number(item.qty) || 1,
-        receivedQty: Number(item.qty) || 1,
-        returnedQty: 0,
-        price: Number(item.price) || 0,
-        subtotal: (Number(item.qty) || 1) * (Number(item.price) || 0),
-        itemStatus: "RECEIVED",
-      }));
+      const formattedItems = (items || []).map((item: any) => {
+        const itemQty = Number(item.qty) || 1;
+        const itemPrice = Math.round(Number(item.price) || 0);
+        const itemSubtotal = Math.round(
+          Number(item.subtotal) || itemQty * itemPrice,
+        );
 
-      const grandTotal = formattedItems.reduce(
-        (acc: number, curr: any) => acc + curr.subtotal,
-        0,
+        return {
+          id: item.id || `RITM_${ulid()}`,
+          itemId: item.itemId,
+          name: item.name,
+          isExpense: item.isExpense || false,
+          qty: itemQty,
+          receivedQty: Number(item.receivedQty ?? itemQty) || 1,
+          returnedQty: Number(item.returnedQty) || 0,
+          price: itemPrice,
+          subtotal: itemSubtotal,
+          itemStatus: "RECEIVED",
+        };
+      });
+
+      const grandTotal = Math.round(
+        formattedItems.reduce(
+          (acc: number, curr: any) => acc + curr.subtotal,
+          0,
+        ),
       );
-      const totalQty = formattedItems.reduce(
+      const rawTotalQty = formattedItems.reduce(
         (acc: number, curr: any) => acc + (curr.isExpense ? 1 : curr.qty),
         0,
       );
+      const totalQty = parseFloat(rawTotalQty.toFixed(4));
 
       const canonicalPayload: AlmaTransactionEnvelope<{
         items: any[];
         isTempo: boolean;
+        paymentMethod: string;
         date: string;
       }> = {
         id: documentId,
@@ -333,6 +361,7 @@ export const receivingCommandHandlers: CommandHandler[] = [
         data: {
           items: formattedItems,
           isTempo: Boolean(isTempo),
+          paymentMethod: paymentMethod || "KASIR",
           date: documentDate,
         },
       };
@@ -514,6 +543,8 @@ export const receivingCommandHandlers: CommandHandler[] = [
       );
     },
   },
+
+  // 9. VOID CICILAN PEMBAYARAN
   {
     commandType: "VOID_RECEIVING_PAYMENT",
     execute: async (cmd: Command) => {
