@@ -6,6 +6,7 @@ import React, {
   useRef,
   createContext,
   useContext,
+  useMemo,
 } from "react";
 import {
   Search,
@@ -658,6 +659,286 @@ const RadialMenuPortal: React.FC<{
   );
 };
 
+// ========== KOMPONEN BARU: ConnectionStatus ==========
+const ConnectionStatus = React.memo(() => {
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [pingMs, setPingMs] = useState<number | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const measurePing = async () => {
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        if (isMounted) {
+          setIsOnline(false);
+          setPingMs(null);
+        }
+        return;
+      }
+
+      const startTime = performance.now();
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 4000);
+        const serverUrl =
+          localStorage.getItem("__unv_serverUrl") ||
+          "https://api.almazain.my.id";
+
+        const res = await fetch(`${serverUrl.replace(/\/+$/, "")}/api/health`, {
+          method: "GET",
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        if (res.ok && isMounted) {
+          const latency = Math.round(performance.now() - startTime);
+          setPingMs((prev) =>
+            prev === null || Math.abs(latency - prev) > 20 ? latency : prev,
+          );
+          setIsOnline(true);
+        } else if (isMounted) {
+          setIsOnline(false);
+          setPingMs(null);
+        }
+      } catch {
+        if (isMounted) {
+          setIsOnline(false);
+          setPingMs(null);
+        }
+      }
+    };
+
+    measurePing();
+    const interval = setInterval(measurePing, 10000);
+
+    const handleOnline = () => measurePing();
+    const handleOffline = () => {
+      setIsOnline(false);
+      setPingMs(null);
+    };
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
+
+  return (
+    <div className="flex items-center gap-2 select-none">
+      {isOnline ? (
+        <Wifi className="w-4 h-4 text-emerald-400" />
+      ) : (
+        <WifiOff className="w-4 h-4 text-rose-400" />
+      )}
+      <span
+        className={`font-bold uppercase tracking-wider text-[10px] ${
+          isOnline ? "text-emerald-400" : "text-rose-400"
+        }`}
+      >
+        {isOnline ? "ONLINE" : "OFFLINE"}
+      </span>
+
+      {/* TINGKAT BAR SINYAL BERDASARKAN LATENSI NYATA */}
+      <div className="flex items-end gap-0.5 h-3 ml-1">
+        {[1, 2, 3, 4].map((bar) => {
+          const activeBars =
+            !isOnline || pingMs === null
+              ? 0
+              : pingMs < 50
+                ? 4
+                : pingMs < 150
+                  ? 3
+                  : pingMs < 300
+                    ? 2
+                    : 1;
+          const isBarLit = bar <= activeBars;
+          const barColor =
+            activeBars >= 3
+              ? "bg-emerald-400"
+              : activeBars === 2
+                ? "bg-amber-400"
+                : "bg-rose-500";
+
+          return (
+            <div
+              key={bar}
+              className={`w-0.75 rounded-t-sm transition-all duration-300 ${
+                isBarLit ? barColor : "bg-slate-700 opacity-40"
+              }`}
+              style={{ height: `${bar * 3}px` }}
+            />
+          );
+        })}
+      </div>
+
+      {/* NILAI MS NYATA */}
+      <div className="flex items-center gap-1.5 ml-2 px-2 py-0.5 bg-(--surface-hover) rounded border border-(--border-color)">
+        <span
+          className={`w-1.5 h-1.5 rounded-full ${
+            isOnline
+              ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)] animate-pulse"
+              : "bg-rose-400"
+          }`}
+        />
+        <span className="text-(--text-secondary) font-mono text-[11px] font-bold">
+          {isOnline && pingMs !== null ? `${pingMs} ms` : "-- ms"}
+        </span>
+      </div>
+    </div>
+  );
+});
+
+// ========== KOMPONEN BARU: PendingSyncBadge ==========
+const PendingSyncBadge = React.memo(() => {
+  const [pendingSyncCount, setPendingSyncCount] = useState(0);
+
+  useEffect(() => {
+    let sub: any;
+    const rxdb = globalLedger.getRxDatabase();
+    if (rxdb && rxdb.collections.outbox) {
+      sub = rxdb.collections.outbox.find().$.subscribe((docs: any[]) => {
+        setPendingSyncCount((prev) =>
+          prev !== docs.length ? docs.length : prev,
+        );
+      });
+    }
+    return () => {
+      if (sub) sub.unsubscribe();
+    };
+  }, []);
+
+  return pendingSyncCount > 0 ? (
+    <div
+      className="flex items-center gap-1.5 ml-2 px-2 py-0.5 bg-amber-500/10 rounded border border-amber-500/30 text-amber-500 font-mono text-[11px] font-black animate-pulse"
+      title="Transaksi tersimpan aman di memori lokal kasir, sedang mengantre terkirim ke server"
+    >
+      <span>⏳ {pendingSyncCount} Pending Sync</span>
+    </div>
+  ) : (
+    <div
+      className="hidden sm:flex items-center gap-1 ml-2 px-2 py-0.5 bg-emerald-500/10 rounded border border-emerald-500/20 text-emerald-500 font-mono text-[10px] font-bold"
+      title="Seluruh data lokal tersinkronisasi 100% ke server cloud"
+    >
+      <span>✓ 0 Pending</span>
+    </div>
+  );
+});
+// ========== KOMPONEN SIDEBAR ITEM (DI-MEMO) ==========
+const SidebarItem = React.memo(
+  ({
+    menu,
+    isCollapsed,
+    activeMenuId,
+    focusedMenuId,
+    pathname,
+    isExpanded,
+    onToggleAccordion,
+    onNavigate,
+    onHover,
+    onRadialOpen,
+  }: {
+    menu: MenuConfig;
+    isCollapsed: boolean;
+    activeMenuId: string;
+    focusedMenuId: string | null;
+    pathname: string;
+    isExpanded: boolean;
+    onToggleAccordion: (id: string) => void;
+    onNavigate: (path: string) => void;
+    onHover: (menuId: string | null) => void;
+    onRadialOpen: (menuId: string, event: React.MouseEvent) => void;
+  }) => {
+    const hasChildren = !!menu.children?.length;
+    const effectiveActiveId = isCollapsed
+      ? (focusedMenuId ?? activeMenuId)
+      : activeMenuId;
+    const isActive =
+      activeMenuId === menu.id ||
+      menu.children?.some((c) => c.id === activeMenuId) ||
+      (menu.path && pathname.includes(menu.path));
+    const isPillActive = isCollapsed
+      ? effectiveActiveId === menu.id ||
+        menu.children?.some((c) => c.id === effectiveActiveId)
+      : isActive;
+
+    return (
+      <div
+        className="mb-1 relative"
+        data-menu-id={menu.id}
+        data-active={isPillActive ? "true" : "false"}
+        onMouseEnter={() => isCollapsed && onHover(menu.id)}
+      >
+        <button
+          onClick={(e) => {
+            if (isCollapsed && hasChildren) {
+              onRadialOpen(menu.id, e);
+            } else if (hasChildren) {
+              onToggleAccordion(menu.id);
+            } else {
+              onNavigate(menu.path || "");
+            }
+          }}
+          title={isCollapsed ? menu.label : undefined}
+          className={`flex items-center transition-colors duration-300 cursor-pointer group relative z-10
+            ${isCollapsed ? "w-12 h-12 rounded-full justify-center mx-auto bg-transparent border border-transparent" : "w-full gap-3.5 px-3 py-2.5 rounded-lg hover:bg-(--surface-hover) border border-transparent"}
+            ${isActive && !isCollapsed ? "bg-linear-to-r from-orange-500/20 to-teal-500/10 text-(--text-primary)" : "text-(--text-secondary) hover:text-(--text-primary)"}
+          `}
+        >
+          <div
+            className={`shrink-0 ${isCollapsed ? "w-5 h-5 flex items-center justify-center" : ""}`}
+          >
+            {React.cloneElement(menu.icon as React.ReactElement, {
+              className: `w-5 h-5 ${isActive ? "text-orange-500" : "text-(--text-secondary) group-hover:text-teal-400"}`,
+            })}
+          </div>
+          {!isCollapsed && (
+            <>
+              <span className="text-sm font-medium flex-1 text-left whitespace-nowrap overflow-hidden text-ellipsis">
+                {menu.label}
+              </span>
+              {hasChildren && (
+                <ChevronDown
+                  className={`w-4 h-4 transition-transform duration-300 text-(--text-secondary) ${isExpanded ? "rotate-180" : ""}`}
+                />
+              )}
+            </>
+          )}
+        </button>
+        {!isCollapsed && hasChildren && (
+          <div
+            className={`overflow-hidden transition-all duration-700 ease-in-out ml-4 ${isExpanded ? "max-h-80 opacity-100 mt-1" : "max-h-0 opacity-0"}`}
+          >
+            <ul className="flex flex-col gap-1 border-l border-(--border-color) pl-4 ml-4">
+              {menu.children!.map((child) => {
+                const isChildActive =
+                  activeMenuId === child.id || pathname.includes(child.path);
+                return (
+                  <li key={child.id}>
+                    <button
+                      onClick={() => onNavigate(child.path)}
+                      className={`flex items-center gap-2 py-2 px-3 text-sm rounded-lg transition-all duration-200 w-full text-left group ${isChildActive ? "text-orange-500 bg-orange-500/10" : "text-(--text-secondary) hover:text-(--text-primary) hover:bg-(--surface-hover)"}`}
+                    >
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full transition-all duration-200 ${isChildActive ? "bg-orange-500 shadow-[0_0_8px_rgba(244,121,62,0.5)]" : "bg-slate-600 group-hover:bg-teal-400 group-hover:shadow-[0_0_8px_rgba(46,196,182,0.5)]"}`}
+                      ></span>
+                      {child.label}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+      </div>
+    );
+  },
+);
+
 // ========== LAYOUT UTAMA ==========
 export function UniversalLayout({
   children,
@@ -673,8 +954,7 @@ export function UniversalLayout({
   const [closingRadialId, setClosingRadialId] = useState<string | null>(null);
   const [radialPosition, setRadialPosition] = useState({ x: 0, y: 0 });
   const [darkMode, setDarkMode] = useState(false);
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [pingMs, setPingMs] = useState<number | null>(null);
+
   // 1. DETEKSI NAMA OUTLET & CABANG AKTIF DARI STORAGE & MASTER
   const { outlets, companies } = useOrgStore();
   const currentOutletName = React.useMemo(() => {
@@ -682,21 +962,6 @@ export function UniversalLayout({
     if (!outId) return "Holding Pusat";
     return outlets.find((o) => o.id === outId)?.name || "Cabang Outlet";
   }, [outlets]);
-
-  // 2. DETEKSI JUMLAH ANTREAN TRANSAKSI OFFLINE (OUTBOX PENDING SYNC)
-  const [pendingSyncCount, setPendingSyncCount] = useState(0);
-  useEffect(() => {
-    let sub: any;
-    const rxdb = globalLedger.getRxDatabase();
-    if (rxdb && rxdb.collections.outbox) {
-      sub = rxdb.collections.outbox.find().$.subscribe((docs: any[]) => {
-        setPendingSyncCount(docs.length);
-      });
-    }
-    return () => {
-      if (sub) sub.unsubscribe();
-    };
-  }, []);
 
   // 3. FITUR KIOSK / FULLSCREEN LAYAR PENUH UNTUK KASIR
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -741,68 +1006,6 @@ export function UniversalLayout({
     }
   };
 
-  // REAL PING LATENCY DETECTOR (Pemeriksaan Setiap 10 Detik)
-  useEffect(() => {
-    let isMounted = true;
-
-    const measurePing = async () => {
-      if (typeof navigator !== "undefined" && !navigator.onLine) {
-        if (isMounted) {
-          setIsOnline(false);
-          setPingMs(null);
-        }
-        return;
-      }
-
-      const startTime = performance.now();
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 4000);
-        const serverUrl =
-          localStorage.getItem("__unv_serverUrl") ||
-          "https://api.almazain.my.id";
-
-        const res = await fetch(`${serverUrl.replace(/\/+$/, "")}/api/health`, {
-          method: "GET",
-          signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-
-        if (res.ok && isMounted) {
-          const latency = Math.round(performance.now() - startTime);
-          setPingMs(latency);
-          setIsOnline(true);
-        } else if (isMounted) {
-          setIsOnline(false);
-          setPingMs(null);
-        }
-      } catch {
-        if (isMounted) {
-          setIsOnline(false);
-          setPingMs(null);
-        }
-      }
-    };
-
-    measurePing();
-    const interval = setInterval(measurePing, 10000);
-
-    const handleOnline = () => measurePing();
-    const handleOffline = () => {
-      setIsOnline(false);
-      setPingMs(null);
-    };
-
-    window.addEventListener("online", handleOnline);
-    window.addEventListener("offline", handleOffline);
-
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-      window.removeEventListener("online", handleOnline);
-      window.removeEventListener("offline", handleOffline);
-    };
-  }, []);
   const [logoAnim, setLogoAnim] = useState(false);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 
@@ -833,14 +1036,17 @@ export function UniversalLayout({
     null,
   );
 
-  const modalApi: UniversalModalContextValue = {
-    openAlert: (config) => setAlertState(config),
-    closeAlert: () => setAlertState(null),
-    openCenterModal: (config) => setCenterModalState(config),
-    closeCenterModal: () => setCenterModalState(null),
-    openSideOver: (config) => setSideOverState(config),
-    closeSideOver: () => setSideOverState(null),
-  };
+  const modalApi: UniversalModalContextValue = useMemo(
+    () => ({
+      openAlert: (config) => setAlertState(config),
+      closeAlert: () => setAlertState(null),
+      openCenterModal: (config) => setCenterModalState(config),
+      closeCenterModal: () => setCenterModalState(null),
+      openSideOver: (config) => setSideOverState(config),
+      closeSideOver: () => setSideOverState(null),
+    }),
+    [],
+  );
 
   useEffect(() => {
     const handleSecurityAlert = (e: any) => {
@@ -859,75 +1065,86 @@ export function UniversalLayout({
     window.addEventListener("UNV_SECURITY_ALERT", handleSecurityAlert);
     return () =>
       window.removeEventListener("UNV_SECURITY_ALERT", handleSecurityAlert);
-  }, []);
+  }, [modalApi]);
 
   useEffect(() => {
     setFocusedMenuId(null);
   }, [activeMenuId]);
 
-  // Logika Liquid Glass Pill Sidebar
+  // Logika Liquid Glass Pill Sidebar (Optimasi: rAF & ResizeObserver)
   useEffect(() => {
     const listEl = sidebarListRef.current;
     if (!listEl || !isCollapsed) {
       setPillStyle((prev) => ({ ...prev, opacity: 0 }));
       return;
     }
-    const updatePill = () => {
-      const activeWrapper = listEl.querySelector(
-        '[data-active="true"]',
-      ) as HTMLElement;
-      const hoverWrapper = hoveredMenuId
-        ? (listEl.querySelector(
-            `[data-menu-id="${hoveredMenuId}"]`,
-          ) as HTMLElement)
-        : null;
-      if (activeWrapper) {
-        const activeBtn = activeWrapper.querySelector("button") as HTMLElement;
-        const hoverBtn = hoverWrapper?.querySelector("button") as HTMLElement;
-        if (activeBtn) {
-          const listRect = listEl.getBoundingClientRect();
-          const aRect = activeBtn.getBoundingClientRect();
-          let top = aRect.top - listRect.top + listEl.scrollTop;
-          let bottom = aRect.bottom - listRect.top + listEl.scrollTop;
-          let left = aRect.left - listRect.left + listEl.scrollLeft;
-          let right = aRect.right - listRect.left + listEl.scrollLeft;
 
-          if (hoverBtn) {
-            const hRect = hoverBtn.getBoundingClientRect();
-            top = Math.min(top, hRect.top - listRect.top + listEl.scrollTop);
-            bottom = Math.max(
-              bottom,
-              hRect.bottom - listRect.top + listEl.scrollTop,
-            );
+    let rafId: number | null = null;
+    const updatePill = () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        const activeWrapper = listEl.querySelector(
+          '[data-active="true"]',
+        ) as HTMLElement;
+        const hoverWrapper = hoveredMenuId
+          ? (listEl.querySelector(
+              `[data-menu-id="${hoveredMenuId}"]`,
+            ) as HTMLElement)
+          : null;
+
+        if (activeWrapper) {
+          const activeBtn = activeWrapper.querySelector(
+            "button",
+          ) as HTMLElement;
+          const hoverBtn = hoverWrapper?.querySelector("button") as HTMLElement;
+          if (activeBtn) {
+            const listRect = listEl.getBoundingClientRect();
+            const aRect = activeBtn.getBoundingClientRect();
+            let top = aRect.top - listRect.top + listEl.scrollTop;
+            let bottom = aRect.bottom - listRect.top + listEl.scrollTop;
+            let left = aRect.left - listRect.left + listEl.scrollLeft;
+            let right = aRect.right - listRect.left + listEl.scrollLeft;
+
+            if (hoverBtn) {
+              const hRect = hoverBtn.getBoundingClientRect();
+              top = Math.min(top, hRect.top - listRect.top + listEl.scrollTop);
+              bottom = Math.max(
+                bottom,
+                hRect.bottom - listRect.top + listEl.scrollTop,
+              );
+            }
+            setPillStyle({
+              top: `${top}px`,
+              height: `${bottom - top}px`,
+              left: `${left}px`,
+              width: `${right - left}px`,
+              opacity: 1,
+              transition:
+                "top 0.5s cubic-bezier(0.22, 1, 0.36, 1), height 0.5s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.3s ease",
+            });
           }
-          setPillStyle({
-            top: `${top}px`,
-            height: `${bottom - top}px`,
-            left: `${left}px`,
-            width: `${right - left}px`,
-            opacity: 1,
-            transition:
-              "top 0.5s cubic-bezier(0.22, 1, 0.36, 1), height 0.5s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.3s ease",
-          });
+        } else {
+          setPillStyle((prev) => ({ ...prev, opacity: 0 }));
         }
-      } else {
-        setPillStyle((prev) => ({ ...prev, opacity: 0 }));
-      }
+      });
     };
+
     updatePill();
+
+    const ro = new ResizeObserver(updatePill);
+    ro.observe(listEl);
     listEl.addEventListener("scroll", updatePill);
-    window.addEventListener("resize", updatePill);
+
     return () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      ro.disconnect();
       listEl.removeEventListener("scroll", updatePill);
-      window.removeEventListener("resize", updatePill);
     };
   }, [
     isCollapsed,
     hoveredMenuId,
     activeMenuId,
-    menus,
     location.pathname,
-    expandedMenus,
     focusedMenuId,
   ]);
 
@@ -990,99 +1207,6 @@ export function UniversalLayout({
     "--surface-hover": darkMode ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.04)",
   } as React.CSSProperties;
 
-  const renderSidebarItem = (menu: MenuConfig) => {
-    const hasChildren = !!menu.children?.length;
-    // PERBAIKAN: ubah logika isExpanded agar default tertutup
-    const isExpanded = !!expandedMenus[menu.id]; // sebelumnya: expandedMenus[menu.id] !== false
-    const effectiveActiveId = isCollapsed
-      ? (focusedMenuId ?? activeMenuId)
-      : activeMenuId;
-    const isActive =
-      activeMenuId === menu.id ||
-      menu.children?.some((c) => c.id === activeMenuId) ||
-      (menu.path && location.pathname.includes(menu.path));
-    const isPillActive = isCollapsed
-      ? effectiveActiveId === menu.id ||
-        menu.children?.some((c) => c.id === effectiveActiveId)
-      : isActive;
-
-    return (
-      <div
-        key={menu.id}
-        className="mb-1 relative"
-        data-menu-id={menu.id}
-        data-active={isPillActive ? "true" : "false"}
-        onMouseEnter={() => isCollapsed && setHoveredMenuId(menu.id)}
-      >
-        <button
-          onClick={(e) => {
-            if (isCollapsed && hasChildren) {
-              setFocusedMenuId(menu.id);
-              handleRadialOpen(menu.id, e);
-            } else if (hasChildren) {
-              toggleAccordion(menu.id);
-            } else {
-              if (isCollapsed) setFocusedMenuId(menu.id);
-              navigate(menu.path || "");
-              setRadialOpenId(null);
-            }
-          }}
-          title={isCollapsed ? menu.label : undefined}
-          className={`flex items-center transition-colors duration-300 cursor-pointer group relative z-10
-            ${isCollapsed ? "w-12 h-12 rounded-full justify-center mx-auto bg-transparent border border-transparent" : "w-full gap-3.5 px-3 py-2.5 rounded-lg hover:bg-(--surface-hover) border border-transparent"}
-            ${isActive && !isCollapsed ? "bg-linear-to-r from-orange-500/20 to-teal-500/10 text-(--text-primary)" : "text-(--text-secondary) hover:text-(--text-primary)"}
-          `}
-        >
-          <div
-            className={`shrink-0 ${isCollapsed ? "w-5 h-5 flex items-center justify-center" : ""}`}
-          >
-            {React.cloneElement(menu.icon as React.ReactElement, {
-              className: `w-5 h-5 ${isActive ? "text-orange-500" : "text-(--text-secondary) group-hover:text-teal-400"}`,
-            })}
-          </div>
-          {!isCollapsed && (
-            <>
-              <span className="text-sm font-medium flex-1 text-left whitespace-nowrap overflow-hidden text-ellipsis">
-                {menu.label}
-              </span>
-              {hasChildren && (
-                <ChevronDown
-                  className={`w-4 h-4 transition-transform duration-300 text-(--text-secondary) ${isExpanded ? "rotate-180" : ""}`}
-                />
-              )}
-            </>
-          )}
-        </button>
-        {!isCollapsed && hasChildren && (
-          <div
-            className={`overflow-hidden transition-all duration-700 ease-in-out ml-4 ${isExpanded ? "max-h-80 opacity-100 mt-1" : "max-h-0 opacity-0"}`}
-          >
-            <ul className="flex flex-col gap-1 border-l border-(--border-color) pl-4 ml-4">
-              {menu.children!.map((child) => {
-                const isChildActive =
-                  activeMenuId === child.id ||
-                  location.pathname.includes(child.path);
-                return (
-                  <li key={child.id}>
-                    <button
-                      onClick={() => navigate(child.path)}
-                      className={`flex items-center gap-2 py-2 px-3 text-sm rounded-lg transition-all duration-200 w-full text-left group ${isChildActive ? "text-orange-500 bg-orange-500/10" : "text-(--text-secondary) hover:text-(--text-primary) hover:bg-(--surface-hover)"}`}
-                    >
-                      <span
-                        className={`w-1.5 h-1.5 rounded-full transition-all duration-200 ${isChildActive ? "bg-orange-500 shadow-[0_0_8px_rgba(244,121,62,0.5)]" : "bg-slate-600 group-hover:bg-teal-400 group-hover:shadow-[0_0_8px_rgba(46,196,182,0.5)]"}`}
-                      ></span>
-                      {child.label}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        )}
-      </div>
-    );
-  };
-
   const radialMenu = menus.find((m) => m.id === radialOpenId);
   const glassInputStyle =
     "bg-(--surface-hover) backdrop-blur-xl border border-(--border-color) shadow-[inset_0_1px_1px_rgba(255,255,255,0.15),inset_0_-1px_1px_rgba(0,0,0,0.05)] transition-all duration-300";
@@ -1133,7 +1257,8 @@ export function UniversalLayout({
 
           <div
             className={`hidden md:flex items-center gap-2 ml-4 px-3 py-1.5 rounded-xl ${glassInputStyle} border-orange-500/20 shrink-0`}
-            title="Lokasi Operasional Perangkat Ini">
+            title="Lokasi Operasional Perangkat Ini"
+          >
             <Store className="w-4 h-4 text-orange-500 shrink-0" />
             <span className="text-xs font-black text-(--text-primary) uppercase tracking-wide">
               {currentOutletName}
@@ -1160,10 +1285,11 @@ export function UniversalLayout({
             <button
               onClick={() => navigate("/dashboard/executive")}
               className="p-2 rounded-full text-orange-500 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 transition cursor-pointer shadow-xs"
-              title="Buka Executive Owner Dashboard">
+              title="Buka Executive Owner Dashboard"
+            >
               <LayoutDashboard className="w-4 h-4" />
             </button>
-           
+
             <div className="h-6 w-px bg-(--border-color)" />
 
             <button
@@ -1341,7 +1467,38 @@ export function UniversalLayout({
                       }}
                     />
                   )}
-                  {menus.map((menu) => renderSidebarItem(menu))}
+                  {menus.map((menu) => (
+                    <SidebarItem
+                      key={menu.id}
+                      menu={menu}
+                      isCollapsed={isCollapsed}
+                      activeMenuId={activeMenuId}
+                      focusedMenuId={focusedMenuId}
+                      pathname={location.pathname}
+                      isExpanded={!!expandedMenus[menu.id]}
+                      onToggleAccordion={toggleAccordion}
+                      onNavigate={(path) => {
+                        if (isCollapsed) setFocusedMenuId(menu.id);
+                        navigate(path);
+                        setRadialOpenId(null);
+                      }}
+                      onHover={setHoveredMenuId}
+                      onRadialOpen={(menuId, e) => {
+                        if (closingRadialId) return;
+                        setFocusedMenuId(menuId);
+                        const rect = (
+                          e.currentTarget as HTMLElement
+                        ).getBoundingClientRect();
+                        setRadialPosition({
+                          x: rect.left + rect.width / 2,
+                          y: rect.top + rect.height / 2,
+                        });
+                        setRadialOpenId(
+                          radialOpenId === menuId ? null : menuId,
+                        );
+                      }}
+                    />
+                  ))}
                 </div>
               </div>
             )}
@@ -1381,75 +1538,8 @@ export function UniversalLayout({
         <footer className="h-10 bg-(--bg-header)/80 backdrop-blur-xl border-t border-(--border-color) flex items-center justify-between px-5 shrink-0 z-40 text-[11px] font-medium text-(--text-secondary)">
           {/* SISI KIRI: INDIKATOR SINYAL & PING NYATA */}
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 select-none">
-              {isOnline ? (
-                <Wifi className="w-4 h-4 text-emerald-400" />
-              ) : (
-                <WifiOff className="w-4 h-4 text-rose-400" />
-              )}
-              <span
-                className={`font-bold uppercase tracking-wider text-[10px] ${isOnline ? "text-emerald-400" : "text-rose-400"}`}
-              >
-                {isOnline ? "ONLINE" : "OFFLINE"}
-              </span>
-
-              {/* TINGKAT BAR SINYAL BERDASARKAN LATENSI NYATA */}
-              <div className="flex items-end gap-0.5 h-3 ml-1">
-                {[1, 2, 3, 4].map((bar) => {
-                  const activeBars =
-                    !isOnline || pingMs === null
-                      ? 0
-                      : pingMs < 50
-                        ? 4
-                        : pingMs < 150
-                          ? 3
-                          : pingMs < 300
-                            ? 2
-                            : 1;
-                  const isBarLit = bar <= activeBars;
-                  const barColor =
-                    activeBars >= 3
-                      ? "bg-emerald-400"
-                      : activeBars === 2
-                        ? "bg-amber-400"
-                        : "bg-rose-500";
-
-                  return (
-                    <div
-                      key={bar}
-                      className={`w-0.75 rounded-t-sm transition-all duration-300 ${isBarLit ? barColor : "bg-slate-700 opacity-40"}`}
-                      style={{ height: `${bar * 3}px` }}
-                    />
-                  );
-                })}
-              </div>
-
-              {/* NILAI MS NYATA */}
-              <div className="flex items-center gap-1.5 ml-2 px-2 py-0.5 bg-(--surface-hover) rounded border border-(--border-color)">
-                <span
-                  className={`w-1.5 h-1.5 rounded-full ${isOnline ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)] animate-pulse" : "bg-rose-400"}`}
-                />
-                <span className="text-(--text-secondary) font-mono text-[11px] font-bold">
-                  {isOnline && pingMs !== null ? `${pingMs} ms` : "-- ms"}
-                </span>
-              </div>
-              {/* INDIKATOR ANTREAN NOTA OFFLINE (OUTBOX PENDING SYNC) */}
-              {pendingSyncCount > 0 ? (
-                <div
-                  className="flex items-center gap-1.5 ml-2 px-2 py-0.5 bg-amber-500/10 rounded border border-amber-500/30 text-amber-500 font-mono text-[11px] font-black animate-pulse"
-                  title="Transaksi tersimpan aman di memori lokal kasir, sedang mengantre terkirim ke server"
-                >
-                  <span>⏳ {pendingSyncCount} Pending Sync</span>
-                </div>
-              ) : (
-                <div
-                  className="hidden sm:flex items-center gap-1 ml-2 px-2 py-0.5 bg-emerald-500/10 rounded border border-emerald-500/20 text-emerald-500 font-mono text-[10px] font-bold"
-                  title="Seluruh data lokal tersinkronisasi 100% ke server cloud"
-                >
-                  <span>✓ 0 Pending</span>
-                </div>
-              )}
-            </div>
+            <ConnectionStatus />
+            <PendingSyncBadge />
           </div>
 
           {/* SISI TENGAH: IDENTITAS ALMA & FOUNDER */}
@@ -1493,17 +1583,19 @@ export function UniversalLayout({
                 DATA MANAGER
               </span>
             </button>
-             {/* ================================================================= */}
+            {/* ================================================================= */}
             {/* KAPSUL "MODUL CONTROL" (KLIK UNTUK KONFIGURASI MODUL) */}
             {/* ================================================================= */}
             <button
               onClick={() => setIsModuleManagerOpen(true)}
               className="p-1 text-(--text-secondary) hover:text-orange-500 hover:bg-(--surface-hover) rounded transition-colors cursor-pointer flex items-center gap-1.5"
-              title="Klik untuk Mengatur & Mengaktifkan Modul">
+              title="Klik untuk Mengatur & Mengaktifkan Modul"
+            >
               <Settings className="w-3.5 h-3.5" />
-              <span className="text-(--text-primary) font-bold">{workspaceName}</span>
+              <span className="text-(--text-primary) font-bold">
+                {workspaceName}
+              </span>
             </button>
-
           </div>
         </footer>
 
