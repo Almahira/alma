@@ -67,7 +67,7 @@ export class UniversalLedger {
       }
       this.secretKey = storedKey;
 
-     const isDemo =
+      const isDemo =
         typeof localStorage !== "undefined" &&
         localStorage.getItem("__unv_is_demo") === "true";
       const dbName = isDemo ? "alma_demo_ledger" : "alma_unv_ledger";
@@ -154,6 +154,18 @@ export class UniversalLedger {
               }
             }
           }
+        }
+      });
+
+      // 3. REMOTE OVER-THE-AIR (OTA) RESYNC TRIGGER
+      this.socket.on("REMOTE_RESYNC_TRIGGER", (data: any) => {
+        console.log(
+          `[OTA TRIGGER] Menerima instruksi penyelarasan data dari Server: ${data?.reason || "Pembaruan Pusat"}`,
+        );
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent("UNV_REMOTE_RESYNC", { detail: data }),
+          );
         }
       });
 

@@ -22,6 +22,7 @@ import ExecutiveDashboard from "./executive-dashboard/ExecutiveDashboard";
 import { LandingPage } from "./system-ui/LandingPage";
 import { SetupWizard } from "./system-ui/SetupWizard";
 import { LoginPage } from "./system-ui/LoginPage";
+import SystemMaintenanceDashboard from "./system-ui/maintenance/SystemMaintenanceDashboard";
 
 function getAllowedModules(): string[] {
   try {
@@ -100,6 +101,11 @@ function WorkspaceWrapper() {
   return (
     <UniversalLayout menus={dynamicMenus} activeMenuId={currentActiveMenuId}>
       <Routes>
+        {/* Rute Khusus Maintenance & SRE Observability */}
+        <Route
+          path="/system/maintenance"
+          element={<SystemMaintenanceDashboard />}
+        />
         {/* Rute Fasilitas Sistem Inti */}
         <Route
           path="/almaApp/diagnostik_log"

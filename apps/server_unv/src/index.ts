@@ -27,6 +27,7 @@ import { telemetryMetrics } from "../../../packages/db-schema/schema/telemetry.j
 import { provisionRouter } from "./routes/provision.js";
 import { executiveDashboardRouter } from "./routes/executiveDashboard.js";
 import { paymentRouter } from "./routes/payment.js";
+import { systemHealthRouter } from "./routes/systemHealth.js";
 
 dotenv.config();
 
@@ -179,6 +180,7 @@ app.use("/api/payment", paymentRouter);
 app.use("/api/storage", storageRouter);
 app.use("/api/provision", provisionRouter);
 app.use("/api/executive", executiveDashboardRouter);
+app.use("/api/system-health", systemHealthRouter);
 
 app.set("io", io);
 

@@ -234,6 +234,36 @@ function SystemBootstrapper() {
         TelemetryEngine.startDaemon();
         setupClientTasks();
         IntegrityChecker.verifyChain();
+
+        // ============================================================
+        // 4. AUTO-RESYNC JIKA ADA PERUBAHAN SKEMA (SCHEMA EPOCH)
+        // ============================================================
+        const CURRENT_SCHEMA_EPOCH = "2.1.1_double_precision";
+        const savedEpoch = localStorage.getItem("__unv_schema_epoch");
+        const hasDevice = !!localStorage.getItem("__unv_deviceToken");
+
+        // HANYA jalankan jika online dan perangkat sudah terdaftar
+        if (
+          hasDevice &&
+          savedEpoch !== CURRENT_SCHEMA_EPOCH &&
+          navigator.onLine
+        ) {
+          console.log(
+            `[BOOT ENGINE] Terdeteksi update sistem (${savedEpoch || "legacy"} -> ${CURRENT_SCHEMA_EPOCH}). Menjalankan Auto-Resync...`,
+          );
+          try {
+            await EventBus.executeSafeLocalResync();
+            localStorage.setItem("__unv_schema_epoch", CURRENT_SCHEMA_EPOCH);
+            console.log("[BOOT ENGINE] Auto-Resync berhasil diselesaikan.");
+          } catch (resyncErr) {
+            // Jika koneksi server lambat/gagal, jangan hentikan boot kasir
+            console.warn(
+              "[BOOT ENGINE] Auto-Resync tertunda karena jaringan, melanjutkan mode offline biasa.",
+              resyncErr,
+            );
+          }
+        }
+
         setIsEngineReady(true);
       } catch (error: any) {
         setBootError(error.message || "Gagal memuat Universal Engine");
