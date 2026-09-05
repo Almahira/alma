@@ -1,5 +1,5 @@
 // File: apps/client_unv/src/App.tsx
-import React from "react";
+import React, { useState, useEffect } from "react";
 import {
   BrowserRouter,
   Routes,
@@ -13,8 +13,13 @@ import {
 } from "../../../packages/core_unv/src/plugin/types";
 // 1. SINGLETON MANAGER (Single Source of Truth)
 import { manager } from "./pluginRegistry";
-// 2. KOMPONEN UI INTI & LIFECYCLE
+// 2. KOMPONEN UI INTI & LIFECYCLE (DESKTOP & SMARTPHONE)
 import { UniversalLayout } from "./shared-ui/UniversalLayout";
+import { UniversalLayoutSM } from "./shared-ui/UniversalLayoutSM";
+// 3. HALAMAN MOBILE KHUSUS SMARTPHONE
+import { ReceivingPageSM } from "../../../modules/mdl_receiving/src/client/ReceivingPageSM";
+import { ItemPageSM } from "../../../modules/mdl_item/src/client/ItemPageSM";
+
 import { DataManager } from "./system-ui/DataManager";
 import { DiagnostikDashboard } from "./system-ui/DiagnostikDashboard";
 import { ModuleLifecycleWrapper } from "./shared-ui/ModuleLifecycleWrapper";
@@ -64,11 +69,24 @@ function getAggregatedRoutes(): (RouteConfig & { pluginName: string })[] {
   return routes;
 }
 
-// WADAH UTAMA SELURUH MODUL BISNIS DI DALAM UNIVERSAL LAYOUT
+// WADAH UTAMA SELURUH MODUL BISNIS DI DALAM UNIVERSAL LAYOUT (RESPONSIF SMARTPHONE & PC)
 function WorkspaceWrapper() {
   const location = useLocation();
   const isProvisioned = !!localStorage.getItem("__unv_deviceToken");
   const hasActiveUser = !!localStorage.getItem("__unv_activeUser");
+
+  // Deteksi Ukuran Layar Klien (Mobile < 640px)
+  const [isMobile, setIsMobile] = useState<boolean>(
+    typeof window !== "undefined" ? window.innerWidth < 640 : false,
+  );
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 640);
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   // 1. Jika mesin belum terdaftar, arahkan ke Setup Wizard
   if (!isProvisioned) {
@@ -98,14 +116,18 @@ function WorkspaceWrapper() {
     dynamicMenus[0]?.id ||
     "";
 
+  // Pilih Layout: UniversalLayoutSM untuk Smartphone, UniversalLayout untuk PC/Tablet
+  const LayoutComponent = isMobile ? UniversalLayoutSM : UniversalLayout;
+
   return (
-    <UniversalLayout menus={dynamicMenus} activeMenuId={currentActiveMenuId}>
+    <LayoutComponent menus={dynamicMenus} activeMenuId={currentActiveMenuId}>
       <Routes>
         {/* Rute Khusus Maintenance & SRE Observability */}
         <Route
           path="/system/maintenance"
           element={<SystemMaintenanceDashboard />}
         />
+
         {/* Rute Fasilitas Sistem Inti */}
         <Route
           path="/almaApp/diagnostik_log"
@@ -124,21 +146,36 @@ function WorkspaceWrapper() {
           }
         />
 
-        {/* Render Seluruh Rute Modul Dinamis (Tanpa Modifikasi Path) */}
-        {dynamicRoutes.map((route, idx) => (
-          <Route
-            key={idx}
-            path={route.path}
-            element={
-              <ModuleLifecycleWrapper
-                contextId={route.contextId || route.pluginName}
-                lifecycle={route.lifecycle}
-              >
-                {route.element}
-              </ModuleLifecycleWrapper>
-            }
-          />
-        ))}
+        {/* Render Seluruh Rute Modul Dinamis (Dengan Switcher Halaman Khusus Smartphone) */}
+        {dynamicRoutes.map((route, idx) => {
+          let pageElement = route.element;
+
+          // Override khusus smartphone untuk Receiving
+          if (route.path === "/transaksi/receiving" && isMobile) {
+            pageElement = <ReceivingPageSM />;
+          }
+
+          // Override khusus smartphone untuk Item / Katalog Master
+          // Mengganti semua rute dari plugin mdl_item dengan ItemPageSM saat mobile
+          if (route.pluginName === "mdl_item" && isMobile) {
+            pageElement = <ItemPageSM />;
+          }
+
+          return (
+            <Route
+              key={idx}
+              path={route.path}
+              element={
+                <ModuleLifecycleWrapper
+                  contextId={route.contextId || route.pluginName}
+                  lifecycle={route.lifecycle}
+                >
+                  {pageElement}
+                </ModuleLifecycleWrapper>
+              }
+            />
+          );
+        })}
 
         {/* Fallback Redirect untuk Rute /app atau Rute Kosong ke Modul Pertama */}
         <Route
@@ -164,7 +201,7 @@ function WorkspaceWrapper() {
           }
         />
       </Routes>
-    </UniversalLayout>
+    </LayoutComponent>
   );
 }
 
@@ -185,6 +222,7 @@ export default function App() {
         />
         <Route path="/pricing" element={<LandingPage />} />
         <Route path="/billing" element={<LandingPage />} />
+
         {/* 2. PORTAL AKTIVASI & SETUP PERANGKAT KASIR */}
         <Route
           path="/setup"
@@ -194,6 +232,7 @@ export default function App() {
             />
           }
         />
+
         {/* 3. SEMUA RUANG OPERASIONAL ERP / KASIR (WILDCARD CATCH-ALL) */}
         <Route path="/*" element={<WorkspaceWrapper />} />
       </Routes>
