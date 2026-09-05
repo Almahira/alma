@@ -12,6 +12,73 @@ function safeDate(val: any): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
+/**
+ * HELPER: Memperbarui harga HPP (basePrice) & harga jual master item
+ * secara dinamis di region / outlet tempat transaksi receiving terjadi.
+ */
+async function updateProductPricingFromReceiving(
+  tx: any,
+  p: any,
+  items: any[],
+) {
+  const scopeKey =
+    p.location?.outletId ||
+    p.outletId ||
+    p.location?.regionId ||
+    p.regionId ||
+    p.organization?.companyId ||
+    p.companyId ||
+    "DEFAULT";
+
+  for (const item of items) {
+    if (item.isExpense) continue; // Abaikan jika ini jasa / biaya operasional
+
+    const currentItem = await tx
+      .select()
+      .from(itemProducts)
+      .where(eq(itemProducts.id, item.itemId))
+      .limit(1);
+
+    if (currentItem.length > 0) {
+      const currentPricing = currentItem[0].pricing || {};
+      const scopePricing = currentPricing[scopeKey] ||
+        currentPricing["DEFAULT"] || {
+          basePrice: 0,
+          marginPercentage: 0,
+          sellingPrice: 0,
+        };
+
+      const newBasePrice = Math.round(Number(item.price) || 0);
+      const margin = Number(scopePricing.marginPercentage) || 0;
+
+      // Hitung ulang harga jual berdasarkan margin produk
+      const newSellingPrice =
+        margin > 0
+          ? Math.round(newBasePrice + newBasePrice * (margin / 100))
+          : scopePricing.sellingPrice &&
+              scopePricing.sellingPrice > newBasePrice
+            ? scopePricing.sellingPrice
+            : newBasePrice;
+
+      currentPricing[scopeKey] = {
+        basePrice: newBasePrice,
+        marginPercentage: margin,
+        sellingPrice: newSellingPrice,
+      };
+
+      // Set default jika belum pernah ada
+      if (!currentPricing["DEFAULT"]) {
+        currentPricing["DEFAULT"] = currentPricing[scopeKey];
+      }
+
+      await tx
+        .update(itemProducts)
+        .set({ pricing: currentPricing })
+        .where(eq(itemProducts.id, item.itemId));
+    }
+  }
+}
+
 export const receivingHandlers: Record<
   string,
   (tx: any, event: any) => Promise<void>
@@ -61,16 +128,19 @@ export const receivingHandlers: Record<
         documentId: event.aggregateId,
         itemId: item.itemId,
         isExpense: item.isExpense || false,
-        qty: Number(item.qty) || 1, // <--- Float 151.6 aman di doublePrecision
-        receivedQty: Number(item.receivedQty || item.qty) || 1,
+        qty: Number(item.qty) || 1, // Mendukung float desimal (132.2 kg)
+        receivedQty: Number(item.receivedQty ?? item.qty) || 1,
         returnedQty: Number(item.returnedQty) || 0,
         price: Math.round(Number(item.price) || 0),
         subtotal: Math.round(
-          Number(item.subtotal || item.qty * item.price) || 0,
+          Number(item.subtotal || Number(item.qty) * Number(item.price)) || 0,
         ),
         itemStatus: item.itemStatus || "RECEIVED",
       }));
       await tx.insert(schema.receivingItems).values(itemsToInsert);
+
+      // ---> PEMBARUAN HARGA MASTER ITEM DINAMIS DI POSTGRESQL <---
+      await updateProductPricingFromReceiving(tx, p, items);
     }
   },
 
@@ -110,28 +180,32 @@ export const receivingHandlers: Record<
         documentId: event.aggregateId,
         itemId: item.itemId,
         isExpense: item.isExpense || false,
-        qty: item.qty || 1,
-        receivedQty: item.qty || 1,
-        returnedQty: 0,
-        price: item.price,
+        qty: Number(item.qty) || 1,
+        receivedQty: Number(item.receivedQty ?? item.qty) || 1,
+        returnedQty: Number(item.returnedQty) || 0,
+        price: Math.round(Number(item.price) || 0),
         subtotal: Math.round(
-          Number(item.subtotal || item.qty * item.price) || 0,
+          Number(item.subtotal || Number(item.qty) * Number(item.price)) || 0,
         ),
         itemStatus: "RECEIVED",
       }));
       await tx.insert(schema.receivingItems).values(itemsToInsert);
+
+      // ---> PEMBARUAN HARGA MASTER ITEM DINAMIS DI POSTGRESQL SAAT UPDATE <---
+      await updateProductPricingFromReceiving(tx, p, items);
     }
   },
 
   RECEIVING_PAYMENT_ADDED: async (tx, event) => {
     const p = event.payload;
 
-    // ---> PERBAIKAN: Ekstrak nominal angka murni, bukan objek <---
-    const paymentAmount = Number(
-      p.data?.amount ??
-        (typeof p.amount === "number"
-          ? p.amount
-          : (p.amount?.total ?? p.amount?.paid ?? 0)),
+    const paymentAmount = Math.round(
+      Number(
+        p.data?.amount ??
+          (typeof p.amount === "number"
+            ? p.amount
+            : (p.amount?.total ?? p.amount?.paid ?? 0)),
+      ),
     );
 
     const docId = p.data?.documentId || p.reference?.documentId || p.documentId;
@@ -203,7 +277,7 @@ export const receivingHandlers: Record<
       );
 
     const newPaidAmount = validPayments.reduce(
-      (sum: number, p: any) => sum + p.amount,
+      (sum: number, p: any) => sum + Math.round(Number(p.amount || 0)),
       0,
     );
 
@@ -252,39 +326,8 @@ export const receivingHandlers: Record<
         .from(schema.receivingItems)
         .where(eq(schema.receivingItems.documentId, event.aggregateId));
 
-      for (const item of docItems) {
-        if (item.isExpense) continue;
-        const scopeKey =
-          p.location?.outletId ||
-          p.location?.regionId ||
-          p.organization?.companyId ||
-          p.outletId ||
-          p.regionId ||
-          p.companyId;
-
-        const currentItem = await tx
-          .select()
-          .from(itemProducts)
-          .where(eq(itemProducts.id, item.itemId))
-          .limit(1);
-
-        if (currentItem.length > 0) {
-          const currentPricing = currentItem[0].pricing || {};
-          const scopePricing = currentPricing[scopeKey] || {
-            basePrice: 0,
-            marginPercentage: 0,
-            sellingPrice: 0,
-          };
-          scopePricing.basePrice = item.price;
-          scopePricing.sellingPrice =
-            item.price + item.price * (scopePricing.marginPercentage / 100);
-          currentPricing[scopeKey] = scopePricing;
-
-          await tx
-            .update(itemProducts)
-            .set({ pricing: currentPricing })
-            .where(eq(itemProducts.id, item.itemId));
-        }
+      if (docItems.length > 0) {
+        await updateProductPricingFromReceiving(tx, p, docItems);
       }
     }
   },

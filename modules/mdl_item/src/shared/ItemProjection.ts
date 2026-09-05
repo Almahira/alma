@@ -18,7 +18,12 @@ export interface ItemState {
 
 export class ItemProjection implements ProjectionHandler<ItemState> {
   aggregateType = "ITEM_DOMAIN";
-  listenTo = ["ITEM_CATEGORY", "ITEM_UOM", "ITEM_PRODUCT"];
+  listenTo = [
+    "ITEM_CATEGORY",
+    "ITEM_UOM",
+    "ITEM_PRODUCT",
+    "RECEIVING_DOCUMENT",
+  ];
 
   private categories = new Map<string, any>();
   private uoms = new Map<string, any>();
@@ -26,7 +31,6 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
 
   public applyEvent(event: LedgerEventDoc): void {
     const { type, payload, aggregateId } = event;
-
     switch (type) {
       case "CATEGORY_CREATED":
       case "CATEGORY_UPDATED":
@@ -36,7 +40,6 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
           status: "Aktif",
         });
         break;
-
       case "UOM_CREATED":
       case "UOM_UPDATED":
         this.uoms.set(aggregateId, {
@@ -45,19 +48,16 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
           status: "Aktif",
         });
         break;
-
       case "CATEGORY_ARCHIVED":
         if (this.categories.has(aggregateId)) {
           this.categories.get(aggregateId).status = "Arsip";
         }
         break;
-
       case "UOM_ARCHIVED":
         if (this.uoms.has(aggregateId)) {
           this.uoms.get(aggregateId).status = "Arsip";
         }
         break;
-
       case "PRODUCT_CREATED":
         this.products.set(aggregateId, {
           id: aggregateId,
@@ -69,7 +69,6 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
           status: "Aktif",
         });
         break;
-
       case "PRODUCT_UPDATED":
         if (this.products.has(aggregateId)) {
           const existing = this.products.get(aggregateId);
@@ -91,7 +90,6 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
           });
         }
         break;
-
       case "PRODUCT_VALIDATED":
         if (this.products.has(aggregateId)) {
           const existing = this.products.get(aggregateId);
@@ -102,18 +100,75 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
           });
         }
         break;
-
       case "PRODUCT_ARCHIVED":
         if (this.products.has(aggregateId)) {
           this.products.get(aggregateId).status = "Arsip";
         }
         break;
-
       case "PRODUCT_RESTORED":
         if (this.products.has(aggregateId)) {
           this.products.get(aggregateId).status = "Aktif";
         }
         break;
+
+      // =====================================================================
+      // ---> 2. RESPONS DINAMIS HARGA FLUKTUATIF DARI BELANJA RECEIVING <---
+      // =====================================================================
+      case "RECEIVING_CREATED":
+      case "RECEIVING_UPDATED":
+      case "RECEIVING_COMPLETED": {
+        const items = payload.data?.items || payload.items || [];
+        // Tentukan wilayah harga (Outlet > Region > Holding > DEFAULT)
+        const scopeKey =
+          payload.location?.outletId ||
+          payload.outletId ||
+          payload.location?.regionId ||
+          payload.regionId ||
+          payload.organization?.companyId ||
+          payload.companyId ||
+          "DEFAULT";
+
+        items.forEach((item: any) => {
+          if (item.isExpense) return; // Abaikan jasa/biaya operasional
+
+          const product = this.products.get(item.itemId);
+          if (product) {
+            const currentPricing = product.pricing || {};
+            const scopePricing = currentPricing[scopeKey] ||
+              currentPricing["DEFAULT"] || {
+                basePrice: 0,
+                marginPercentage: 0,
+                sellingPrice: 0,
+              };
+
+            const newBasePrice = Math.round(Number(item.price) || 0);
+            const margin = Number(scopePricing.marginPercentage) || 0;
+            // Harga jual otomatis menyesuaikan margin persentase
+            const newSellingPrice =
+              margin > 0
+                ? Math.round(newBasePrice + newBasePrice * (margin / 100))
+                : scopePricing.sellingPrice &&
+                    scopePricing.sellingPrice > newBasePrice
+                  ? scopePricing.sellingPrice
+                  : newBasePrice;
+
+            currentPricing[scopeKey] = {
+              basePrice: newBasePrice,
+              marginPercentage: margin,
+              sellingPrice: newSellingPrice,
+            };
+
+            // Cadangkan ke DEFAULT jika DEFAULT belum pernah disetel
+            if (!currentPricing["DEFAULT"]) {
+              currentPricing["DEFAULT"] = currentPricing[scopeKey];
+            }
+
+            product.pricing = { ...currentPricing };
+            this.products.set(item.itemId, { ...product });
+          }
+        });
+        break;
+      }
     }
   }
 
@@ -135,7 +190,6 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
     this.categories.clear();
     this.uoms.clear();
     this.products.clear();
-
     if (state) {
       state.categories?.forEach((c) => this.categories.set(c.id, c));
       state.uoms?.forEach((u) => this.uoms.set(u.id, u));
