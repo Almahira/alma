@@ -134,8 +134,24 @@ export class WarehouseProjection implements ProjectionHandler<WarehouseState> {
       case "TX_DISTRIBUTION_UPDATED": {
         if (this.distributions.has(aggregateId)) {
           const existing = this.distributions.get(aggregateId)!;
+          const date = payload.timestamp || payload.date || existing.date; // <--- UPDATE TANGGAL
+          const qty = Number(
+            payload.quantity?.ordered ?? payload.qty ?? existing.qty,
+          );
+          const unitCost = Math.round(
+            Number(
+              payload.data?.unitCost ?? payload.unitCost ?? existing.unitCost,
+            ),
+          );
+          const totalCost = Math.round(
+            Number(
+              payload.amount?.total ?? payload.totalCost ?? qty * unitCost,
+            ),
+          );
+
           this.distributions.set(aggregateId, {
             ...existing,
+            date,
             divisionId: payload.reference?.divisionId || existing.divisionId,
             divisionName:
               payload.reference?.divisionName || existing.divisionName,
@@ -143,9 +159,9 @@ export class WarehouseProjection implements ProjectionHandler<WarehouseState> {
             itemName: payload.data?.itemName || existing.itemName,
             uomId: payload.data?.uomId || existing.uomId,
             uomName: payload.data?.uomName || existing.uomName,
-            qty: payload.quantity?.ordered ?? existing.qty,
-            unitCost: payload.data?.unitCost ?? existing.unitCost,
-            totalCost: payload.amount?.total ?? existing.totalCost,
+            qty,
+            unitCost,
+            totalCost,
             notes:
               payload.data?.notes !== undefined
                 ? payload.data.notes
@@ -277,12 +293,14 @@ export class WarehouseProjection implements ProjectionHandler<WarehouseState> {
             payload.data?.foodCostPercentage ||
               payload.foodCostPercentage ||
               30,
+          ), // Mendukung desimal (misal 32.5%)
+          totalHppCost: Math.round(
+            Number(payload.amount?.total || payload.totalHppCost || 0),
           ),
-          totalHppCost: Number(
-            payload.amount?.total || payload.totalHppCost || 0,
-          ),
-          idealSellingPrice: Number(
-            payload.data?.idealSellingPrice || payload.idealSellingPrice || 0,
+          idealSellingPrice: Math.round(
+            Number(
+              payload.data?.idealSellingPrice || payload.idealSellingPrice || 0,
+            ),
           ),
           rawMaterials: payload.data?.rawMaterials || [],
           subRecipes: payload.data?.subRecipes || [],

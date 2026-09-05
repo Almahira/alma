@@ -41,18 +41,26 @@ export const warehouseHandlers: Record<
   },
   TX_DISTRIBUTION_UPDATED: async (tx, event) => {
     const p = event.payload;
+    const dateObj = safeDate(p.timestamp || p.date);
+    const qty = Number(p.quantity?.ordered ?? p.qty ?? 1);
+    const unitCost = Math.round(Number(p.data?.unitCost ?? p.unitCost ?? 0));
+    const totalCost = Math.round(
+      Number(p.amount?.total ?? p.totalCost ?? qty * unitCost),
+    );
+
     await tx
       .update(schema.warehouseDistributions)
       .set({
+        date: dateObj, // <--- UPDATE TANGGAL DI POSTGRESQL
         divisionId: p.reference?.divisionId || p.divisionId,
         divisionName: p.reference?.divisionName || p.divisionName,
         itemId: p.data?.itemId || p.itemId,
         itemName: p.data?.itemName || p.itemName,
         uomId: p.data?.uomId || p.uomId,
         uomName: p.data?.uomName || p.uomName,
-        qty: p.quantity?.ordered ?? p.qty,
-        unitCost: p.data?.unitCost ?? p.unitCost,
-        totalCost: p.amount?.total ?? p.totalCost,
+        qty,
+        unitCost,
+        totalCost,
         notes: p.data?.notes || p.notes || null,
         aggregateVersion: event.aggregateVersion,
         lastEventId: event.id,

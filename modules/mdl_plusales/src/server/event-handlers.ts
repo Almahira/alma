@@ -15,28 +15,30 @@ export const plusalesHandlers: Record<
   TX_PLUSALES_CREATED: async (tx, event) => {
     const p = event.payload;
     const dynamicItems = p.data?.dynamicItems || [];
-
     const companyId = p.organization?.companyId || p.companyId || "";
     const regionId = p.location?.regionId || p.regionId || "";
     const outletId = p.location?.outletId || p.outletId || "";
+    const dateObj = safeDate(p.data?.date || p.date || p.timestamp);
 
     await tx.insert(schema.plusalesDocuments).values({
       id: event.aggregateId,
       companyId,
       regionId,
       outletId,
-      date: safeDate(p.timestamp || p.date),
+      date: dateObj,
       documentNumber:
         p.reference?.documentNumber || p.documentNumber || `SLS-${Date.now()}`,
-      grossSales: p.amount?.subtotal || p.grossSales || 0,
-      discount: p.amount?.discount || p.discount || 0,
-      tax: p.amount?.tax || p.tax || 0,
-      service: p.data?.service || p.service || 0,
-      netSales: p.amount?.total || p.netSales || 0,
-      totalSettlement: p.data?.totalSettlement || 0,
-      totalPettycash: p.data?.totalPettycash || 0,
-      cashOnHand: p.data?.cashOnHand || 0,
-      balanceDifference: p.amount?.balance || p.balanceDifference || 0,
+      grossSales: Math.round(Number(p.amount?.subtotal || p.grossSales || 0)),
+      discount: Math.round(Number(p.amount?.discount || p.discount || 0)),
+      tax: Math.round(Number(p.amount?.tax || p.tax || 0)),
+      service: Math.round(Number(p.data?.service || p.service || 0)),
+      netSales: Math.round(Number(p.amount?.total || p.netSales || 0)),
+      totalSettlement: Math.round(Number(p.data?.totalSettlement || 0)),
+      totalPettycash: Math.round(Number(p.data?.totalPettycash || 0)),
+      cashOnHand: Math.round(Number(p.data?.cashOnHand || 0)),
+      balanceDifference: Math.round(
+        Number(p.amount?.balance || p.balanceDifference || 0),
+      ),
       discrepancyNote: p.data?.discrepancyNote || null,
       proofFileId: p.data?.proofFileId || null,
       status: p.status || "COMPLETED",
@@ -53,7 +55,7 @@ export const plusalesHandlers: Record<
         documentId: event.aggregateId,
         category: item.category || "SETTLEMENT",
         name: item.name,
-        amount: item.amount || 0,
+        amount: Math.round(Number(item.amount || 0)), // <--- Dibulatkan
       }));
       await tx.insert(schema.plusalesDynamicItems).values(itemsToInsert);
     }
@@ -62,19 +64,23 @@ export const plusalesHandlers: Record<
   TX_PLUSALES_UPDATED: async (tx, event) => {
     const p = event.payload;
     const dynamicItems = p.data?.dynamicItems || [];
+    const dateObj = safeDate(p.data?.date || p.date || p.timestamp);
 
     await tx
       .update(schema.plusalesDocuments)
       .set({
-        grossSales: p.amount?.subtotal || p.grossSales,
-        discount: p.amount?.discount || p.discount,
-        tax: p.amount?.tax || p.tax,
-        service: p.data?.service || p.service,
-        netSales: p.amount?.total || p.netSales,
-        totalSettlement: p.data?.totalSettlement,
-        totalPettycash: p.data?.totalPettycash,
-        cashOnHand: p.data?.cashOnHand,
-        balanceDifference: p.amount?.balance || p.balanceDifference,
+        date: dateObj, // <--- UPDATE TANGGAL DI POSTGRESQL
+        grossSales: Math.round(Number(p.amount?.subtotal || p.grossSales || 0)),
+        discount: Math.round(Number(p.amount?.discount || p.discount || 0)),
+        tax: Math.round(Number(p.amount?.tax || p.tax || 0)),
+        service: Math.round(Number(p.data?.service || p.service || 0)),
+        netSales: Math.round(Number(p.amount?.total || p.netSales || 0)),
+        totalSettlement: Math.round(Number(p.data?.totalSettlement || 0)),
+        totalPettycash: Math.round(Number(p.data?.totalPettycash || 0)),
+        cashOnHand: Math.round(Number(p.data?.cashOnHand || 0)),
+        balanceDifference: Math.round(
+          Number(p.amount?.balance || p.balanceDifference || 0),
+        ),
         discrepancyNote: p.data?.discrepancyNote || null,
         proofFileId: p.data?.proofFileId || null,
         aggregateVersion: event.aggregateVersion,
@@ -94,7 +100,7 @@ export const plusalesHandlers: Record<
         documentId: event.aggregateId,
         category: item.category || "SETTLEMENT",
         name: item.name,
-        amount: item.amount || 0,
+        amount: Math.round(Number(item.amount || 0)), // <--- Dibulatkan
       }));
       await tx.insert(schema.plusalesDynamicItems).values(itemsToInsert);
     }

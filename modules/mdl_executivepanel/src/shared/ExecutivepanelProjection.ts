@@ -74,14 +74,13 @@ export class ExecutivePanelProjection implements ProjectionHandler<ExecutivePane
         const outletId = payload.location?.outletId || payload.outletId || "";
         const month = payload.data?.month || payload.month || "";
         const key = `${outletId}_${month}`;
-
         this.targets.set(key, {
           id: key,
           companyId: payload.organization?.companyId || payload.companyId || "",
           outletId,
           month,
-          targetSales: Number(
-            payload.data?.targetSales ?? payload.targetSales ?? 0,
+          targetSales: Math.round(
+            Number(payload.data?.targetSales ?? payload.targetSales ?? 0),
           ),
           foodSalesTargetPct: Number(
             payload.data?.foodSalesTargetPct ??
@@ -96,11 +95,17 @@ export class ExecutivePanelProjection implements ProjectionHandler<ExecutivePane
           cogsBudgetPct: Number(
             payload.data?.cogsBudgetPct ?? payload.cogsBudgetPct ?? 35,
           ),
-          opexBudgetLimit: Number(
-            payload.data?.opexBudgetLimit ?? payload.opexBudgetLimit ?? 0,
+          opexBudgetLimit: Math.round(
+            Number(
+              payload.data?.opexBudgetLimit ?? payload.opexBudgetLimit ?? 0,
+            ),
           ),
-          payrollBudgetLimit: Number(
-            payload.data?.payrollBudgetLimit ?? payload.payrollBudgetLimit ?? 0,
+          payrollBudgetLimit: Math.round(
+            Number(
+              payload.data?.payrollBudgetLimit ??
+                payload.payrollBudgetLimit ??
+                0,
+            ),
           ),
           bankFeePct: Number(
             payload.data?.bankFeePct ?? payload.bankFeePct ?? 0.7,
@@ -110,7 +115,7 @@ export class ExecutivePanelProjection implements ProjectionHandler<ExecutivePane
         break;
       }
 
-      // 2. ALOKASI CADANGAN
+      // ALOKASI CADANGAN
       case "EXECUTIVE_ALLOCATION_SET": {
         this.allocations.set(aggregateId, {
           id: aggregateId,
@@ -124,7 +129,9 @@ export class ExecutivePanelProjection implements ProjectionHandler<ExecutivePane
           percentage: Number(
             payload.data?.percentage ?? payload.percentage ?? 0,
           ),
-          nominal: Number(payload.data?.nominal ?? payload.nominal ?? 0),
+          nominal: Math.round(
+            Number(payload.data?.nominal ?? payload.nominal ?? 0),
+          ),
           isActive: true,
         });
         break;
@@ -152,7 +159,9 @@ export class ExecutivePanelProjection implements ProjectionHandler<ExecutivePane
           percentage: Number(
             payload.data?.percentage ?? payload.percentage ?? 0,
           ),
-          amount: Number(payload.amount?.total ?? payload.amount ?? 0),
+          amount: Math.round(
+            Number(payload.amount?.total ?? payload.amount ?? 0),
+          ),
           sourceFund:
             payload.data?.sourceFund || payload.sourceFund || "TRANSFER_BANK",
           notes: payload.data?.notes || payload.notes || null,

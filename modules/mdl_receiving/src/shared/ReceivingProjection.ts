@@ -29,14 +29,23 @@ export class ReceivingProjection implements ProjectionHandler<ReceivingState> {
           payload.organization?.companyId || payload.companyId || "";
         const regionId = payload.location?.regionId || payload.regionId || null;
         const outletId = payload.location?.outletId || payload.outletId || null;
-        const totalAmount = payload.amount?.total ?? payload.totalAmount ?? 0;
-        const paidAmount = payload.amount?.paid ?? payload.paidAmount ?? 0;
+        const totalAmount = Math.round(
+          payload.amount?.total ?? payload.totalAmount ?? 0,
+        );
+        const paidAmount = Math.round(
+          payload.amount?.paid ?? payload.paidAmount ?? 0,
+        );
         const items = payload.data?.items || payload.items || [];
         const isTempo = payload.data?.isTempo ?? Boolean(dueDate);
-
-        // ---> PERBAIKAN KRUSIAL: Ambil paymentMethod secara eksplisit <---
         const paymentMethod =
           payload.data?.paymentMethod || payload.paymentMethod || "KASIR";
+
+        // ---> AMBIL TANGGAL ASLI NOTA SECARA PRESISI <---
+        const documentDate =
+          payload.data?.date ||
+          payload.date ||
+          payload.timestamp ||
+          new Date().toISOString();
 
         this.documents.set(aggregateId, {
           id: aggregateId,
@@ -46,8 +55,8 @@ export class ReceivingProjection implements ProjectionHandler<ReceivingState> {
           vendorId,
           documentType,
           invoiceNumber,
-          paymentMethod, // <--- TERSIMPAN KE IN-MEMORY PROJECTION
-          date: payload.timestamp || payload.date || new Date().toISOString(),
+          paymentMethod,
+          date: documentDate, // <--- TERSIMPAN KE MEMORI
           dueDate,
           totalAmount,
           paidAmount,
@@ -60,7 +69,6 @@ export class ReceivingProjection implements ProjectionHandler<ReceivingState> {
         });
         break;
       }
-
       case "RECEIVING_UPDATED": {
         if (this.documents.has(aggregateId)) {
           const existing = this.documents.get(aggregateId);
@@ -76,10 +84,11 @@ export class ReceivingProjection implements ProjectionHandler<ReceivingState> {
             payload.reference?.supplierId ||
             payload.vendorId ||
             existing.vendorId;
-          const totalAmount =
+          const totalAmount = Math.round(
             payload.amount?.total ??
-            payload.totalAmount ??
-            existing.totalAmount;
+              payload.totalAmount ??
+              existing.totalAmount,
+          );
           const items = payload.data?.items || payload.items || existing.items;
           const paymentMethod =
             payload.data?.paymentMethod ||
@@ -87,8 +96,16 @@ export class ReceivingProjection implements ProjectionHandler<ReceivingState> {
             existing.paymentMethod ||
             "KASIR";
 
+          // ---> PERBAIKAN KRUSIAL: PERBARUI TANGGAL DARI PAYLOAD UPDATE <---
+          const documentDate =
+            payload.data?.date ||
+            payload.date ||
+            payload.timestamp ||
+            existing.date;
+
           this.documents.set(aggregateId, {
             ...existing,
+            date: documentDate, // <--- TANGGAL DIPERBARUI DI UI!
             invoiceNumber,
             dueDate,
             vendorId,

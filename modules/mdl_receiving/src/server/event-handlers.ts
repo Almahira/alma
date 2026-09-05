@@ -28,8 +28,12 @@ export const receivingHandlers: Record<
     const dateVal = p.data?.date || p.date || p.timestamp;
     const dateObj = safeDate(dateVal) || new Date();
     const dueDateObj = safeDate(p.reference?.dueDate) || safeDate(p.dueDate);
-    const totalAmount = p.amount?.total ?? p.totalAmount ?? 0;
-    const paidAmount = p.amount?.paid ?? p.paidAmount ?? 0;
+
+    // ---> BULATKAN ANGKA INTEGER RUPIAH <---
+    const totalAmount = Math.round(
+      Number(p.amount?.total ?? p.totalAmount ?? 0),
+    );
+    const paidAmount = Math.round(Number(p.amount?.paid ?? p.paidAmount ?? 0));
     const items = p.data?.items || p.items || [];
 
     await tx.insert(schema.receivingDocuments).values({
@@ -57,11 +61,13 @@ export const receivingHandlers: Record<
         documentId: event.aggregateId,
         itemId: item.itemId,
         isExpense: item.isExpense || false,
-        qty: item.qty || 1,
-        receivedQty: item.receivedQty || item.qty || 1,
-        returnedQty: item.returnedQty || 0,
-        price: item.price,
-        subtotal: item.subtotal,
+        qty: Number(item.qty) || 1, // <--- Float 151.6 aman di doublePrecision
+        receivedQty: Number(item.receivedQty || item.qty) || 1,
+        returnedQty: Number(item.returnedQty) || 0,
+        price: Math.round(Number(item.price) || 0),
+        subtotal: Math.round(
+          Number(item.subtotal || item.qty * item.price) || 0,
+        ),
         itemStatus: item.itemStatus || "RECEIVED",
       }));
       await tx.insert(schema.receivingItems).values(itemsToInsert);
@@ -75,7 +81,9 @@ export const receivingHandlers: Record<
     const dateVal = p.data?.date || p.date || p.timestamp;
     const dateObj = safeDate(dateVal) || new Date();
     const dueDateObj = safeDate(p.reference?.dueDate) || safeDate(p.dueDate);
-    const totalAmount = p.amount?.total ?? p.totalAmount ?? 0;
+    const totalAmount = Math.round(
+      Number(p.amount?.total ?? p.totalAmount ?? 0),
+    );
     const items = p.data?.items || p.items || [];
 
     await tx
@@ -106,7 +114,9 @@ export const receivingHandlers: Record<
         receivedQty: item.qty || 1,
         returnedQty: 0,
         price: item.price,
-        subtotal: item.subtotal,
+        subtotal: Math.round(
+          Number(item.subtotal || item.qty * item.price) || 0,
+        ),
         itemStatus: "RECEIVED",
       }));
       await tx.insert(schema.receivingItems).values(itemsToInsert);
