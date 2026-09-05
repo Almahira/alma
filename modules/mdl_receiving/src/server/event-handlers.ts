@@ -18,7 +18,6 @@ export const receivingHandlers: Record<
 > = {
   RECEIVING_CREATED: async (tx, event) => {
     const p = event.payload;
-
     const companyId = p.organization?.companyId || p.companyId;
     const regionId = p.location?.regionId || p.regionId;
     const outletId = p.location?.outletId || p.outletId || null;
@@ -26,11 +25,9 @@ export const receivingHandlers: Record<
     const documentType =
       p.reference?.documentType || p.documentType || "HUTANG";
     const invoiceNumber = p.reference?.invoiceNumber || p.invoiceNumber;
-
-    // Gunakan safeDate
-    const dateObj = safeDate(p.timestamp) || safeDate(p.date) || new Date();
+    const dateVal = p.data?.date || p.date || p.timestamp;
+    const dateObj = safeDate(dateVal) || new Date();
     const dueDateObj = safeDate(p.reference?.dueDate) || safeDate(p.dueDate);
-
     const totalAmount = p.amount?.total ?? p.totalAmount ?? 0;
     const paidAmount = p.amount?.paid ?? p.paidAmount ?? 0;
     const items = p.data?.items || p.items || [];
@@ -75,7 +72,8 @@ export const receivingHandlers: Record<
     const p = event.payload;
     const invoiceNumber = p.reference?.invoiceNumber || p.invoiceNumber;
     const vendorId = p.reference?.supplierId || p.vendorId || null;
-    const dateObj = safeDate(p.timestamp) || safeDate(p.date) || new Date();
+    const dateVal = p.data?.date || p.date || p.timestamp;
+    const dateObj = safeDate(dateVal) || new Date();
     const dueDateObj = safeDate(p.reference?.dueDate) || safeDate(p.dueDate);
     const totalAmount = p.amount?.total ?? p.totalAmount ?? 0;
     const items = p.data?.items || p.items || [];

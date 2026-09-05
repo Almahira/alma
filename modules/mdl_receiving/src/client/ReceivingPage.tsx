@@ -147,72 +147,68 @@ function RowActionMenu({
               maxHeight: "80vh",
               overflowY: "auto",
             }}
-            className="w-48 bg-(--bg-card) rounded-xl shadow-2xl border border-(--border-color) py-1 animate-in fade-in zoom-in-95 duration-150 text-xs font-bold"
+            // ---> PERBAIKAN: Ganti bg-(--bg-card) dengan background SOLID eksplisit <---
+            className="w-52 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 py-1.5 animate-in fade-in zoom-in-95 duration-150 text-xs font-bold text-slate-800 dark:text-slate-100"
           >
-            {/* 1. BAYAR CICILAN (JIKA BELUM LUNAS & BUKAN VOID) */}
+            {/* 1. BAYAR CICILAN */}
             {!isPaid && doc.status !== "CANCELLED" && (
               <button
                 onClick={() => handleAction(onPay)}
-                className="w-full text-left px-4 py-2 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 flex items-center gap-2 transition cursor-pointer"
+                className="w-full text-left px-4 py-2.5 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 flex items-center gap-2.5 transition cursor-pointer"
               >
-                <DollarSign className="w-3.5 h-3.5" /> Bayar Cicilan
+                <DollarSign className="w-4 h-4" /> Bayar Cicilan
               </button>
             )}
-
             {/* 2. EDIT DRAFT */}
             {doc.status === "DRAFT" && !isPaid && (
               <button
                 onClick={() => handleAction(onEdit)}
-                className="w-full text-left px-4 py-2 text-orange-600 dark:text-orange-400 hover:bg-orange-500/10 flex items-center gap-2 transition cursor-pointer"
+                className="w-full text-left px-4 py-2.5 text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-950/40 flex items-center gap-2.5 transition cursor-pointer"
               >
-                <Edit2 className="w-3.5 h-3.5" /> Edit Draft
+                <Edit2 className="w-4 h-4" /> Edit Draft
               </button>
             )}
-
             {/* 3. SELESAIKAN & KUNCI DOKUMEN */}
             {doc.status === "DRAFT" && (
               <button
                 onClick={() => handleAction(onComplete)}
-                className="w-full text-left px-4 py-2 text-blue-600 dark:text-blue-400 hover:bg-blue-500/10 flex items-center gap-2 transition cursor-pointer"
+                className="w-full text-left px-4 py-2.5 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 flex items-center gap-2.5 transition cursor-pointer"
               >
-                <CheckCircle2 className="w-3.5 h-3.5" /> Selesaikan / Kunci
+                <CheckCircle2 className="w-4 h-4" /> Selesaikan / Kunci
               </button>
             )}
-
             {/* 4. ARSIPKAN NOTA DRAFT */}
             {doc.status === "DRAFT" && (
               <button
                 onClick={() => handleAction(onArchive)}
-                className="w-full text-left px-4 py-2 text-slate-600 dark:text-slate-400 hover:bg-slate-500/10 flex items-center gap-2 transition cursor-pointer border-t border-(--border-color)"
+                className="w-full text-left px-4 py-2.5 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition cursor-pointer border-t border-slate-100 dark:border-slate-800"
               >
-                <Archive className="w-3.5 h-3.5" /> Arsipkan Nota
+                <Archive className="w-4 h-4" /> Arsipkan Nota
               </button>
             )}
-
             {/* 5. BATALKAN TRANSAKSI SELESAI (VOID) */}
             {doc.status === "COMPLETED" && (
               <button
                 onClick={() => handleAction(onCancel)}
-                className="w-full text-left px-4 py-2 text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 flex items-center gap-2 transition cursor-pointer"
+                className="w-full text-left px-4 py-2.5 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center gap-2.5 transition cursor-pointer"
               >
-                <Ban className="w-3.5 h-3.5" /> Batalkan (VOID)
+                <Ban className="w-4 h-4" /> Batalkan (VOID)
               </button>
             )}
-
-            {/* 6. SOLUSI ANTI-INPUT ULANG: BUKA KEMBALI NOTA YANG DI-VOID KE DRAFT */}
+            {/* 6. BUKA KEMBALI NOTA YANG DI-VOID KE DRAFT */}
             {doc.status === "CANCELLED" && (
               <>
                 <button
                   onClick={() => handleAction(onReopen)}
-                  className="w-full text-left px-4 py-2 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 flex items-center gap-2 transition cursor-pointer"
+                  className="w-full text-left px-4 py-2.5 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 flex items-center gap-2.5 transition cursor-pointer"
                 >
-                  <RefreshCcw className="w-3.5 h-3.5" /> Buka Kembali ke Draft
+                  <RefreshCcw className="w-4 h-4" /> Buka Kembali ke Draft
                 </button>
                 <button
                   onClick={() => handleAction(onArchive)}
-                  className="w-full text-left px-4 py-2 text-slate-600 dark:text-slate-400 hover:bg-slate-500/10 flex items-center gap-2 transition cursor-pointer border-t border-(--border-color)"
+                  className="w-full text-left px-4 py-2.5 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 transition cursor-pointer border-t border-slate-100 dark:border-slate-800"
                 >
-                  <Archive className="w-3.5 h-3.5" /> Arsipkan Dokumen
+                  <Archive className="w-4 h-4" /> Arsipkan Dokumen
                 </button>
               </>
             )}

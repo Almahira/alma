@@ -908,10 +908,10 @@ export const ReceivingForm: React.FC<{
     setErrors((prev) => ({ ...prev, cart: "" }));
 
     setTimeout(() => {
-      if (itemComboboxRef.current?.focus) {
+      if (itemComboboxRef.current) {
         itemComboboxRef.current.focus();
       }
-    }, 50);
+    }, 60);
   };
 
   const handleUpdateCartItem = (
@@ -1435,6 +1435,28 @@ export const ReceivingForm: React.FC<{
               value={selectedItemId}
               onChange={(v) => setSelectedItemId(v)}
               placeholder={`Ketik nama ${isExpense ? "jasa/biaya" : "barang"}...`}
+              // ---> SETELAH PILIH ITEM & TEKAN ENTER, KURSOR LOMPAT KE QTY (ATAU HARGA JIKA JASA) <---
+              onEnterPressed={() => {
+                setTimeout(() => {
+                  if (!isExpense) {
+                    const qtyEl = document.getElementById(
+                      "qty-input",
+                    ) as HTMLInputElement;
+                    if (qtyEl) {
+                      qtyEl.focus();
+                      qtyEl.select(); // Langsung blok angka 1 agar bisa langsung ditimpa
+                    }
+                  } else {
+                    const priceEl = document.getElementById(
+                      "price-input",
+                    ) as HTMLInputElement;
+                    if (priceEl) {
+                      priceEl.focus();
+                      priceEl.select();
+                    }
+                  }
+                }, 50);
+              }}
             />
           </div>
 
@@ -1445,21 +1467,26 @@ export const ReceivingForm: React.FC<{
                   QTY (DESIMAL)
                 </label>
                 <input
+                  id="qty-input"
                   type="text"
                   inputMode="decimal"
                   value={inputQtyText}
                   onChange={(e) => setInputQtyText(e.target.value)}
+                  // ---> TEKAN ENTER DI QTY, LOMPAT KE HARGA <---
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
                       e.preventDefault();
                       const priceInput = document.getElementById(
                         "price-input",
                       ) as HTMLInputElement;
-                      if (priceInput) priceInput.focus();
+                      if (priceInput) {
+                        priceInput.focus();
+                        priceInput.select(); // Blok angka harga
+                      }
                     }
                   }}
                   placeholder="1 atau 2,5"
-                  className="w-full text-sm font-bold p-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg outline-none font-mono text-center"
+                  className="w-full text-sm font-bold p-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg outline-none font-mono text-center focus:border-blue-500"
                 />
               </div>
             )}
@@ -1473,13 +1500,14 @@ export const ReceivingForm: React.FC<{
                 inputMode="decimal"
                 value={inputPriceText}
                 onChange={(e) => setInputPriceText(e.target.value)}
+                // ---> TEKAN ENTER DI HARGA, TAMBAHKAN KE KERANJANG <---
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault();
                     handleAddToCart();
                   }
                 }}
-                className="w-full text-sm font-black p-2 bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 border border-slate-300 dark:border-slate-700 rounded-lg outline-none font-mono"
+                className="w-full text-sm font-black p-2 bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 border border-slate-300 dark:border-slate-700 rounded-lg outline-none font-mono focus:border-blue-500"
               />
             </div>
             <div className="flex items-end">

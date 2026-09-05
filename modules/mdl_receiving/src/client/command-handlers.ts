@@ -41,7 +41,9 @@ export const receivingCommandHandlers: CommandHandler[] = [
     execute: async (cmd: Command) => {
       const transactionId = `RCV_${ulid()}`;
       const activeActor = getActiveActor();
-
+      const documentDate = cmd.payload.date
+        ? new Date(cmd.payload.date).toISOString()
+        : new Date().toISOString();
       const formattedItems = (cmd.payload.items || []).map((item: any) => ({
         id: item.id || `RITM_${ulid()}`,
         itemId: item.itemId,
@@ -72,25 +74,24 @@ export const receivingCommandHandlers: CommandHandler[] = [
         cmd.payload.outletId || localStorage.getItem("__unv_outletId") || null;
       const isTempo = Boolean(cmd.payload.isTempo);
 
-      // BUNGKUS KE DALAM ALMA CANONICAL ENVELOPE
+      // BUNGKUS KE DALAM ALMA CANONICAL ENVELOPE DENGAN TANGGAL NOTA ASLI
       const canonicalPayload: AlmaTransactionEnvelope<{
         items: any[];
         isTempo: boolean;
         paymentMethod: string;
+        date: string;
       }> = {
         id: transactionId,
         type: "RECEIVING",
         action: "CREATE_RECEIVING",
         status: isTempo ? "DRAFT" : "COMPLETED",
-        timestamp: new Date().toISOString(),
+        timestamp: documentDate, // <--- KUNCI: Gunakan documentDate
         actor: {
           id: activeActor.userId,
           name: activeActor.userId,
           role: activeActor.role,
         },
-        organization: {
-          companyId,
-        },
+        organization: { companyId },
         location: {
           regionId,
           outletId,
@@ -119,10 +120,10 @@ export const receivingCommandHandlers: CommandHandler[] = [
           items: formattedItems,
           isTempo,
           paymentMethod: cmd.payload.paymentMethod || "KASIR",
+          date: documentDate,
         },
       };
 
-      // Terbitkan Event Dokumen
       await globalLedger.appendEvent(
         "RECEIVING_CREATED",
         transactionId,
@@ -132,7 +133,6 @@ export const receivingCommandHandlers: CommandHandler[] = [
         activeActor,
       );
 
-      // Jika CASH, terbitkan Event Pembayaran Lunas
       if (!isTempo && grandTotal > 0) {
         const paymentId = `RPAY_${ulid()}`;
         const paymentPayload: AlmaTransactionEnvelope<{
@@ -144,7 +144,7 @@ export const receivingCommandHandlers: CommandHandler[] = [
           type: "RECEIVING",
           action: "PAYMENT",
           status: "SUCCESS",
-          timestamp: new Date().toISOString(),
+          timestamp: documentDate,
           actor: {
             id: activeActor.userId,
             name: activeActor.userId,
@@ -165,7 +165,6 @@ export const receivingCommandHandlers: CommandHandler[] = [
             proofFileId: null,
           },
         };
-
         await globalLedger.appendEvent(
           "RECEIVING_PAYMENT_ADDED",
           transactionId,
@@ -262,8 +261,14 @@ export const receivingCommandHandlers: CommandHandler[] = [
         invoiceNumber,
         vendorId,
       } = cmd.payload;
+
       const nextVer = (await globalLedger.getAggregateVersion(documentId)) + 1;
       const activeActor = getActiveActor();
+
+      // ---> PERBAIKAN: Gunakan tanggal form saat update <---
+      const documentDate = date
+        ? new Date(date).toISOString()
+        : new Date().toISOString();
 
       const formattedItems = (items || []).map((item: any) => ({
         id: item.id || `RITM_${ulid()}`,
@@ -290,12 +295,13 @@ export const receivingCommandHandlers: CommandHandler[] = [
       const canonicalPayload: AlmaTransactionEnvelope<{
         items: any[];
         isTempo: boolean;
+        date: string;
       }> = {
         id: documentId,
         type: "RECEIVING",
         action: "UPDATE_RECEIVING",
         status: "DRAFT",
-        timestamp: new Date().toISOString(),
+        timestamp: documentDate,
         actor: {
           id: activeActor.userId,
           name: activeActor.userId,
@@ -327,6 +333,7 @@ export const receivingCommandHandlers: CommandHandler[] = [
         data: {
           items: formattedItems,
           isTempo: Boolean(isTempo),
+          date: documentDate,
         },
       };
 
