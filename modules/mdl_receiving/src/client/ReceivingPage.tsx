@@ -881,7 +881,6 @@ export function ReceivingPage() {
                                         }
                                       }
                                     } catch {}
-
                                     // 4. Cetak Invoice dengan 100% Data Riil
                                     printSingleInvoicePdf({
                                       doc,

@@ -41,7 +41,7 @@ import {
   printSummaryPeriodPdf,
   printDetailedPeriodPdf,
 } from "./features/pdf-receiving";
-import { exportExcelReceiving } from "./features/excel-receiving";
+import { exportDetailedExcelReceiving } from "./features/excel-receiving";
 
 // =========================================================================
 // HALAMAN UTAMA MOBILE: RECEIVING PAGE SM
@@ -63,6 +63,9 @@ export function ReceivingPageSM() {
     (localStorage.getItem("__unv_outletId") ? "OUTLET" : "COMPANY");
   const canAccessPiutang =
     deviceScope === "COMPANY" || deviceScope === "REGION";
+  const localCompanyId = localStorage.getItem("__unv_companyId") || "";
+  const localRegionId = localStorage.getItem("__unv_regionId") || "";
+  const localOutletId = localStorage.getItem("__unv_outletId") || "";
 
   const [activeTab, setActiveTab] = useState<
     "HUTANG" | "PIUTANG" | "PETTYCASH"
@@ -431,13 +434,16 @@ export function ReceivingPageSM() {
                   <div className="h-px bg-(--border-color) my-1" />
                   <button
                     onClick={() => {
-                      exportExcelReceiving(filteredDocs, getEntityName);
+                      exportDetailedExcelReceiving(
+                        groupedData,
+                        getLocationReportName(),
+                      );
                       setIsActionMenuOpen(false);
                     }}
-                    className="w-full text-left px-4 py-2.5 text-xs font-bold hover:bg-(--surface-hover) flex items-center gap-2"
+                    className="w-full text-left px-4 py-2.5 text-xs font-bold text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10 flex items-center gap-2.5 transition cursor-pointer"
                   >
                     <FileSpreadsheet className="w-4 h-4 text-emerald-500" />{" "}
-                    Export Excel
+                    Export Rekap Excel (Detail Item)
                   </button>
                 </div>
               )}
@@ -695,17 +701,84 @@ export function ReceivingPageSM() {
                                 <Eye className="w-4 h-4" />
                               </button>
                               <button
-                                onClick={() =>
-                                  printSingleInvoicePdf(
+                                onClick={() => {
+                                  const isPiutang =
+                                    doc.documentType === "PIUTANG";
+
+                                  // 1. Ambil Perusahaan & Region
+                                  const comp =
+                                    companies.find(
+                                      (c) => c.id === doc.companyId,
+                                    ) || companies[0];
+                                  const targetRegionId =
+                                    doc.regionId || localRegionId;
+                                  const reg = regions.find(
+                                    (r) => r.id === targetRegionId,
+                                  );
+
+                                  // 2. Dapatkan Rekening Bank Dinamis (Region jika Piutang, Vendor jika Hutang)
+                                  const { bankAccounts, employees } =
+                                    useOrgStore.getState();
+                                  let finalBankInfo = group.bankInfo;
+
+                                  if (isPiutang) {
+                                    const regBank = bankAccounts.find(
+                                      (b) =>
+                                        (b.targetId === targetRegionId ||
+                                          b.id === targetRegionId) &&
+                                        b.status !== "Arsip",
+                                    );
+                                    if (regBank) {
+                                      finalBankInfo = {
+                                        bankName: regBank.bankName,
+                                        bankAccount: regBank.accountNumber,
+                                        bankAccountName: regBank.accountName,
+                                      };
+                                    }
+                                  }
+
+                                  // 3. Dapatkan Nama & Nomor HP User yang Sedang Login
+                                  let actorName = "Petugas";
+                                  let actorPhone = "-";
+                                  try {
+                                    const rawUser =
+                                      localStorage.getItem("__unv_activeUser");
+                                    if (rawUser) {
+                                      const user = JSON.parse(rawUser);
+                                      actorName =
+                                        user.fullName ||
+                                        user.username ||
+                                        actorName;
+                                      const emp = employees.find(
+                                        (e) => e.id === user.employeeId,
+                                      );
+                                      if (emp?.phone) {
+                                        actorPhone = emp.phone;
+                                      }
+                                    }
+                                  } catch {}
+                                  // 4. Cetak Invoice dengan 100% Data Riil
+                                  printSingleInvoicePdf({
                                     doc,
-                                    group.title,
-                                    getLocationReportName(),
-                                    group.bankInfo,
-                                  )
-                                }
-                                className="p-1.5 text-(--text-secondary) hover:text-indigo-500 border border-(--border-color) rounded"
+                                    vendorName: group.title,
+                                    locationName: getLocationReportName(),
+                                    companyName:
+                                      comp?.name || "ALMA ENTERPRISE",
+                                    regionName: reg?.name
+                                      ? `Region: ${reg.name}`
+                                      : "Kantor Pusat",
+                                    regionAddress:
+                                      reg?.address ||
+                                      "Alamat belum diatur di Master Region",
+                                    activeActorName: actorName,
+                                    activeActorPhone: actorPhone,
+                                    bankInfo: finalBankInfo,
+                                  });
+                                }}
+                                className="p-1.5 text-(--text-secondary) hover:text-indigo-500 bg-(--bg-card) border border-(--border-color) rounded cursor-pointer"
+                                title="Cetak Faktur Nota / Surat Jalan Ini"
                               >
-                                <Printer className="w-4 h-4" />
+                                <Printer className="w-3.5 h-3.5" />
                               </button>
                               {/* Tombol Aksi (More) */}
                               <button
