@@ -228,12 +228,12 @@ export const printSingleInvoicePdf = (context: InvoicePrintContext) => {
           <div class="company-name">${companyName}</div>
           <div class="company-tagline">${regionName}</div>
         </div>
-        <div class="invoice-title">${isPiutang ? "SURAT JALAN" : "INVOICE"}</div>
+        <div class="invoice-title">${isPiutang ? "INVOICE" : "INVOICE"}</div>
       </div>
 
       <div class="bg-footer-dark"></div>
       <div class="bg-footer-black">
-        <div class="thank-you">Dokumen ini diterbitkan otomatis oleh Sistem ALMA. Harap periksa fisik barang saat serah terima.</div>
+        <div class="thank-you">Dokumen ini diterbitkan otomatis oleh Sistem ALMA.</div>
       </div>
       <div class="bg-footer-red"></div>
 
