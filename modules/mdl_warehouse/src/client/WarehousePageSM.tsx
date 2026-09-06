@@ -60,13 +60,23 @@ export function WarehousePageSM() {
 
   const divisionOptions = useMemo(() => {
     return divisions
-      .filter(
-        (d) =>
-          d.status === "Aktif" &&
-          (!localCompanyId || d.companyId === localCompanyId),
-      )
+      .filter((d) => {
+        if (d.status !== "Aktif") return false;
+        if (localCompanyId && d.companyId && d.companyId !== localCompanyId)
+          return false;
+
+        // Cabang Outlet HANYA melihat divisi yang dibuat untuk cabang ini:
+        if (localOutletId) {
+          return d.outletId === localOutletId || !d.outletId;
+        }
+        // Region melihat divisi region atau divisi cabang wilayahnya:
+        if (localRegionId) {
+          return d.regionId === localRegionId || !d.regionId;
+        }
+        return true;
+      })
       .map((d) => ({ value: d.id, label: d.name }));
-  }, [divisions, localCompanyId]);
+  }, [divisions, localCompanyId, localOutletId, localRegionId]);
 
   useEffect(() => {
     if (!stickyDivisionId && divisionOptions.length > 0) {
@@ -329,7 +339,9 @@ export function WarehousePageSM() {
                 step="any"
                 value={inputQty}
                 onChange={(e) =>
-                  setInputQty(e.target.value === "" ? "" : Number(e.target.value))
+                  setInputQty(
+                    e.target.value === "" ? "" : Number(e.target.value),
+                  )
                 }
                 className="w-full text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none text-center font-mono"
               />
@@ -469,14 +481,18 @@ export function WarehousePageSM() {
 
             <div className="flex items-center justify-between pt-2 border-t border-(--border-color) text-xs">
               <div>
-                <span className="text-[9px] text-(--text-secondary) block">Jumlah Diambil:</span>
+                <span className="text-[9px] text-(--text-secondary) block">
+                  Jumlah Diambil:
+                </span>
                 <span className="font-mono font-bold text-orange-500 text-xs">
                   {doc.qty} {doc.uomName}
                 </span>
               </div>
 
               <div className="text-right">
-                <span className="text-[9px] text-(--text-secondary) block">Serapan HPP:</span>
+                <span className="text-[9px] text-(--text-secondary) block">
+                  Serapan HPP:
+                </span>
                 <span className="font-mono font-black text-rose-500 text-xs">
                   Rp {(doc.totalCost || 0).toLocaleString()}
                 </span>

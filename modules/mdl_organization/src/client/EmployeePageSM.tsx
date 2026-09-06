@@ -1,5 +1,5 @@
 // File: modules/mdl_organization/src/client/EmployeePageSM.tsx
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Users,
   Briefcase,
@@ -114,7 +114,10 @@ const EmployeeDocumentFormSM: React.FC<{
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!employeeId || !file) {
-      return sysToast.error("Error", "Pilih karyawan dan lampirkan berkas dokumen!");
+      return sysToast.error(
+        "Error",
+        "Pilih karyawan dan lampirkan berkas dokumen!",
+      );
     }
     try {
       await globalCommandBus.execute({
@@ -290,7 +293,10 @@ const EmployeeFormSM: React.FC<{
           employmentStatus: formData.employmentStatus || "PERMANENT",
         },
       });
-      sysToast.success("Berhasil", `Data karyawan ${formData.fullName} disimpan.`);
+      sysToast.success(
+        "Berhasil",
+        `Data karyawan ${formData.fullName} disimpan.`,
+      );
       onClose();
     } catch (err: any) {
       sysToast.error("Gagal", err.message);
@@ -340,7 +346,9 @@ const EmployeeFormSM: React.FC<{
           </label>
           <select
             value={formData.gender || "LAKI-LAKI"}
-            onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
+            onChange={(e) =>
+              setFormData({ ...formData, gender: e.target.value })
+            }
             className="w-full text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none"
           >
             <option value="LAKI-LAKI">LAKI-LAKI</option>
@@ -358,7 +366,9 @@ const EmployeeFormSM: React.FC<{
             type="tel"
             inputMode="tel"
             value={formData.phone || ""}
-            onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+            onChange={(e) =>
+              setFormData({ ...formData, phone: e.target.value })
+            }
             placeholder="08123456789"
             className="w-full text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none font-mono"
           />
@@ -816,8 +826,7 @@ const PositionFormSM: React.FC<{
           <option value="">PILIH DIVISI</option>
           {divisions
             .filter(
-              (d) =>
-                d.companyId === formData.companyId && d.status === "Aktif",
+              (d) => d.companyId === formData.companyId && d.status === "Aktif",
             )
             .map((d) => (
               <option key={d.id} value={d.id}>
@@ -883,6 +892,79 @@ export function EmployeePageSM() {
     "EMPLOYEES" | "ASSIGNMENTS" | "DOCUMENTS" | "DIV_POS"
   >("EMPLOYEES");
   const [viewStatus, setViewStatus] = useState<"AKTIF" | "ARSIP">("AKTIF");
+
+  // =========================================================================
+  // FILTER TERPADU BERDASARKAN UNIT (COMPANY / REGION / OUTLET)
+  // =========================================================================
+  const localCompanyId = localStorage.getItem("__unv_companyId") || "";
+  const localRegionId = localStorage.getItem("__unv_regionId") || "";
+  const localOutletId = localStorage.getItem("__unv_outletId") || "";
+
+  // 1. DAFTAR ID KARYAWAN YANG SAH UNTUK UNIT INI
+  const allowedEmployeeIds = useMemo(() => {
+    if (localOutletId) {
+      return new Set(
+        (employmentAssignments || [])
+          .filter((a) => a.outletId === localOutletId && a.status === "Aktif")
+          .map((a) => a.employeeId),
+      );
+    }
+    if (localRegionId) {
+      return new Set(
+        (employmentAssignments || [])
+          .filter((a) => a.regionId === localRegionId && a.status === "Aktif")
+          .map((a) => a.employeeId),
+      );
+    }
+    return new Set((employees || []).map((e) => e.id));
+  }, [employmentAssignments, employees, localOutletId, localRegionId]);
+
+  // 2. FILTER TAB 1: DIVISI & POSISI
+  const scopedDivisions = useMemo(() => {
+    return divisions.filter((d) => {
+      if (d.status !== (viewStatus === "AKTIF" ? "Aktif" : "Arsip"))
+        return false;
+      if (localCompanyId && d.companyId && d.companyId !== localCompanyId)
+        return false;
+
+      if (localOutletId) {
+        return d.outletId === localOutletId || !d.outletId;
+      }
+      if (localRegionId) {
+        return d.regionId === localRegionId || !d.regionId;
+      }
+      return true;
+    });
+  }, [divisions, viewStatus, localCompanyId, localOutletId, localRegionId]);
+
+  // 3. FILTER TAB 2: DATA KARYAWAN
+  const scopedEmployees = useMemo(() => {
+    return employees.filter((e) => {
+      const matchStatus =
+        viewStatus === "AKTIF" ? e.status === "Aktif" : e.status === "Arsip";
+      return matchStatus && allowedEmployeeIds.has(e.id);
+    });
+  }, [employees, viewStatus, allowedEmployeeIds]);
+
+  // 4. FILTER TAB 3: PENUGASAN CABANG (ASSIGNMENTS)
+  const scopedAssignments = useMemo(() => {
+    return employmentAssignments.filter((a) => {
+      const matchStatus =
+        viewStatus === "AKTIF" ? a.status === "Aktif" : a.status === "Arsip";
+      if (!matchStatus) return false;
+
+      if (localOutletId) return a.outletId === localOutletId;
+      if (localRegionId) return a.regionId === localRegionId;
+      return true;
+    });
+  }, [employmentAssignments, viewStatus, localOutletId, localRegionId]);
+
+  // 5. FILTER TAB 4: DOKUMEN LEGALITAS KARYAWAN
+  const scopedDocuments = useMemo(() => {
+    return employeeDocuments.filter((doc) =>
+      allowedEmployeeIds.has(doc.employeeId),
+    );
+  }, [employeeDocuments, allowedEmployeeIds]);
 
   const handleArchive = (id: string, type: string, name: string) => {
     openAlert({
@@ -972,7 +1054,9 @@ export function EmployeePageSM() {
                 onClick={() =>
                   openCenterModal({
                     title: "UNGGAH DOKUMEN LEGALITAS",
-                    content: <EmployeeDocumentFormSM onClose={closeCenterModal} />,
+                    content: (
+                      <EmployeeDocumentFormSM onClose={closeCenterModal} />
+                    ),
                   })
                 }
                 className="flex items-center gap-1 px-3 py-1.5 text-xs font-black text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm"
@@ -1032,7 +1116,8 @@ export function EmployeePageSM() {
                 : "text-(--text-secondary) bg-(--bg-input)"
             }`}
           >
-            DATA KARYAWAN ({employees.filter((e) => e.status === "Aktif").length})
+            DATA KARYAWAN (
+            {scopedEmployees.filter((e) => e.status === "Aktif").length})
           </button>
           <button
             onClick={() => setActiveTab("ASSIGNMENTS")}
@@ -1042,7 +1127,8 @@ export function EmployeePageSM() {
                 : "text-(--text-secondary) bg-(--bg-input)"
             }`}
           >
-            PENUGASAN ({employmentAssignments.filter((a) => a.status === "Aktif").length})
+            PENUGASAN (
+            {scopedAssignments.filter((a) => a.status === "Aktif").length})
           </button>
           <button
             onClick={() => setActiveTab("DOCUMENTS")}
@@ -1052,7 +1138,7 @@ export function EmployeePageSM() {
                 : "text-(--text-secondary) bg-(--bg-input)"
             }`}
           >
-            DOKUMEN ({employeeDocuments.length})
+            DOKUMEN ({scopedDocuments.length})
           </button>
           <button
             onClick={() => setActiveTab("DIV_POS")}
@@ -1100,91 +1186,87 @@ export function EmployeePageSM() {
         {/* ========================================================= */}
         {activeTab === "EMPLOYEES" && (
           <>
-            {employees
-              .filter((e) =>
-                viewStatus === "AKTIF"
-                  ? e.status === "Aktif"
-                  : e.status === "Arsip",
-              )
-              .map((emp) => (
-                <div
-                  key={emp.id}
-                  className="bg-(--bg-card) border border-(--border-color) rounded-xl p-3 shadow-xs space-y-2"
-                >
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <div className="font-bold text-sm text-(--text-primary)">
-                        {emp.fullName}
-                      </div>
-                      <div className="text-[10px] font-mono text-orange-500 font-bold mt-0.5">
-                        NIK: {emp.employeeNumber || "-"}
-                      </div>
+            {scopedEmployees.map((emp) => (
+              <div
+                key={emp.id}
+                className="bg-(--bg-card) border border-(--border-color) rounded-xl p-3 shadow-xs space-y-2"
+              >
+                <div className="flex items-start justify-between">
+                  <div>
+                    <div className="font-bold text-sm text-(--text-primary)">
+                      {emp.fullName}
                     </div>
-
-                    <span className="px-2 py-0.5 rounded text-[8px] font-black tracking-wider bg-blue-500/10 text-blue-500 border border-blue-500/20 uppercase">
-                      {emp.employmentStatus}
-                    </span>
+                    <div className="text-[10px] font-mono text-orange-500 font-bold mt-0.5">
+                      NIK: {emp.employeeNumber || "-"}
+                    </div>
                   </div>
 
-                  <div className="flex items-center justify-between pt-2 border-t border-(--border-color) text-xs">
-                    <div>
-                      {emp.phone ? (
-                        <a
-                          href={`tel:${emp.phone}`}
-                          className="inline-flex items-center gap-1 font-mono text-[10px] text-emerald-500 font-bold"
-                        >
-                          <Phone className="w-3 h-3" /> {emp.phone}
-                        </a>
-                      ) : (
-                        <span className="text-[10px] text-(--text-secondary)">{emp.gender}</span>
-                      )}
-                    </div>
+                  <span className="px-2 py-0.5 rounded text-[8px] font-black tracking-wider bg-blue-500/10 text-blue-500 border border-blue-500/20 uppercase">
+                    {emp.employmentStatus}
+                  </span>
+                </div>
 
-                    {hasWriteAccess && (
-                      <div className="flex items-center gap-1.5">
-                        {viewStatus === "AKTIF" ? (
-                          <>
-                            <button
-                              onClick={() =>
-                                openCenterModal({
-                                  title: "EDIT KARYAWAN",
-                                  content: (
-                                    <EmployeeFormSM
-                                      isEditMode={true}
-                                      initialData={emp}
-                                      onClose={closeCenterModal}
-                                    />
-                                  ),
-                                })
-                              }
-                              className="p-1.5 text-(--text-secondary) hover:text-orange-500 border border-(--border-color) rounded-lg"
-                              title="Edit"
-                            >
-                              <Edit2 className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              onClick={() =>
-                                handleArchive(emp.id, "EMPLOYEE", emp.fullName)
-                              }
-                              className="p-1.5 text-(--text-secondary) hover:text-rose-500 border border-(--border-color) rounded-lg"
-                              title="Arsipkan"
-                            >
-                              <Archive className="w-3.5 h-3.5" />
-                            </button>
-                          </>
-                        ) : (
-                          <button
-                            onClick={() => handleRestore(emp.id, "EMPLOYEE")}
-                            className="px-2.5 py-1 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 text-[10px] font-bold rounded-lg flex items-center gap-1"
-                          >
-                            <RotateCcw className="w-3 h-3" /> Restore
-                          </button>
-                        )}
-                      </div>
+                <div className="flex items-center justify-between pt-2 border-t border-(--border-color) text-xs">
+                  <div>
+                    {emp.phone ? (
+                      <a
+                        href={`tel:${emp.phone}`}
+                        className="inline-flex items-center gap-1 font-mono text-[10px] text-emerald-500 font-bold"
+                      >
+                        <Phone className="w-3 h-3" /> {emp.phone}
+                      </a>
+                    ) : (
+                      <span className="text-[10px] text-(--text-secondary)">
+                        {emp.gender}
+                      </span>
                     )}
                   </div>
+
+                  {hasWriteAccess && (
+                    <div className="flex items-center gap-1.5">
+                      {viewStatus === "AKTIF" ? (
+                        <>
+                          <button
+                            onClick={() =>
+                              openCenterModal({
+                                title: "EDIT KARYAWAN",
+                                content: (
+                                  <EmployeeFormSM
+                                    isEditMode={true}
+                                    initialData={emp}
+                                    onClose={closeCenterModal}
+                                  />
+                                ),
+                              })
+                            }
+                            className="p-1.5 text-(--text-secondary) hover:text-orange-500 border border-(--border-color) rounded-lg"
+                            title="Edit"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() =>
+                              handleArchive(emp.id, "EMPLOYEE", emp.fullName)
+                            }
+                            className="p-1.5 text-(--text-secondary) hover:text-rose-500 border border-(--border-color) rounded-lg"
+                            title="Arsipkan"
+                          >
+                            <Archive className="w-3.5 h-3.5" />
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          onClick={() => handleRestore(emp.id, "EMPLOYEE")}
+                          className="px-2.5 py-1 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 text-[10px] font-bold rounded-lg flex items-center gap-1"
+                        >
+                          <RotateCcw className="w-3 h-3" /> Restore
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
-              ))}
+              </div>
+            ))}
           </>
         )}
 
@@ -1193,74 +1275,68 @@ export function EmployeePageSM() {
         {/* ========================================================= */}
         {activeTab === "ASSIGNMENTS" && (
           <>
-            {employmentAssignments
-              .filter((a) =>
-                viewStatus === "AKTIF"
-                  ? a.status === "Aktif"
-                  : a.status === "Arsip",
-              )
-              .map((asn) => {
-                const emp = employees.find((e) => e.id === asn.employeeId);
-                const outlet = outlets.find((o) => o.id === asn.outletId);
-                const div = divisions.find((d) => d.id === asn.divisionId);
-                const pos = positions.find((p) => p.id === asn.positionId);
+            {scopedAssignments.map((asn) => {
+              const emp = employees.find((e) => e.id === asn.employeeId);
+              const outlet = outlets.find((o) => o.id === asn.outletId);
+              const div = divisions.find((d) => d.id === asn.divisionId);
+              const pos = positions.find((p) => p.id === asn.positionId);
 
-                return (
-                  <div
-                    key={asn.id}
-                    className="bg-(--bg-card) border border-(--border-color) rounded-xl p-3 shadow-xs space-y-2"
-                  >
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <div className="font-bold text-xs text-(--text-primary)">
-                          {emp?.fullName || asn.employeeId}
-                        </div>
-                        <div className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5">
-                          <Store className="w-3 h-3" />
-                          <span>{outlet?.name || "-"}</span>
-                        </div>
+              return (
+                <div
+                  key={asn.id}
+                  className="bg-(--bg-card) border border-(--border-color) rounded-xl p-3 shadow-xs space-y-2"
+                >
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <div className="font-bold text-xs text-(--text-primary)">
+                        {emp?.fullName || asn.employeeId}
                       </div>
+                      <div className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5">
+                        <Store className="w-3 h-3" />
+                        <span>{outlet?.name || "-"}</span>
+                      </div>
+                    </div>
 
-                      <span
-                        className={`px-1.5 py-0.2 rounded text-[8px] font-black uppercase border ${
-                          asn.isPrimary
-                            ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20"
-                            : "bg-slate-500/10 text-slate-400 border-slate-500/20"
-                        }`}
-                      >
-                        {asn.isPrimary ? "UTAMA" : "BACKUP"}
+                    <span
+                      className={`px-1.5 py-0.2 rounded text-[8px] font-black uppercase border ${
+                        asn.isPrimary
+                          ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20"
+                          : "bg-slate-500/10 text-slate-400 border-slate-500/20"
+                      }`}
+                    >
+                      {asn.isPrimary ? "UTAMA" : "BACKUP"}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2 border-t border-(--border-color) text-xs">
+                    <div>
+                      <span className="font-bold text-(--text-primary) block text-[11px]">
+                        {pos?.name || "-"}
+                      </span>
+                      <span className="text-[9px] text-(--text-secondary)">
+                        Div: {div?.name || "-"} • Sejak {asn.startDate}
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between pt-2 border-t border-(--border-color) text-xs">
-                      <div>
-                        <span className="font-bold text-(--text-primary) block text-[11px]">
-                          {pos?.name || "-"}
-                        </span>
-                        <span className="text-[9px] text-(--text-secondary)">
-                          Div: {div?.name || "-"} • Sejak {asn.startDate}
-                        </span>
-                      </div>
-
-                      {hasWriteAccess && viewStatus === "AKTIF" && (
-                        <button
-                          onClick={() =>
-                            handleArchive(
-                              asn.employeeId,
-                              "EMPLOYMENT_ASSIGNMENT",
-                              emp?.fullName || "Penugasan",
-                            )
-                          }
-                          className="p-1.5 text-(--text-secondary) hover:text-rose-500 border border-(--border-color) rounded-lg"
-                          title="Akhiri Penugasan"
-                        >
-                          <Archive className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
+                    {hasWriteAccess && viewStatus === "AKTIF" && (
+                      <button
+                        onClick={() =>
+                          handleArchive(
+                            asn.employeeId,
+                            "EMPLOYMENT_ASSIGNMENT",
+                            emp?.fullName || "Penugasan",
+                          )
+                        }
+                        className="p-1.5 text-(--text-secondary) hover:text-rose-500 border border-(--border-color) rounded-lg"
+                        title="Akhiri Penugasan"
+                      >
+                        <Archive className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
-                );
-              })}
+                </div>
+              );
+            })}
           </>
         )}
 
@@ -1269,7 +1345,7 @@ export function EmployeePageSM() {
         {/* ========================================================= */}
         {activeTab === "DOCUMENTS" && (
           <>
-            {employeeDocuments.map((doc) => {
+            {scopedDocuments.map((doc) => {
               const emp = employees.find((e) => e.id === doc.employeeId);
               return (
                 <div
@@ -1317,7 +1393,7 @@ export function EmployeePageSM() {
               );
             })}
 
-            {employeeDocuments.length === 0 && (
+            {scopedDocuments.length === 0 && (
               <div className="p-8 text-center text-(--text-secondary) font-bold text-xs italic">
                 Belum ada dokumen legalitas karyawan yang diunggah.
               </div>
@@ -1331,14 +1407,14 @@ export function EmployeePageSM() {
         {activeTab === "DIV_POS" && (
           <div className="space-y-3">
             {companies
-              .filter((c) => c.status === "Aktif")
+              .filter(
+                (c) =>
+                  c.status === "Aktif" &&
+                  scopedDivisions.some((d) => d.companyId === c.id),
+              )
               .map((company) => {
-                const companyDivs = divisions.filter(
-                  (d) =>
-                    d.companyId === company.id &&
-                    (viewStatus === "AKTIF"
-                      ? d.status === "Aktif"
-                      : d.status === "Arsip"),
+                const companyDivs = scopedDivisions.filter(
+                  (d) => d.companyId === company.id,
                 );
 
                 return (
@@ -1348,7 +1424,8 @@ export function EmployeePageSM() {
                   >
                     <div className="flex items-center justify-between border-b border-(--border-color) pb-2">
                       <span className="font-black text-xs text-(--text-primary) uppercase flex items-center gap-1.5">
-                        <Building2 className="w-4 h-4 text-orange-500" /> {company.name}
+                        <Building2 className="w-4 h-4 text-orange-500" />{" "}
+                        {company.name}
                       </span>
                       <span className="text-[9px] font-mono text-(--text-secondary)">
                         {companyDivs.length} Divisi
@@ -1395,7 +1472,11 @@ export function EmployeePageSM() {
                                   </button>
                                   <button
                                     onClick={() =>
-                                      handleArchive(div.id, "DIVISION", div.name)
+                                      handleArchive(
+                                        div.id,
+                                        "DIVISION",
+                                        div.name,
+                                      )
                                     }
                                     className="p-1 text-(--text-secondary) hover:text-rose-500"
                                   >

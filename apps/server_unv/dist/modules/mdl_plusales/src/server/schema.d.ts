@@ -110,7 +110,7 @@ export declare const plusalesDocuments: import("drizzle-orm/pg-core").PgTableWit
             name: "gross_sales";
             tableName: "plusales_documents";
             dataType: "number";
-            columnType: "PgInteger";
+            columnType: "PgDoublePrecision";
             data: number;
             driverParam: string | number;
             notNull: true;
@@ -127,7 +127,7 @@ export declare const plusalesDocuments: import("drizzle-orm/pg-core").PgTableWit
             name: "discount";
             tableName: "plusales_documents";
             dataType: "number";
-            columnType: "PgInteger";
+            columnType: "PgDoublePrecision";
             data: number;
             driverParam: string | number;
             notNull: true;
@@ -144,7 +144,7 @@ export declare const plusalesDocuments: import("drizzle-orm/pg-core").PgTableWit
             name: "tax";
             tableName: "plusales_documents";
             dataType: "number";
-            columnType: "PgInteger";
+            columnType: "PgDoublePrecision";
             data: number;
             driverParam: string | number;
             notNull: true;
@@ -161,7 +161,7 @@ export declare const plusalesDocuments: import("drizzle-orm/pg-core").PgTableWit
             name: "service";
             tableName: "plusales_documents";
             dataType: "number";
-            columnType: "PgInteger";
+            columnType: "PgDoublePrecision";
             data: number;
             driverParam: string | number;
             notNull: true;
@@ -178,7 +178,7 @@ export declare const plusalesDocuments: import("drizzle-orm/pg-core").PgTableWit
             name: "net_sales";
             tableName: "plusales_documents";
             dataType: "number";
-            columnType: "PgInteger";
+            columnType: "PgDoublePrecision";
             data: number;
             driverParam: string | number;
             notNull: true;
@@ -195,7 +195,7 @@ export declare const plusalesDocuments: import("drizzle-orm/pg-core").PgTableWit
             name: "total_settlement";
             tableName: "plusales_documents";
             dataType: "number";
-            columnType: "PgInteger";
+            columnType: "PgDoublePrecision";
             data: number;
             driverParam: string | number;
             notNull: true;
@@ -212,7 +212,7 @@ export declare const plusalesDocuments: import("drizzle-orm/pg-core").PgTableWit
             name: "total_pettycash";
             tableName: "plusales_documents";
             dataType: "number";
-            columnType: "PgInteger";
+            columnType: "PgDoublePrecision";
             data: number;
             driverParam: string | number;
             notNull: true;
@@ -229,7 +229,7 @@ export declare const plusalesDocuments: import("drizzle-orm/pg-core").PgTableWit
             name: "cash_on_hand";
             tableName: "plusales_documents";
             dataType: "number";
-            columnType: "PgInteger";
+            columnType: "PgDoublePrecision";
             data: number;
             driverParam: string | number;
             notNull: true;
@@ -246,7 +246,7 @@ export declare const plusalesDocuments: import("drizzle-orm/pg-core").PgTableWit
             name: "balance_difference";
             tableName: "plusales_documents";
             dataType: "number";
-            columnType: "PgInteger";
+            columnType: "PgDoublePrecision";
             data: number;
             driverParam: string | number;
             notNull: true;
@@ -461,11 +461,11 @@ export declare const plusalesDynamicItems: import("drizzle-orm/pg-core").PgTable
             name: "amount";
             tableName: "plusales_dynamic_items";
             dataType: "number";
-            columnType: "PgInteger";
+            columnType: "PgDoublePrecision";
             data: number;
             driverParam: string | number;
             notNull: true;
-            hasDefault: false;
+            hasDefault: true;
             isPrimaryKey: false;
             isAutoincrement: false;
             hasRuntimeDefault: false;

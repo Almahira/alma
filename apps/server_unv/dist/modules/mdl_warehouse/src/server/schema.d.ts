@@ -231,7 +231,7 @@ export declare const warehouseDistributions: import("drizzle-orm/pg-core").PgTab
             name: "unit_cost";
             tableName: "warehouse_distributions";
             dataType: "number";
-            columnType: "PgInteger";
+            columnType: "PgDoublePrecision";
             data: number;
             driverParam: string | number;
             notNull: true;
@@ -248,7 +248,7 @@ export declare const warehouseDistributions: import("drizzle-orm/pg-core").PgTab
             name: "total_cost";
             tableName: "warehouse_distributions";
             dataType: "number";
-            columnType: "PgInteger";
+            columnType: "PgDoublePrecision";
             data: number;
             driverParam: string | number;
             notNull: true;
@@ -640,7 +640,7 @@ export declare const warehouseStockOpnames: import("drizzle-orm/pg-core").PgTabl
             name: "total_variance_cost";
             tableName: "warehouse_stock_opnames";
             dataType: "number";
-            columnType: "PgInteger";
+            columnType: "PgDoublePrecision";
             data: number;
             driverParam: string | number;
             notNull: true;
@@ -957,7 +957,7 @@ export declare const warehouseStockOpnameItems: import("drizzle-orm/pg-core").Pg
             name: "unit_cost";
             tableName: "warehouse_stock_opname_items";
             dataType: "number";
-            columnType: "PgInteger";
+            columnType: "PgDoublePrecision";
             data: number;
             driverParam: string | number;
             notNull: true;
@@ -974,7 +974,7 @@ export declare const warehouseStockOpnameItems: import("drizzle-orm/pg-core").Pg
             name: "previous_unit_cost";
             tableName: "warehouse_stock_opname_items";
             dataType: "number";
-            columnType: "PgInteger";
+            columnType: "PgDoublePrecision";
             data: number;
             driverParam: string | number;
             notNull: true;
@@ -991,7 +991,7 @@ export declare const warehouseStockOpnameItems: import("drizzle-orm/pg-core").Pg
             name: "variance_cost";
             tableName: "warehouse_stock_opname_items";
             dataType: "number";
-            columnType: "PgInteger";
+            columnType: "PgDoublePrecision";
             data: number;
             driverParam: string | number;
             notNull: true;
@@ -1363,7 +1363,7 @@ export declare const warehouseSpoilWastes: import("drizzle-orm/pg-core").PgTable
             name: "unit_cost";
             tableName: "warehouse_spoil_wastes";
             dataType: "number";
-            columnType: "PgInteger";
+            columnType: "PgDoublePrecision";
             data: number;
             driverParam: string | number;
             notNull: true;
@@ -1380,7 +1380,7 @@ export declare const warehouseSpoilWastes: import("drizzle-orm/pg-core").PgTable
             name: "total_loss_cost";
             tableName: "warehouse_spoil_wastes";
             dataType: "number";
-            columnType: "PgInteger";
+            columnType: "PgDoublePrecision";
             data: number;
             driverParam: string | number;
             notNull: true;
@@ -1595,7 +1595,7 @@ export declare const warehouseRecipes: import("drizzle-orm/pg-core").PgTableWith
             name: "food_cost_percentage";
             tableName: "warehouse_recipes";
             dataType: "number";
-            columnType: "PgInteger";
+            columnType: "PgDoublePrecision";
             data: number;
             driverParam: string | number;
             notNull: true;
@@ -1612,7 +1612,7 @@ export declare const warehouseRecipes: import("drizzle-orm/pg-core").PgTableWith
             name: "total_hpp_cost";
             tableName: "warehouse_recipes";
             dataType: "number";
-            columnType: "PgInteger";
+            columnType: "PgDoublePrecision";
             data: number;
             driverParam: string | number;
             notNull: true;
@@ -1629,7 +1629,7 @@ export declare const warehouseRecipes: import("drizzle-orm/pg-core").PgTableWith
             name: "ideal_selling_price";
             tableName: "warehouse_recipes";
             dataType: "number";
-            columnType: "PgInteger";
+            columnType: "PgDoublePrecision";
             data: number;
             driverParam: string | number;
             notNull: true;

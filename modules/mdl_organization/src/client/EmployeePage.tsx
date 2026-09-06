@@ -1,5 +1,5 @@
 // File: modules/mdl_organization/src/client/EmployeePage.tsx
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Users,
   Briefcase,
@@ -888,7 +888,7 @@ const AssignmentForm: React.FC<{
 };
 
 // =========================================================================
-// 4. HALAMAN UTAMA MASTER KARYAWAN (DILENGKAPI TAB DOKUMEN LEGALITAS)
+// 4. HALAMAN UTAMA MASTER KARYAWAN (DENGAN FILTER TERPADU)
 // =========================================================================
 export const EmployeePage: React.FC = () => {
   const {
@@ -914,6 +914,82 @@ export const EmployeePage: React.FC = () => {
   >("DIV_POS");
   const [viewStatus, setViewStatus] = useState<"AKTIF" | "ARSIP">("AKTIF");
 
+  // =========================================================================
+  // FILTER TERPADU BERDASARKAN UNIT (COMPANY / REGION / OUTLET)
+  // =========================================================================
+  const localCompanyId = localStorage.getItem("__unv_companyId") || "";
+  const localRegionId = localStorage.getItem("__unv_regionId") || "";
+  const localOutletId = localStorage.getItem("__unv_outletId") || "";
+
+  // 1. DAFTAR ID KARYAWAN YANG SAH UNTUK UNIT INI
+  const allowedEmployeeIds = useMemo(() => {
+    if (localOutletId) {
+      return new Set(
+        (employmentAssignments || [])
+          .filter((a) => a.outletId === localOutletId && a.status === "Aktif")
+          .map((a) => a.employeeId),
+      );
+    }
+    if (localRegionId) {
+      return new Set(
+        (employmentAssignments || [])
+          .filter((a) => a.regionId === localRegionId && a.status === "Aktif")
+          .map((a) => a.employeeId),
+      );
+    }
+    return new Set((employees || []).map((e) => e.id));
+  }, [employmentAssignments, employees, localOutletId, localRegionId]);
+
+  // 2. FILTER TAB 1: DIVISI & POSISI
+  const scopedDivisions = useMemo(() => {
+    return divisions.filter((d) => {
+      if (d.status !== (viewStatus === "AKTIF" ? "Aktif" : "Arsip"))
+        return false;
+      if (localCompanyId && d.companyId && d.companyId !== localCompanyId)
+        return false;
+
+      if (localOutletId) {
+        return d.outletId === localOutletId || !d.outletId;
+      }
+      if (localRegionId) {
+        return d.regionId === localRegionId || !d.regionId;
+      }
+      return true;
+    });
+  }, [divisions, viewStatus, localCompanyId, localOutletId, localRegionId]);
+
+  // 3. FILTER TAB 2: DATA KARYAWAN
+  const scopedEmployees = useMemo(() => {
+    return employees.filter((e) => {
+      const matchStatus =
+        viewStatus === "AKTIF" ? e.status === "Aktif" : e.status === "Arsip";
+      return matchStatus && allowedEmployeeIds.has(e.id);
+    });
+  }, [employees, viewStatus, allowedEmployeeIds]);
+
+  // 4. FILTER TAB 3: PENUGASAN CABANG (ASSIGNMENTS)
+  const scopedAssignments = useMemo(() => {
+    return employmentAssignments.filter((a) => {
+      const matchStatus =
+        viewStatus === "AKTIF" ? a.status === "Aktif" : a.status === "Arsip";
+      if (!matchStatus) return false;
+
+      if (localOutletId) return a.outletId === localOutletId;
+      if (localRegionId) return a.regionId === localRegionId;
+      return true;
+    });
+  }, [employmentAssignments, viewStatus, localOutletId, localRegionId]);
+
+  // 5. FILTER TAB 4: DOKUMEN LEGALITAS KARYAWAN
+  const scopedDocuments = useMemo(() => {
+    return employeeDocuments.filter((doc) =>
+      allowedEmployeeIds.has(doc.employeeId),
+    );
+  }, [employeeDocuments, allowedEmployeeIds]);
+
+  // =========================================================================
+  // HANDLER ARCHIVE & RESTORE
+  // =========================================================================
   const handleArchive = (id: string, type: string) => {
     openAlert({
       title: "Konfirmasi Arsip",
@@ -942,6 +1018,9 @@ export const EmployeePage: React.FC = () => {
     });
   };
 
+  // =========================================================================
+  // RENDER
+  // =========================================================================
   return (
     <div className="relative h-full flex flex-col overflow-hidden bg-(--bg-card)">
       {/* Header Utama */}
@@ -1097,7 +1176,7 @@ export const EmployeePage: React.FC = () => {
             }`}
           >
             <FileText className="w-4 h-4" /> DOKUMEN LEGALITAS (
-            {employeeDocuments.length})
+            {scopedDocuments.length})
           </button>
         </div>
 
@@ -1138,14 +1217,14 @@ export const EmployeePage: React.FC = () => {
         {activeTab === "DIV_POS" && (
           <div className="space-y-6">
             {companies
-              .filter((c) => c.status === "Aktif")
+              .filter(
+                (c) =>
+                  c.status === "Aktif" &&
+                  scopedDivisions.some((d) => d.companyId === c.id),
+              )
               .map((company) => {
-                const companyDivs = divisions.filter(
-                  (d) =>
-                    d.companyId === company.id &&
-                    (viewStatus === "AKTIF"
-                      ? d.status === "Aktif"
-                      : d.status === "Arsip"),
+                const companyDivs = scopedDivisions.filter(
+                  (d) => d.companyId === company.id,
                 );
                 return (
                   <div
@@ -1328,84 +1407,76 @@ export const EmployeePage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-(--border-color)">
-                {employees
-                  .filter((e) =>
-                    viewStatus === "AKTIF"
-                      ? e.status === "Aktif"
-                      : e.status === "Arsip",
-                  )
-                  .map((emp) => (
-                    <tr
-                      key={emp.id}
-                      className="hover:bg-(--surface-hover) transition"
-                    >
-                      <td className="px-6 py-4 font-mono font-bold text-orange-500">
-                        {emp.employeeNumber}
-                      </td>
-                      <td className="px-6 py-4 font-bold text-(--text-primary)">
-                        {emp.fullName}
-                      </td>
-                      <td className="px-6 py-4 text-(--text-secondary)">
-                        {emp.gender}
-                      </td>
-                      <td className="px-6 py-4 text-(--text-secondary)">
-                        <div>{emp.phone || "-"}</div>
-                        <div className="text-[10px] opacity-70">
-                          {emp.email || "-"}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className="px-2 py-0.5 rounded text-[9px] font-black tracking-wider bg-blue-500/10 text-blue-500 border border-blue-500/20">
-                          {emp.employmentStatus}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-right space-x-2">
-                        {viewStatus === "AKTIF" ? (
-                          <>
-                            {hasWriteAccess && (
-                              <button
-                                onClick={() =>
-                                  openSideOver({
-                                    title: "EDIT KARYAWAN",
-                                    width: "w-[500px]",
-                                    content: (
-                                      <EmployeeForm
-                                        isEditMode={true}
-                                        initialData={emp}
-                                        onClose={closeSideOver}
-                                      />
-                                    ),
-                                  })
-                                }
-                                className="p-1.5 text-(--text-secondary) hover:text-blue-500 rounded"
-                              >
-                                <Edit2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                            {hasWriteAccess && (
-                              <button
-                                onClick={() =>
-                                  handleArchive(emp.id, "EMPLOYEE")
-                                }
-                                className="p-1.5 text-(--text-secondary) hover:text-rose-500 rounded"
-                              >
-                                <Archive className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </>
-                        ) : (
-                          hasWriteAccess && (
+                {scopedEmployees.map((emp) => (
+                  <tr
+                    key={emp.id}
+                    className="hover:bg-(--surface-hover) transition"
+                  >
+                    <td className="px-6 py-4 font-mono font-bold text-orange-500">
+                      {emp.employeeNumber}
+                    </td>
+                    <td className="px-6 py-4 font-bold text-(--text-primary)">
+                      {emp.fullName}
+                    </td>
+                    <td className="px-6 py-4 text-(--text-secondary)">
+                      {emp.gender}
+                    </td>
+                    <td className="px-6 py-4 text-(--text-secondary)">
+                      <div>{emp.phone || "-"}</div>
+                      <div className="text-[10px] opacity-70">
+                        {emp.email || "-"}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="px-2 py-0.5 rounded text-[9px] font-black tracking-wider bg-blue-500/10 text-blue-500 border border-blue-500/20">
+                        {emp.employmentStatus}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-right space-x-2">
+                      {viewStatus === "AKTIF" ? (
+                        <>
+                          {hasWriteAccess && (
                             <button
-                              onClick={() => handleRestore(emp.id, "EMPLOYEE")}
-                              className="px-3 py-1 text-[10px] font-bold text-emerald-500 bg-emerald-500/10 rounded"
+                              onClick={() =>
+                                openSideOver({
+                                  title: "EDIT KARYAWAN",
+                                  width: "w-[500px]",
+                                  content: (
+                                    <EmployeeForm
+                                      isEditMode={true}
+                                      initialData={emp}
+                                      onClose={closeSideOver}
+                                    />
+                                  ),
+                                })
+                              }
+                              className="p-1.5 text-(--text-secondary) hover:text-blue-500 rounded"
                             >
-                              RESTORE
+                              <Edit2 className="w-3.5 h-3.5" />
                             </button>
-                          )
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                          )}
+                          {hasWriteAccess && (
+                            <button
+                              onClick={() => handleArchive(emp.id, "EMPLOYEE")}
+                              className="p-1.5 text-(--text-secondary) hover:text-rose-500 rounded"
+                            >
+                              <Archive className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        hasWriteAccess && (
+                          <button
+                            onClick={() => handleRestore(emp.id, "EMPLOYEE")}
+                            className="px-3 py-1 text-[10px] font-bold text-emerald-500 bg-emerald-500/10 rounded"
+                          >
+                            RESTORE
+                          </button>
+                        )
+                      )}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -1428,81 +1499,75 @@ export const EmployeePage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-(--border-color)">
-                {employmentAssignments
-                  .filter((a) =>
-                    viewStatus === "AKTIF"
-                      ? a.status === "Aktif"
-                      : a.status === "Arsip",
-                  )
-                  .map((asn) => {
-                    const emp = employees.find((e) => e.id === asn.employeeId);
-                    const outlet = outlets.find((o) => o.id === asn.outletId);
-                    const div = divisions.find((d) => d.id === asn.divisionId);
-                    const pos = positions.find((p) => p.id === asn.positionId);
+                {scopedAssignments.map((asn) => {
+                  const emp = employees.find((e) => e.id === asn.employeeId);
+                  const outlet = outlets.find((o) => o.id === asn.outletId);
+                  const div = divisions.find((d) => d.id === asn.divisionId);
+                  const pos = positions.find((p) => p.id === asn.positionId);
 
-                    return (
-                      <tr
-                        key={asn.id}
-                        className="hover:bg-(--surface-hover) transition"
-                      >
-                        <td className="px-6 py-4 font-bold text-(--text-primary)">
-                          {emp?.fullName || asn.employeeId}
-                          <div className="text-[10px] font-mono text-(--text-secondary)">
-                            {emp?.employeeNumber}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 font-semibold text-(--text-primary)">
-                          <div className="flex items-center gap-1.5">
-                            <Store className="w-3.5 h-3.5 text-emerald-500" />
-                            {outlet?.name || "-"}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 text-(--text-secondary)">
-                          <div className="font-bold text-(--text-primary)">
-                            {pos?.name || "-"}
-                          </div>
-                          <div className="text-[10px]">{div?.name || "-"}</div>
-                        </td>
-                        <td className="px-6 py-4">
-                          {asn.isPrimary ? (
-                            <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 text-[9px] font-black rounded">
-                              OUTLET UTAMA
-                            </span>
-                          ) : (
-                            <span className="px-2 py-0.5 bg-slate-500/10 text-slate-400 border border-slate-500/20 text-[9px] font-black rounded">
-                              SEKUNDER / BACKUP
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 font-mono text-(--text-secondary)">
-                          {asn.startDate}
-                        </td>
-                        <td className="px-6 py-4 text-right">
-                          {viewStatus === "AKTIF" && hasWriteAccess && (
-                            <button
-                              onClick={() =>
-                                handleArchive(
-                                  asn.employeeId,
-                                  "EMPLOYMENT_ASSIGNMENT",
-                                )
-                              }
-                              className="p-1.5 text-(--text-secondary) hover:text-rose-500 rounded"
-                              title="Akhiri Penugasan"
-                            >
-                              <Archive className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  return (
+                    <tr
+                      key={asn.id}
+                      className="hover:bg-(--surface-hover) transition"
+                    >
+                      <td className="px-6 py-4 font-bold text-(--text-primary)">
+                        {emp?.fullName || asn.employeeId}
+                        <div className="text-[10px] font-mono text-(--text-secondary)">
+                          {emp?.employeeNumber}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 font-semibold text-(--text-primary)">
+                        <div className="flex items-center gap-1.5">
+                          <Store className="w-3.5 h-3.5 text-emerald-500" />
+                          {outlet?.name || "-"}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-(--text-secondary)">
+                        <div className="font-bold text-(--text-primary)">
+                          {pos?.name || "-"}
+                        </div>
+                        <div className="text-[10px]">{div?.name || "-"}</div>
+                      </td>
+                      <td className="px-6 py-4">
+                        {asn.isPrimary ? (
+                          <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 text-[9px] font-black rounded">
+                            OUTLET UTAMA
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 bg-slate-500/10 text-slate-400 border border-slate-500/20 text-[9px] font-black rounded">
+                            SEKUNDER / BACKUP
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 font-mono text-(--text-secondary)">
+                        {asn.startDate}
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        {viewStatus === "AKTIF" && hasWriteAccess && (
+                          <button
+                            onClick={() =>
+                              handleArchive(
+                                asn.employeeId,
+                                "EMPLOYMENT_ASSIGNMENT",
+                              )
+                            }
+                            className="p-1.5 text-(--text-secondary) hover:text-rose-500 rounded"
+                            title="Akhiri Penugasan"
+                          >
+                            <Archive className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
 
         {/* ========================================================================= */}
-        {/* TAB 4: DOKUMEN LEGALITAS KARYAWAN (KTP, NPWP, BPJS, IJAZAH) */}
+        {/* TAB 4: DOKUMEN LEGALITAS KARYAWAN */}
         {/* ========================================================================= */}
         {activeTab === "DOCUMENTS" && (
           <div className="bg-(--bg-card) rounded-xl shadow-xs border border-(--border-color) overflow-hidden">
@@ -1518,7 +1583,7 @@ export const EmployeePage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-(--border-color)">
-                {employeeDocuments.map((doc) => {
+                {scopedDocuments.map((doc) => {
                   const emp = employees.find((e) => e.id === doc.employeeId);
                   return (
                     <tr
@@ -1566,7 +1631,7 @@ export const EmployeePage: React.FC = () => {
                     </tr>
                   );
                 })}
-                {employeeDocuments.length === 0 && (
+                {scopedDocuments.length === 0 && (
                   <tr>
                     <td
                       colSpan={6}

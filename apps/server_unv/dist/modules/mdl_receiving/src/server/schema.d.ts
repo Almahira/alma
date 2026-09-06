@@ -163,7 +163,7 @@ export declare const receivingDocuments: import("drizzle-orm/pg-core").PgTableWi
             name: "total_amount";
             tableName: "receiving_documents";
             dataType: "number";
-            columnType: "PgInteger";
+            columnType: "PgDoublePrecision";
             data: number;
             driverParam: string | number;
             notNull: true;
@@ -180,7 +180,7 @@ export declare const receivingDocuments: import("drizzle-orm/pg-core").PgTableWi
             name: "paid_amount";
             tableName: "receiving_documents";
             dataType: "number";
-            columnType: "PgInteger";
+            columnType: "PgDoublePrecision";
             data: number;
             driverParam: string | number;
             notNull: true;
@@ -269,7 +269,7 @@ export declare const receivingDocuments: import("drizzle-orm/pg-core").PgTableWi
             name: "aggregate_version";
             tableName: "receiving_documents";
             dataType: "number";
-            columnType: "PgInteger";
+            columnType: "PgDoublePrecision";
             data: number;
             driverParam: string | number;
             notNull: true;
@@ -395,7 +395,7 @@ export declare const receivingItems: import("drizzle-orm/pg-core").PgTableWithCo
             name: "qty";
             tableName: "receiving_items";
             dataType: "number";
-            columnType: "PgInteger";
+            columnType: "PgDoublePrecision";
             data: number;
             driverParam: string | number;
             notNull: true;
@@ -412,7 +412,7 @@ export declare const receivingItems: import("drizzle-orm/pg-core").PgTableWithCo
             name: "received_qty";
             tableName: "receiving_items";
             dataType: "number";
-            columnType: "PgInteger";
+            columnType: "PgDoublePrecision";
             data: number;
             driverParam: string | number;
             notNull: true;
@@ -429,7 +429,7 @@ export declare const receivingItems: import("drizzle-orm/pg-core").PgTableWithCo
             name: "returned_qty";
             tableName: "receiving_items";
             dataType: "number";
-            columnType: "PgInteger";
+            columnType: "PgDoublePrecision";
             data: number;
             driverParam: string | number;
             notNull: true;
@@ -446,11 +446,11 @@ export declare const receivingItems: import("drizzle-orm/pg-core").PgTableWithCo
             name: "price";
             tableName: "receiving_items";
             dataType: "number";
-            columnType: "PgInteger";
+            columnType: "PgDoublePrecision";
             data: number;
             driverParam: string | number;
             notNull: true;
-            hasDefault: false;
+            hasDefault: true;
             isPrimaryKey: false;
             isAutoincrement: false;
             hasRuntimeDefault: false;
@@ -463,11 +463,11 @@ export declare const receivingItems: import("drizzle-orm/pg-core").PgTableWithCo
             name: "subtotal";
             tableName: "receiving_items";
             dataType: "number";
-            columnType: "PgInteger";
+            columnType: "PgDoublePrecision";
             data: number;
             driverParam: string | number;
             notNull: true;
-            hasDefault: false;
+            hasDefault: true;
             isPrimaryKey: false;
             isAutoincrement: false;
             hasRuntimeDefault: false;
@@ -557,11 +557,11 @@ export declare const receivingPayments: import("drizzle-orm/pg-core").PgTableWit
             name: "amount";
             tableName: "receiving_payments";
             dataType: "number";
-            columnType: "PgInteger";
+            columnType: "PgDoublePrecision";
             data: number;
             driverParam: string | number;
             notNull: true;
-            hasDefault: false;
+            hasDefault: true;
             isPrimaryKey: false;
             isAutoincrement: false;
             hasRuntimeDefault: false;

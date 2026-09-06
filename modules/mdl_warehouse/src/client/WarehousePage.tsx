@@ -63,13 +63,23 @@ export function WarehousePage() {
   // Filter Divisi Aktif untuk Perusahaan Ini
   const divisionOptions = useMemo(() => {
     return divisions
-      .filter(
-        (d) =>
-          d.status === "Aktif" &&
-          (!localCompanyId || d.companyId === localCompanyId),
-      )
+      .filter((d) => {
+        if (d.status !== "Aktif") return false;
+        if (localCompanyId && d.companyId && d.companyId !== localCompanyId)
+          return false;
+
+        // Cabang Outlet HANYA melihat divisi yang dibuat untuk cabang ini:
+        if (localOutletId) {
+          return d.outletId === localOutletId || !d.outletId;
+        }
+        // Region melihat divisi region atau divisi cabang wilayahnya:
+        if (localRegionId) {
+          return d.regionId === localRegionId || !d.regionId;
+        }
+        return true;
+      })
       .map((d) => ({ value: d.id, label: d.name }));
-  }, [divisions, localCompanyId]);
+  }, [divisions, localCompanyId, localOutletId, localRegionId]);
 
   // Set default divisi jika belum terpilih
   useEffect(() => {

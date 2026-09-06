@@ -19,12 +19,12 @@ export const executivepanelHandlers = {
             companyId: p.organization?.companyId || p.companyId || "",
             outletId: p.location?.outletId || p.outletId || "",
             month: p.data?.month || p.month,
-            targetSales: Number(p.data?.targetSales ?? p.targetSales ?? 0),
+            targetSales: Math.round(Number(p.data?.targetSales ?? p.targetSales ?? 0)),
             foodSalesTargetPct: Number(p.data?.foodSalesTargetPct ?? p.foodSalesTargetPct ?? 85),
             beverageSalesTargetPct: Number(p.data?.beverageSalesTargetPct ?? p.beverageSalesTargetPct ?? 15),
             cogsBudgetPct: Number(p.data?.cogsBudgetPct ?? p.cogsBudgetPct ?? 35),
-            opexBudgetLimit: Number(p.data?.opexBudgetLimit ?? p.opexBudgetLimit ?? 0),
-            payrollBudgetLimit: Number(p.data?.payrollBudgetLimit ?? p.payrollBudgetLimit ?? 0),
+            opexBudgetLimit: Math.round(Number(p.data?.opexBudgetLimit ?? p.opexBudgetLimit ?? 0)),
+            payrollBudgetLimit: Math.round(Number(p.data?.payrollBudgetLimit ?? p.payrollBudgetLimit ?? 0)),
             bankFeePct: Number(p.data?.bankFeePct ?? p.bankFeePct ?? 0.7),
             isActive: true,
             aggregateVersion: event.aggregateVersion,
@@ -33,12 +33,12 @@ export const executivepanelHandlers = {
             .onConflictDoUpdate({
             target: schema.executiveTargets.id,
             set: {
-                targetSales: Number(p.data?.targetSales ?? p.targetSales ?? 0),
+                targetSales: Math.round(Number(p.data?.targetSales ?? p.targetSales ?? 0)),
                 foodSalesTargetPct: Number(p.data?.foodSalesTargetPct ?? p.foodSalesTargetPct ?? 85),
                 beverageSalesTargetPct: Number(p.data?.beverageSalesTargetPct ?? p.beverageSalesTargetPct ?? 15),
                 cogsBudgetPct: Number(p.data?.cogsBudgetPct ?? p.cogsBudgetPct ?? 35),
-                opexBudgetLimit: Number(p.data?.opexBudgetLimit ?? p.opexBudgetLimit ?? 0),
-                payrollBudgetLimit: Number(p.data?.payrollBudgetLimit ?? p.payrollBudgetLimit ?? 0),
+                opexBudgetLimit: Math.round(Number(p.data?.opexBudgetLimit ?? p.opexBudgetLimit ?? 0)),
+                payrollBudgetLimit: Math.round(Number(p.data?.payrollBudgetLimit ?? p.payrollBudgetLimit ?? 0)),
                 bankFeePct: Number(p.data?.bankFeePct ?? p.bankFeePct ?? 0.7),
                 aggregateVersion: event.aggregateVersion,
                 lastEventId: event.id,
@@ -46,7 +46,6 @@ export const executivepanelHandlers = {
             },
         });
     },
-    // 2. ALOKASI CADANGAN OPSIONAL
     EXECUTIVE_ALLOCATION_SET: async (tx, event) => {
         const p = event.payload;
         await tx.insert(schema.executiveAllocations).values({
@@ -56,7 +55,7 @@ export const executivepanelHandlers = {
             month: p.data?.month || p.month || new Date().toISOString().slice(0, 7),
             name: p.data?.name || p.name,
             percentage: Number(p.data?.percentage ?? p.percentage ?? 0),
-            nominal: Number(p.data?.nominal ?? p.nominal ?? 0),
+            nominal: Math.round(Number(p.data?.nominal ?? p.nominal ?? 0)),
             isActive: true,
             aggregateVersion: event.aggregateVersion,
             lastEventId: event.id,
@@ -85,7 +84,7 @@ export const executivepanelHandlers = {
             category: p.data?.category || p.category || "PRIVE",
             recipientName: p.data?.recipientName || p.recipientName || "Pemilik",
             percentage: Number(p.data?.percentage ?? p.percentage ?? 0),
-            amount: Number(p.amount?.total ?? p.amount ?? 0),
+            amount: Math.round(Number(p.amount?.total ?? p.amount ?? 0)),
             sourceFund: p.data?.sourceFund || p.sourceFund || "TRANSFER_BANK",
             notes: p.data?.notes || p.notes || null,
             status: "COMPLETED",

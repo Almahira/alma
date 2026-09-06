@@ -7,32 +7,29 @@ import React, {
   createContext,
   useContext,
   useMemo,
+  memo,
 } from "react";
 import {
-  Search,
   LogOut,
   ChevronDown,
   Bell,
   Settings,
-  Circle,
   Sun,
   Moon,
   Wifi,
   WifiOff,
   X,
   Boxes,
-  Power,
   Box,
   ShieldCheck,
   Key,
   Download,
   Store,
-  Building2,
   LayoutDashboard,
   Menu,
+  Database,
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { createPortal } from "react-dom";
 import { ActivityDrawer } from "./ActivityDrawer";
 import { CommandPalette } from "./CommandPalette";
 import { VirtualNumpad } from "./VirtualNumpad";
@@ -42,6 +39,7 @@ import { sysToast } from "./useToastStore";
 import { useOrgStore } from "../../../../modules/mdl_organization/src/client/store";
 import { globalLedger } from "../../../../packages/core_unv/src/ledger/UniversalLedger";
 
+// ========== TIPE & KONTEKS MODAL UNIVERSAL (MOBILE) ==========
 export interface MenuConfig {
   id: string;
   label: string;
@@ -62,7 +60,6 @@ export interface UniversalLayoutSMProps {
   workspaceName?: string;
 }
 
-// ========== TIPE MODAL UNIVERSAL ==========
 export interface AlertConfig {
   title?: string;
   message: string;
@@ -112,286 +109,288 @@ export const useUniversalModal = () => {
 // =========================================================================
 // MODAL: KONFIGURASI MODUL KONTROL PERANGKAT (MOBILE OPTIMIZED)
 // =========================================================================
-const ModuleManagerModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
-  const allPlugins = manager.getAllPlugins();
+const ModuleManagerModal: React.FC<{ onClose: () => void }> = memo(
+  ({ onClose }) => {
+    const allPlugins = manager.getAllPlugins();
 
-  const [currentTier, setCurrentTier] = useState<string>(() => {
-    return localStorage.getItem("__unv_license_tier") || "FREE";
-  });
+    const [currentTier, setCurrentTier] = useState<string>(() => {
+      return localStorage.getItem("__unv_license_tier") || "FREE";
+    });
 
-  const [allowedModules, setAllowedModules] = useState<string[]>(() => {
-    try {
-      const raw = localStorage.getItem("__unv_allowed_modules");
-      return raw ? JSON.parse(raw) : ["mdl_organization"];
-    } catch {
-      return ["mdl_organization"];
-    }
-  });
+    const [allowedModules, setAllowedModules] = useState<string[]>(() => {
+      try {
+        const raw = localStorage.getItem("__unv_allowed_modules");
+        return raw ? JSON.parse(raw) : ["mdl_organization"];
+      } catch {
+        return ["mdl_organization"];
+      }
+    });
 
-  const [showKeyInput, setShowKeyInput] = useState(false);
-  const [licenseInput, setLicenseInput] = useState("");
+    const [showKeyInput, setShowKeyInput] = useState(false);
+    const [licenseInput, setLicenseInput] = useState("");
 
-  const toggleModule = (modName: string, isCore?: boolean) => {
-    if (isCore || modName === "mdl_organization") return;
-    setAllowedModules((prev) =>
-      prev.includes(modName)
-        ? prev.filter((name) => name !== modName)
-        : [...prev, modName],
-    );
-  };
-
-  const handleEnableAll = () => {
-    setAllowedModules(allPlugins.map((p) => p.name));
-  };
-
-  const handleApplyLicenseKey = () => {
-    if (!licenseInput.trim()) {
-      return sysToast.error(
-        "Error",
-        "Tempelkan kunci lisensi terlebih dahulu!",
+    const toggleModule = (modName: string, isCore?: boolean) => {
+      if (isCore || modName === "mdl_organization") return;
+      setAllowedModules((prev) =>
+        prev.includes(modName)
+          ? prev.filter((name) => name !== modName)
+          : [...prev, modName],
       );
-    }
+    };
 
-    const result = LicenseManager.verifyLicense(licenseInput.trim());
-    if (!result.isValid) {
-      return sysToast.error(
-        "Lisensi Tidak Valid",
-        result.errorMessage || "Kunci lisensi salah atau telah kedaluwarsa.",
+    const handleEnableAll = () => {
+      setAllowedModules(allPlugins.map((p) => p.name));
+    };
+
+    const handleApplyLicenseKey = () => {
+      if (!licenseInput.trim()) {
+        return sysToast.error(
+          "Error",
+          "Tempelkan kunci lisensi terlebih dahulu!",
+        );
+      }
+
+      const result = LicenseManager.verifyLicense(licenseInput.trim());
+      if (!result.isValid) {
+        return sysToast.error(
+          "Lisensi Tidak Valid",
+          result.errorMessage || "Kunci lisensi salah atau telah kedaluwarsa.",
+        );
+      }
+
+      localStorage.setItem("__unv_license_tier", result.tier);
+      localStorage.setItem("__unv_license_token", licenseInput.trim());
+
+      const newAllowed = Array.from(
+        new Set([...allowedModules, ...result.allowedModules]),
       );
-    }
+      localStorage.setItem("__unv_allowed_modules", JSON.stringify(newAllowed));
 
-    localStorage.setItem("__unv_license_tier", result.tier);
-    localStorage.setItem("__unv_license_token", licenseInput.trim());
+      setCurrentTier(result.tier);
+      setAllowedModules(newAllowed);
+      setShowKeyInput(false);
+      setLicenseInput("");
 
-    const newAllowed = Array.from(
-      new Set([...allowedModules, ...result.allowedModules]),
-    );
-    localStorage.setItem("__unv_allowed_modules", JSON.stringify(newAllowed));
+      sysToast.success(
+        "Lisensi Terverifikasi",
+        `Paket ${result.tier} aktif untuk ${result.companyName || "Perusahaan"}. Masa aktif s/d ${result.validUntil ? new Date(result.validUntil).toLocaleDateString("id-ID") : "Selamanya"}`,
+      );
 
-    setCurrentTier(result.tier);
-    setAllowedModules(newAllowed);
-    setShowKeyInput(false);
-    setLicenseInput("");
+      setTimeout(() => {
+        window.location.reload();
+      }, 600);
+    };
 
-    sysToast.success(
-      "Lisensi Terverifikasi",
-      `Paket ${result.tier} aktif untuk ${result.companyName || "Perusahaan"}. Masa aktif s/d ${result.validUntil ? new Date(result.validUntil).toLocaleDateString("id-ID") : "Selamanya"}`,
-    );
+    const handleSave = () => {
+      localStorage.setItem(
+        "__unv_allowed_modules",
+        JSON.stringify(allowedModules),
+      );
+      sysToast.success(
+        "Modul Diperbarui",
+        "Konfigurasi modul berhasil disimpan. Memuat ulang antarmuka...",
+      );
+      setTimeout(() => {
+        window.location.reload();
+      }, 400);
+    };
 
-    setTimeout(() => {
-      window.location.reload();
-    }, 600);
-  };
-
-  const handleSave = () => {
-    localStorage.setItem(
-      "__unv_allowed_modules",
-      JSON.stringify(allowedModules),
-    );
-    sysToast.success(
-      "Modul Diperbarui",
-      "Konfigurasi modul berhasil disimpan. Memuat ulang antarmuka...",
-    );
-    setTimeout(() => {
-      window.location.reload();
-    }, 400);
-  };
-
-  return (
-    <div className="fixed inset-0 z-100 flex items-end sm:items-center justify-center bg-slate-950/70 backdrop-blur-sm">
-      <div className="bg-(--bg-card) w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl shadow-2xl border border-(--border-color) overflow-hidden flex flex-col max-h-[90vh] animate-in slide-in-from-bottom duration-300">
-        {/* Header */}
-        <div className="px-4 py-3 border-b border-(--border-color) flex items-center justify-between bg-(--surface-hover) shrink-0">
-          <div className="flex items-center gap-2">
-            <Boxes className="w-5 h-5 text-orange-500" />
-            <div>
-              <h3 className="font-black text-sm text-(--text-primary) uppercase tracking-wide flex items-center gap-2">
-                Modul &amp; Lisensi
-                <span
-                  className={`px-2 py-0.5 rounded text-[9px] font-black uppercase border ${
-                    currentTier === "EXCLUSIVE"
-                      ? "bg-blue-500/10 text-blue-500 border-blue-500/20"
-                      : currentTier === "PREMIUM"
-                        ? "bg-orange-500/10 text-orange-500 border-orange-500/20"
-                        : "bg-emerald-500/10 text-emerald-500 border-emerald-500/20"
-                  }`}
-                >
-                  {currentTier}
-                </span>
-              </h3>
-              <p className="text-[10px] text-(--text-secondary) font-bold">
-                Aktifkan modul atau upgrade lisensi
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-2 rounded-lg text-(--text-secondary) hover:text-rose-500 hover:bg-rose-500/10 transition"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Konten Scroll */}
-        <div className="p-4 overflow-y-auto custom-scrollbar flex-1 space-y-4">
-          {/* Status Lisensi */}
-          <div className="p-3 bg-(--bg-input) rounded-xl border border-(--border-color) flex items-center justify-between">
+    return (
+      <div className="fixed inset-0 z-100 flex items-end sm:items-center justify-center bg-slate-950/70 backdrop-blur-sm">
+        <div className="bg-(--bg-card) w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl shadow-2xl border border-(--border-color) overflow-hidden flex flex-col max-h-[90vh] animate-in slide-in-from-bottom duration-300">
+          {/* Header */}
+          <div className="px-4 py-3 border-b border-(--border-color) flex items-center justify-between bg-(--surface-hover) shrink-0">
             <div className="flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-orange-500" />
+              <Boxes className="w-5 h-5 text-orange-500" />
               <div>
-                <span className="text-xs font-black text-(--text-primary) block">
-                  Paket {currentTier}
-                </span>
-                <span className="text-[10px] text-(--text-secondary)">
-                  {currentTier === "FREE"
-                    ? "7 Modul Inti Gratis"
-                    : "Lisensi Aktif"}
-                </span>
-              </div>
-            </div>
-            <button
-              onClick={() => setShowKeyInput(!showKeyInput)}
-              className="px-3 py-1.5 bg-orange-500/10 text-orange-500 hover:bg-orange-500/20 border border-orange-500/20 rounded-lg text-[10px] font-black uppercase flex items-center gap-1"
-            >
-              <Key className="w-3 h-3" />
-              {showKeyInput ? "Tutup" : "Upgrade"}
-            </button>
-          </div>
-
-          {/* Form Aktivasi */}
-          {showKeyInput && (
-            <div className="p-3 bg-orange-500/5 rounded-xl border border-orange-500/30 space-y-3">
-              <label className="text-[10px] font-black text-orange-500 uppercase">
-                Input Kunci Lisensi
-              </label>
-              <div className="flex flex-col sm:flex-row gap-2">
-                <input
-                  type="text"
-                  value={licenseInput}
-                  onChange={(e) => setLicenseInput(e.target.value.trim())}
-                  placeholder="Tempel kunci ALMA-LIC-..."
-                  className="flex-1 text-xs font-mono font-bold p-2 bg-(--bg-card) text-(--text-primary) border border-(--border-color) rounded-lg outline-none focus:border-orange-500"
-                />
-                <button
-                  onClick={handleApplyLicenseKey}
-                  className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white font-black text-xs rounded-lg"
-                >
-                  Terapkan
-                </button>
-              </div>
-              <div className="flex items-center gap-2 my-1">
-                <div className="h-px bg-(--border-color) flex-1" />
-                <span className="text-[9px] font-black text-(--text-secondary) uppercase">
-                  ATAU
-                </span>
-                <div className="h-px bg-(--border-color) flex-1" />
-              </div>
-              <button
-                onClick={() => {
-                  onClose();
-                  window.open("/#paket", "_blank");
-                }}
-                className="w-full px-3 py-2 bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs uppercase rounded-lg"
-              >
-                Beli via QRIS / VA
-              </button>
-            </div>
-          )}
-
-          {/* Daftar Modul */}
-          <div>
-            <div className="flex justify-between items-center mb-2">
-              <span className="text-[10px] font-black text-(--text-secondary) uppercase">
-                Modul Terpasang ({allPlugins.length})
-              </span>
-              <button
-                onClick={handleEnableAll}
-                className="text-[10px] font-black text-orange-500"
-              >
-                AKTIFKAN SEMUA
-              </button>
-            </div>
-            <div className="grid grid-cols-1 gap-2">
-              {allPlugins.map((plugin) => {
-                const isSelected = allowedModules.includes(plugin.name);
-                const isCore =
-                  plugin.isCore || plugin.name === "mdl_organization";
-                const PluginIcon = (
-                  typeof plugin.icon === "function" ? plugin.icon : Box
-                ) as React.ComponentType<{ className?: string }>;
-
-                return (
-                  <div
-                    key={plugin.name}
-                    onClick={() => toggleModule(plugin.name, isCore)}
-                    className={`p-3 rounded-xl border-2 flex items-center justify-between ${
-                      isSelected
-                        ? "border-orange-500 bg-orange-500/5"
-                        : "border-(--border-color) bg-(--bg-input) opacity-60"
+                <h3 className="font-black text-sm text-(--text-primary) uppercase tracking-wide flex items-center gap-2">
+                  Modul &amp; Lisensi
+                  <span
+                    className={`px-2 py-0.5 rounded text-[9px] font-black uppercase border ${
+                      currentTier === "EXCLUSIVE"
+                        ? "bg-blue-500/10 text-blue-500 border-blue-500/20"
+                        : currentTier === "PREMIUM"
+                          ? "bg-orange-500/10 text-orange-500 border-orange-500/20"
+                          : "bg-emerald-500/10 text-emerald-500 border-emerald-500/20"
                     }`}
                   >
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                          isSelected
-                            ? "bg-orange-500 text-white"
-                            : "bg-(--surface-hover) text-(--text-secondary)"
-                        }`}
-                      >
-                        <PluginIcon className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <div className="text-xs font-black flex items-center gap-1">
-                          {plugin.displayName || plugin.name}
-                          {isCore && (
-                            <span className="text-[8px] bg-slate-900 text-white px-1 rounded">
-                              WAJIB
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-[9px] text-(--text-secondary)">
-                          {plugin.description || "Modul Bisnis"}
-                        </div>
-                      </div>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      disabled={isCore}
-                      onChange={() => {}}
-                      className="w-4 h-4 rounded text-orange-500"
-                    />
-                  </div>
-                );
-              })}
+                    {currentTier}
+                  </span>
+                </h3>
+                <p className="text-[10px] text-(--text-secondary) font-bold">
+                  Aktifkan modul atau upgrade lisensi
+                </p>
+              </div>
             </div>
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="px-4 py-3 bg-(--surface-hover) border-t border-(--border-color) flex items-center justify-between shrink-0">
-          <span className="text-xs font-bold text-(--text-secondary)">
-            {allowedModules.length}/{allPlugins.length} aktif
-          </span>
-          <div className="flex gap-2">
             <button
               onClick={onClose}
-              className="px-3 py-2 text-xs font-bold text-(--text-secondary) rounded-lg"
+              className="p-2 rounded-lg text-(--text-secondary) hover:text-rose-500 hover:bg-rose-500/10 transition"
             >
-              BATAL
+              <X className="w-5 h-5" />
             </button>
-            <button
-              onClick={handleSave}
-              className="px-4 py-2 text-xs font-black text-white bg-orange-500 rounded-lg"
-            >
-              SIMPAN
-            </button>
+          </div>
+
+          {/* Konten Scroll */}
+          <div className="p-4 overflow-y-auto custom-scrollbar flex-1 space-y-4">
+            {/* Status Lisensi */}
+            <div className="p-3 bg-(--bg-input) rounded-xl border border-(--border-color) flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-orange-500" />
+                <div>
+                  <span className="text-xs font-black text-(--text-primary) block">
+                    Paket {currentTier}
+                  </span>
+                  <span className="text-[10px] text-(--text-secondary)">
+                    {currentTier === "FREE"
+                      ? "7 Modul Inti Gratis"
+                      : "Lisensi Aktif"}
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowKeyInput(!showKeyInput)}
+                className="px-3 py-1.5 bg-orange-500/10 text-orange-500 hover:bg-orange-500/20 border border-orange-500/20 rounded-lg text-[10px] font-black uppercase flex items-center gap-1"
+              >
+                <Key className="w-3 h-3" />
+                {showKeyInput ? "Tutup" : "Upgrade"}
+              </button>
+            </div>
+
+            {/* Form Aktivasi */}
+            {showKeyInput && (
+              <div className="p-3 bg-orange-500/5 rounded-xl border border-orange-500/30 space-y-3">
+                <label className="text-[10px] font-black text-orange-500 uppercase">
+                  Input Kunci Lisensi
+                </label>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="text"
+                    value={licenseInput}
+                    onChange={(e) => setLicenseInput(e.target.value.trim())}
+                    placeholder="Tempel kunci ALMA-LIC-..."
+                    className="flex-1 text-xs font-mono font-bold p-2 bg-(--bg-card) text-(--text-primary) border border-(--border-color) rounded-lg outline-none focus:border-orange-500"
+                  />
+                  <button
+                    onClick={handleApplyLicenseKey}
+                    className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white font-black text-xs rounded-lg"
+                  >
+                    Terapkan
+                  </button>
+                </div>
+                <div className="flex items-center gap-2 my-1">
+                  <div className="h-px bg-(--border-color) flex-1" />
+                  <span className="text-[9px] font-black text-(--text-secondary) uppercase">
+                    ATAU
+                  </span>
+                  <div className="h-px bg-(--border-color) flex-1" />
+                </div>
+                <button
+                  onClick={() => {
+                    onClose();
+                    window.open("/#paket", "_blank");
+                  }}
+                  className="w-full px-3 py-2 bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs uppercase rounded-lg"
+                >
+                  Beli via QRIS / VA
+                </button>
+              </div>
+            )}
+
+            {/* Daftar Modul */}
+            <div>
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-[10px] font-black text-(--text-secondary) uppercase">
+                  Modul Terpasang ({allPlugins.length})
+                </span>
+                <button
+                  onClick={handleEnableAll}
+                  className="text-[10px] font-black text-orange-500"
+                >
+                  AKTIFKAN SEMUA
+                </button>
+              </div>
+              <div className="grid grid-cols-1 gap-2">
+                {allPlugins.map((plugin) => {
+                  const isSelected = allowedModules.includes(plugin.name);
+                  const isCore =
+                    plugin.isCore || plugin.name === "mdl_organization";
+                  const PluginIcon = (
+                    typeof plugin.icon === "function" ? plugin.icon : Box
+                  ) as React.ComponentType<{ className?: string }>;
+
+                  return (
+                    <div
+                      key={plugin.name}
+                      onClick={() => toggleModule(plugin.name, isCore)}
+                      className={`p-3 rounded-xl border-2 flex items-center justify-between ${
+                        isSelected
+                          ? "border-orange-500 bg-orange-500/5"
+                          : "border-(--border-color) bg-(--bg-input) opacity-60"
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div
+                          className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                            isSelected
+                              ? "bg-orange-500 text-white"
+                              : "bg-(--surface-hover) text-(--text-secondary)"
+                          }`}
+                        >
+                          <PluginIcon className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="text-xs font-black flex items-center gap-1">
+                            {plugin.displayName || plugin.name}
+                            {isCore && (
+                              <span className="text-[8px] bg-slate-900 text-white px-1 rounded">
+                                WAJIB
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[9px] text-(--text-secondary)">
+                            {plugin.description || "Modul Bisnis"}
+                          </div>
+                        </div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        disabled={isCore}
+                        onChange={() => {}}
+                        className="w-4 h-4 rounded text-orange-500"
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="px-4 py-3 bg-(--surface-hover) border-t border-(--border-color) flex items-center justify-between shrink-0">
+            <span className="text-xs font-bold text-(--text-secondary)">
+              {allowedModules.length}/{allPlugins.length} aktif
+            </span>
+            <div className="flex gap-2">
+              <button
+                onClick={onClose}
+                className="px-3 py-2 text-xs font-bold text-(--text-secondary) rounded-lg"
+              >
+                BATAL
+              </button>
+              <button
+                onClick={handleSave}
+                className="px-4 py-2 text-xs font-black text-white bg-orange-500 rounded-lg"
+              >
+                SIMPAN
+              </button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
-  );
-};
+    );
+  },
+);
 
 // ========== MODAL ALERT (MOBILE) ==========
 const AlertDialog: React.FC<{ config: AlertConfig; onClose: () => void }> = ({
@@ -503,72 +502,78 @@ const SideOver: React.FC<{ config: SideOverConfig; onClose: () => void }> = ({
   );
 };
 
-// ========== INDIKATOR KONEKSI ==========
-const ConnectionStatus = React.memo(() => {
+// ========== INDIKATOR KONEKSI (HEMAT BATERAI) ==========
+const ConnectionStatus = memo(() => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [pingMs, setPingMs] = useState<number | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const measurePing = async () => {
+    if (document.hidden) return; // Jangan ping saat tab tidak aktif
+    if (!navigator.onLine) {
+      setIsOnline(false);
+      setPingMs(null);
+      return;
+    }
+
+    const startTime = performance.now();
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
+      const serverUrl =
+        localStorage.getItem("__unv_serverUrl") || "https://api.almazain.my.id";
+
+      const res = await fetch(`${serverUrl.replace(/\/+$/, "")}/api/health`, {
+        method: "GET",
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const latency = Math.round(performance.now() - startTime);
+        setPingMs((prev) =>
+          prev === null || Math.abs(latency - prev) > 20 ? latency : prev,
+        );
+        setIsOnline(true);
+      } else {
+        setIsOnline(false);
+        setPingMs(null);
+      }
+    } catch {
+      setIsOnline(false);
+      setPingMs(null);
+    }
+  };
 
   useEffect(() => {
     let isMounted = true;
-
-    const measurePing = async () => {
-      if (typeof navigator !== "undefined" && !navigator.onLine) {
-        if (isMounted) {
-          setIsOnline(false);
-          setPingMs(null);
-        }
-        return;
-      }
-
-      const startTime = performance.now();
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 4000);
-        const serverUrl =
-          localStorage.getItem("__unv_serverUrl") ||
-          "https://api.almazain.my.id";
-
-        const res = await fetch(`${serverUrl.replace(/\/+$/, "")}/api/health`, {
-          method: "GET",
-          signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-
-        if (res.ok && isMounted) {
-          const latency = Math.round(performance.now() - startTime);
-          setPingMs((prev) =>
-            prev === null || Math.abs(latency - prev) > 20 ? latency : prev,
-          );
-          setIsOnline(true);
-        } else if (isMounted) {
-          setIsOnline(false);
-          setPingMs(null);
-        }
-      } catch {
-        if (isMounted) {
-          setIsOnline(false);
-          setPingMs(null);
-        }
-      }
+    const wrapper = () => {
+      if (isMounted) measurePing();
     };
 
-    measurePing();
-    const interval = setInterval(measurePing, 10000);
+    wrapper();
+    // Interval lebih jarang untuk hemat baterai: 15 detik
+    intervalRef.current = setInterval(wrapper, 15000);
 
-    const handleOnline = () => measurePing();
+    const handleOnline = () => wrapper();
     const handleOffline = () => {
       setIsOnline(false);
       setPingMs(null);
     };
+    const handleVisibility = () => {
+      if (!document.hidden) wrapper();
+    };
 
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
+    document.addEventListener("visibilitychange", handleVisibility);
 
     return () => {
       isMounted = false;
-      clearInterval(interval);
+      if (intervalRef.current) clearInterval(intervalRef.current);
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
+      document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, []);
 
@@ -596,7 +601,7 @@ const ConnectionStatus = React.memo(() => {
 });
 
 // ========== PENDING SYNC BADGE ==========
-const PendingSyncBadge = React.memo(() => {
+const PendingSyncBadge = memo(() => {
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
 
   useEffect(() => {
@@ -631,7 +636,7 @@ const DrawerMenuItem: React.FC<{
   activeMenuId: string;
   pathname: string;
   onNavigate: (path: string) => void;
-}> = ({ menu, activeMenuId, pathname, onNavigate }) => {
+}> = memo(({ menu, activeMenuId, pathname, onNavigate }) => {
   const [isOpen, setIsOpen] = useState(false);
   const hasChildren = !!menu.children?.length;
   const isActive =
@@ -663,7 +668,9 @@ const DrawerMenuItem: React.FC<{
         <span className="flex-1 text-sm font-medium">{menu.label}</span>
         {hasChildren && (
           <ChevronDown
-            className={`w-4 h-4 text-(--text-secondary) transition-transform ${isOpen ? "rotate-180" : ""}`}
+            className={`w-4 h-4 text-(--text-secondary) transition-transform ${
+              isOpen ? "rotate-180" : ""
+            }`}
           />
         )}
       </button>
@@ -702,7 +709,7 @@ const DrawerMenuItem: React.FC<{
       )}
     </div>
   );
-};
+});
 
 // ========== LAYOUT UTAMA MOBILE ==========
 export function UniversalLayoutSM({
@@ -714,12 +721,13 @@ export function UniversalLayoutSM({
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [isModuleManagerOpen, setIsModuleManagerOpen] = useState(false);
+  const [isActivityOpen, setIsActivityOpen] = useState(false);
 
   const navigate = useNavigate();
   const location = useLocation();
 
   const { outlets } = useOrgStore();
-  const currentOutletName = React.useMemo(() => {
+  const currentOutletName = useMemo(() => {
     const outId = localStorage.getItem("__unv_outletId");
     if (!outId) return "Holding Pusat";
     return outlets.find((o) => o.id === outId)?.name || "Cabang Outlet";
@@ -836,18 +844,18 @@ export function UniversalLayoutSM({
       >
         {/* Header Mobile */}
         <header className="h-14 bg-(--bg-header)/90 backdrop-blur-xl border-b border-(--border-color) flex items-center justify-between px-3 shrink-0 z-40">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             <button
               onClick={() => setDrawerOpen(true)}
               className="p-2 rounded-lg text-(--text-primary) hover:bg-(--surface-hover)"
             >
               <Menu className="w-6 h-6" />
             </button>
-            <div className="flex items-center gap-2">
-              <span className="font-['Syne',sans-serif] font-extrabold text-lg bg-linear-to-r from-orange-400 via-orange-500 to-yellow-400 bg-clip-text text-transparent">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="font-['Syne',sans-serif] font-extrabold text-lg bg-linear-to-r from-orange-400 via-orange-500 to-yellow-400 bg-clip-text text-transparent whitespace-nowrap">
                 AlmaAPP
               </span>
-              <span className="hidden xs:inline text-[10px] font-bold text-(--text-secondary) uppercase">
+              <span className="hidden xs:inline text-[10px] font-bold text-(--text-secondary) uppercase truncate max-w-30">
                 {currentOutletName}
               </span>
             </div>
@@ -873,6 +881,17 @@ export function UniversalLayoutSM({
                 <Download className="w-5 h-5" />
               </button>
             )}
+            {/* Tombol Aktivitas/Notifikasi */}
+            <button
+              onClick={() => setIsActivityOpen(true)}
+              className="p-2 rounded-lg text-(--text-secondary) hover:bg-(--surface-hover) relative"
+            >
+              <Bell className="w-5 h-5" />
+              {/* Badge titik merah jika ada pending sync (bisa diganti dengan notifikasi lain) */}
+              {
+                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 rounded-full border border-(--bg-header)" />
+              }
+            </button>
             <button
               onClick={() =>
                 modalApi.openAlert({
@@ -951,6 +970,16 @@ export function UniversalLayoutSM({
                 <button
                   onClick={() => {
                     setDrawerOpen(false);
+                    navigate("/system/data-manager");
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-(--text-primary) hover:bg-(--surface-hover)"
+                >
+                  <Database className="w-5 h-5 text-(--text-secondary)" />
+                  Data Manager
+                </button>
+                <button
+                  onClick={() => {
+                    setDrawerOpen(false);
                     navigate("/dashboard/executive");
                   }}
                   className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-(--text-primary) hover:bg-(--surface-hover)"
@@ -1021,7 +1050,10 @@ export function UniversalLayoutSM({
         <CommandPalette menus={menus} />
         <VirtualNumpad />
         <UniversalToast />
-        <ActivityDrawer isOpen={false} onClose={() => {}} />
+        <ActivityDrawer
+          isOpen={isActivityOpen}
+          onClose={() => setIsActivityOpen(false)}
+        />
       </div>
     </UniversalModalContext.Provider>
   );

@@ -93,6 +93,8 @@ export const divisions = pgTable("divisions", {
   companyId: text("company_id")
     .notNull()
     .references(() => companies.id),
+  regionId: text("region_id"),
+  outletId: text("outlet_id"),
   name: text("name").notNull(),
   isActive: boolean("is_active").default(true),
   aggregateVersion: integer("aggregate_version").notNull().default(1),

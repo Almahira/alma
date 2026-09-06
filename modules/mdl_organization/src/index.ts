@@ -81,8 +81,9 @@ export const OrganizationPlugin: ClientPlugin & ServerPlugin = {
       targetAggregate: "ORGANIZATION",
       collectionKey: "divisions",
       matchFields: ["name"],
-      scopeBy: ["companyId"],
-      errorMessage: "Divisi dengan nama ini sudah terdaftar!",
+      // ---> PERBAIKAN: Tambahkan outletId ke scope keunikan <---
+      scopeBy: ["companyId", "outletId"],
+      errorMessage: "Divisi dengan nama ini sudah terdaftar di cabang ini!",
     },
     {
       commandType: "CREATE_USER_ACCOUNT",

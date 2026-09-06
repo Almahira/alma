@@ -17,6 +17,7 @@ import { telemetryMetrics } from "../../../packages/db-schema/schema/telemetry.j
 import { provisionRouter } from "./routes/provision.js";
 import { executiveDashboardRouter } from "./routes/executiveDashboard.js";
 import { paymentRouter } from "./routes/payment.js";
+import { systemHealthRouter } from "./routes/systemHealth.js";
 dotenv.config();
 // ============================================================
 // 1. DYNAMIC CORS ORIGIN RESOLVER
@@ -133,6 +134,7 @@ app.use("/api/payment", paymentRouter);
 app.use("/api/storage", storageRouter);
 app.use("/api/provision", provisionRouter);
 app.use("/api/executive", executiveDashboardRouter);
+app.use("/api/system-health", systemHealthRouter);
 app.set("io", io);
 app.get("/api/health", async (_req, res) => {
     try {
@@ -220,13 +222,39 @@ app.get("/api/events/pull/tx", async (req, res) => {
         const validTxEvents = [];
         const txAggregateMap = new Map();
         txEventsRaw.forEach((evt) => {
-            // Filter Spasial: Jika level outlet, hanya tarik data outletnya
-            if (filterOutletId && evt.outletId && evt.outletId !== filterOutletId) {
-                return;
+            // ============================================================
+            // PENYEKATAN SPASIAL KETAT (ANTI KEBOCORAN DATA)
+            // ============================================================
+            // 1. FILTER PERUSAHAAN / HOLDING (MUTLAK)
+            if (filterCompanyId && evt.payload) {
+                try {
+                    const p = typeof evt.payload === "string"
+                        ? JSON.parse(evt.payload)
+                        : evt.payload;
+                    const evtCompId = p.organization?.companyId || p.companyId;
+                    if (evtCompId && evtCompId !== filterCompanyId)
+                        return;
+                }
+                catch { }
             }
-            // Filter Spasial: Jika level region, hanya tarik data regionnya
-            if (filterRegionId && evt.regionId && evt.regionId !== filterRegionId) {
-                return;
+            // 2. JIKA PERANGKAT ADALAH CABANG OUTLET (Paling Ketat)
+            if (filterOutletId) {
+                // Outlet HANYA berhak menarik event miliknya sendiri!
+                // Event Gudang Region (outletId null) atau Outlet lain DITOLAK MUTLAK.
+                if (evt.outletId !== filterOutletId) {
+                    return;
+                }
+            }
+            // 3. JIKA PERANGKAT ADALAH GUDANG PUSAT / REGION (Tanpa Outlet)
+            else if (filterRegionId) {
+                // Gudang Region hanya berhak menarik event regionnya atau transaksi internalnya
+                if (evt.regionId !== filterRegionId) {
+                    return;
+                }
+                // Jika event milik cabang spesifik, gudang pusat regional tidak perlu menarik transaksi kasir cabang
+                if (evt.outletId) {
+                    return;
+                }
             }
             if (!txAggregateMap.has(evt.aggregateId)) {
                 txAggregateMap.set(evt.aggregateId, []);

@@ -1,5 +1,5 @@
 // File: modules/mdl_organization/src/client/AccountPageSM.tsx
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import {
   ShieldCheck,
   Plus,
@@ -68,12 +68,18 @@ const UserAccountFormSM: React.FC<{
               {isEditMode ? "Edit Akun Pengguna" : "Buat Akun Sistem Baru"}
             </h3>
           </div>
-          <button onClick={onClose} className="p-1 rounded text-(--text-secondary) hover:text-rose-500">
+          <button
+            onClick={onClose}
+            className="p-1 rounded text-(--text-secondary) hover:text-rose-500"
+          >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <form onSubmit={handleSave} className="flex flex-col flex-1 overflow-hidden">
+        <form
+          onSubmit={handleSave}
+          className="flex flex-col flex-1 overflow-hidden"
+        >
           <div className="p-4 overflow-y-auto custom-scrollbar space-y-3.5 flex-1">
             <div>
               <label className="block text-[10px] font-black text-(--text-secondary) uppercase mb-1">
@@ -166,7 +172,9 @@ const UserAccountFormSM: React.FC<{
                 className="w-full text-xs font-bold text-(--text-primary) p-2.5 bg-(--bg-input) border border-(--border-color) rounded-lg outline-none focus:border-orange-500"
               >
                 <option value="SUPER_ADMIN">SUPER ADMIN (Semua Akses)</option>
-                <option value="OUTLET_MANAGER">OUTLET MANAGER (Manajer Toko)</option>
+                <option value="OUTLET_MANAGER">
+                  OUTLET MANAGER (Manajer Toko)
+                </option>
                 <option value="ADMIN">ADMIN OUTLET (Staff Kantor)</option>
                 <option value="STAFF">STAFF UMUM / KASIR (Operasional)</option>
               </select>
@@ -220,13 +228,46 @@ const UserAccountFormSM: React.FC<{
 // 2. HALAMAN UTAMA MOBILE: ACCOUNT PAGE SM
 // =========================================================================
 export function AccountPageSM() {
-  const { userAccounts, employees, positions } = useOrgStore();
+  const { userAccounts, employees, positions, employmentAssignments } =
+    useOrgStore();
   const hasWriteAccess = useHasWriteAccess();
   const { openAlert } = useUniversalModal();
 
   const [viewStatus, setViewStatus] = useState<"AKTIF" | "ARSIP">("AKTIF");
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editUser, setEditUser] = useState<any>(null);
+
+  // =========================================================================
+  // FILTER TERPADU BERDASARKAN UNIT (REGION / OUTLET)
+  // =========================================================================
+  const localOutletId = localStorage.getItem("__unv_outletId") || "";
+  const localRegionId = localStorage.getItem("__unv_regionId") || "";
+
+  const allowedEmployeeIds = useMemo(() => {
+    if (localOutletId) {
+      return new Set(
+        (employmentAssignments || [])
+          .filter((a) => a.outletId === localOutletId && a.status === "Aktif")
+          .map((a) => a.employeeId),
+      );
+    }
+    if (localRegionId) {
+      return new Set(
+        (employmentAssignments || [])
+          .filter((a) => a.regionId === localRegionId && a.status === "Aktif")
+          .map((a) => a.employeeId),
+      );
+    }
+    return new Set((employees || []).map((e) => e.id));
+  }, [employmentAssignments, employees, localOutletId, localRegionId]);
+
+  const scopedUserAccounts = useMemo(() => {
+    return userAccounts.filter((u) => {
+      const matchStatus =
+        viewStatus === "AKTIF" ? u.status === "Aktif" : u.status === "Arsip";
+      return matchStatus && allowedEmployeeIds.has(u.employeeId);
+    });
+  }, [userAccounts, viewStatus, allowedEmployeeIds]);
 
   const handleArchive = (id: string, username: string) => {
     openAlert({
@@ -258,10 +299,6 @@ export function AccountPageSM() {
       sysToast.error("Gagal", err.message);
     }
   };
-
-  const filteredAccounts = userAccounts.filter((u) =>
-    viewStatus === "AKTIF" ? u.status === "Aktif" : u.status === "Arsip",
-  );
 
   return (
     <div className="relative h-full flex flex-col overflow-hidden bg-(--bg-card)">
@@ -314,7 +351,8 @@ export function AccountPageSM() {
                 : "text-(--text-secondary)"
             }`}
           >
-            AKUN AKTIF ({userAccounts.filter((u) => u.status === "Aktif").length})
+            AKUN AKTIF (
+            {scopedUserAccounts.filter((u) => u.status === "Aktif").length})
           </button>
           <button
             onClick={() => setViewStatus("ARSIP")}
@@ -331,17 +369,20 @@ export function AccountPageSM() {
 
       {/* DAFTAR AKUN (KARTU MOBILE) */}
       <div className="flex-1 overflow-y-auto p-3 space-y-2.5 custom-scrollbar">
-        {filteredAccounts.map((user) => {
+        {scopedUserAccounts.map((user) => {
           const emp = employees.find((e) => e.id === user.employeeId);
           const pos = positions.find((p) => p.id === user.positionId);
 
-          let roleBadgeColor = "bg-slate-500/10 text-slate-400 border-slate-500/20";
+          let roleBadgeColor =
+            "bg-slate-500/10 text-slate-400 border-slate-500/20";
           if (user.role === "SUPER_ADMIN")
             roleBadgeColor = "bg-rose-500/10 text-rose-500 border-rose-500/20";
           if (user.role === "OUTLET_MANAGER")
-            roleBadgeColor = "bg-amber-500/10 text-amber-500 border-amber-500/20";
+            roleBadgeColor =
+              "bg-amber-500/10 text-amber-500 border-amber-500/20";
           if (user.role === "CASHIER" || user.role === "STAFF")
-            roleBadgeColor = "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
+            roleBadgeColor =
+              "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
 
           return (
             <div
@@ -370,7 +411,10 @@ export function AccountPageSM() {
 
               <div className="flex items-center justify-between pt-2 border-t border-(--border-color) text-xs">
                 <span className="text-[10px] text-(--text-secondary)">
-                  Posisi: <strong className="text-(--text-primary)">{pos?.name || "-"}</strong>
+                  Posisi:{" "}
+                  <strong className="text-(--text-primary)">
+                    {pos?.name || "-"}
+                  </strong>
                 </span>
 
                 {hasWriteAccess && (
@@ -410,7 +454,7 @@ export function AccountPageSM() {
           );
         })}
 
-        {filteredAccounts.length === 0 && (
+        {scopedUserAccounts.length === 0 && (
           <div className="p-8 text-center text-(--text-secondary) font-bold text-xs italic">
             Belum ada akun pengguna pada status ini.
           </div>

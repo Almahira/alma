@@ -96,7 +96,7 @@ interface UniversalModalContextValue {
   closeSideOver: () => void;
 }
 
-const UniversalModalContext = createContext<
+export const UniversalModalContext = createContext<
   UniversalModalContextValue | undefined
 >(undefined);
 

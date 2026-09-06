@@ -74,7 +74,7 @@ export async function startSyncWorker(io) {
                     if (handler) {
                         await handler(tx, event);
                     }
-                    else {
+                    else if (!type.startsWith("DICTIONARY_")) {
                         console.warn(`[WORKER] Tidak ada server handler untuk event: ${type}`);
                     }
                 });

@@ -358,12 +358,27 @@ export const organizationCommandHandlers: CommandHandler[] = [
     execute: async (cmd: Command) => {
       validateWriteAccess();
       const newId = `AGG_${ulid()}`;
+      const payload = {
+        ...cmd.payload,
+        companyId:
+          cmd.payload.companyId ||
+          localStorage.getItem("__unv_companyId") ||
+          "",
+        regionId:
+          cmd.payload.regionId ||
+          localStorage.getItem("__unv_regionId") ||
+          null,
+        outletId:
+          cmd.payload.outletId ||
+          localStorage.getItem("__unv_outletId") ||
+          null, // <--- Warisi otomatis dari perangkat
+      };
       await globalLedger.appendEvent(
         "DIVISION_CREATED",
         newId,
         "DIVISION",
         1,
-        cmd.payload,
+        payload,
         getActiveActor(),
       );
     },

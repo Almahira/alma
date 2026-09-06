@@ -1,5 +1,5 @@
 // File: modules/mdl_organization/src/client/AccountPage.tsx
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import {
   ShieldCheck,
   Plus,
@@ -185,9 +185,42 @@ const UserAccountForm: React.FC<{
 
 export const AccountPage: React.FC = () => {
   const { openSideOver, closeSideOver, openAlert } = useUniversalModal();
-  const { userAccounts, employees, positions } = useOrgStore();
+  const { userAccounts, employees, positions, employmentAssignments } =
+    useOrgStore();
   const hasWriteAccess = useHasWriteAccess();
   const [viewStatus, setViewStatus] = useState<"AKTIF" | "ARSIP">("AKTIF");
+
+  // =========================================================================
+  // FILTER TERPADU BERDASARKAN UNIT (REGION / OUTLET)
+  // =========================================================================
+  const localOutletId = localStorage.getItem("__unv_outletId") || "";
+  const localRegionId = localStorage.getItem("__unv_regionId") || "";
+
+  const allowedEmployeeIds = useMemo(() => {
+    if (localOutletId) {
+      return new Set(
+        (employmentAssignments || [])
+          .filter((a) => a.outletId === localOutletId && a.status === "Aktif")
+          .map((a) => a.employeeId),
+      );
+    }
+    if (localRegionId) {
+      return new Set(
+        (employmentAssignments || [])
+          .filter((a) => a.regionId === localRegionId && a.status === "Aktif")
+          .map((a) => a.employeeId),
+      );
+    }
+    return new Set((employees || []).map((e) => e.id));
+  }, [employmentAssignments, employees, localOutletId, localRegionId]);
+
+  const scopedUserAccounts = useMemo(() => {
+    return userAccounts.filter((u) => {
+      const matchStatus =
+        viewStatus === "AKTIF" ? u.status === "Aktif" : u.status === "Arsip";
+      return matchStatus && allowedEmployeeIds.has(u.employeeId);
+    });
+  }, [userAccounts, viewStatus, allowedEmployeeIds]);
 
   const handleArchive = (id: string) => {
     openAlert({
@@ -296,99 +329,93 @@ export const AccountPage: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-(--border-color)">
-              {userAccounts
-                .filter((u) =>
-                  viewStatus === "AKTIF"
-                    ? u.status === "Aktif"
-                    : u.status === "Arsip",
-                )
-                .map((user) => {
-                  const emp = employees.find((e) => e.id === user.employeeId);
-                  const pos = positions.find((p) => p.id === user.positionId);
+              {scopedUserAccounts.map((user) => {
+                const emp = employees.find((e) => e.id === user.employeeId);
+                const pos = positions.find((p) => p.id === user.positionId);
 
-                  let roleBadgeColor =
-                    "bg-slate-500/10 text-slate-400 border-slate-500/20";
-                  if (user.role === "SUPER_ADMIN")
-                    roleBadgeColor =
-                      "bg-rose-500/10 text-rose-500 border-rose-500/20";
-                  if (user.role === "OUTLET_MANAGER")
-                    roleBadgeColor =
-                      "bg-amber-500/10 text-amber-500 border-amber-500/20";
-                  if (user.role === "CASHIER")
-                    roleBadgeColor =
-                      "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
+                let roleBadgeColor =
+                  "bg-slate-500/10 text-slate-400 border-slate-500/20";
+                if (user.role === "SUPER_ADMIN")
+                  roleBadgeColor =
+                    "bg-rose-500/10 text-rose-500 border-rose-500/20";
+                if (user.role === "OUTLET_MANAGER")
+                  roleBadgeColor =
+                    "bg-amber-500/10 text-amber-500 border-amber-500/20";
+                if (user.role === "CASHIER")
+                  roleBadgeColor =
+                    "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
 
-                  return (
-                    <tr
-                      key={user.id}
-                      className="hover:bg-(--surface-hover) transition"
-                    >
-                      <td className="px-6 py-4 font-mono font-bold text-orange-500">
-                        {user.username}
-                      </td>
-                      <td className="px-6 py-4 font-bold text-(--text-primary)">
-                        {emp?.fullName || user.employeeId}
-                        <div className="text-[10px] font-mono text-(--text-secondary)">
-                          {emp?.employeeNumber}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span
-                          className={`px-2 py-0.5 rounded text-[9px] font-black tracking-wider border ${roleBadgeColor}`}
-                        >
-                          {user.role}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 font-semibold text-(--text-secondary)">
-                        {pos?.name || "-"}
-                      </td>
-                      <td className="px-6 py-4 text-right space-x-2">
-                        {viewStatus === "AKTIF" ? (
-                          <>
-                            {hasWriteAccess && (
-                              <button
-                                onClick={() =>
-                                  openSideOver({
-                                    title: "EDIT AKUN",
-                                    width: "w-[500px]",
-                                    content: (
-                                      <UserAccountForm
-                                        isEditMode={true}
-                                        initialData={user}
-                                        onClose={closeSideOver}
-                                      />
-                                    ),
-                                  })
-                                }
-                                className="p-1.5 text-(--text-secondary) hover:text-blue-500 rounded"
-                              >
-                                <Edit2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                            {hasWriteAccess && (
-                              <button
-                                onClick={() => handleArchive(user.id)}
-                                className="p-1.5 text-(--text-secondary) hover:text-rose-500 rounded"
-                              >
-                                <Archive className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </>
-                        ) : (
-                          hasWriteAccess && (
+                return (
+                  <tr
+                    key={user.id}
+                    className="hover:bg-(--surface-hover) transition"
+                  >
+                    <td className="px-6 py-4 font-mono font-bold text-orange-500">
+                      {user.username}
+                    </td>
+                    <td className="px-6 py-4 font-bold text-(--text-primary)">
+                      {emp?.fullName || user.employeeId}
+                      <div className="text-[10px] font-mono text-(--text-secondary)">
+                        {emp?.employeeNumber}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span
+                        className={`px-2 py-0.5 rounded text-[9px] font-black tracking-wider border ${roleBadgeColor}`}
+                      >
+                        {user.role}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 font-semibold text-(--text-secondary)">
+                      {pos?.name || "-"}
+                    </td>
+                    <td className="px-6 py-4 text-right space-x-2">
+                      {viewStatus === "AKTIF" ? (
+                        <>
+                          {hasWriteAccess && (
                             <button
-                              onClick={() => handleRestore(user.id)}
-                              className="px-3 py-1 text-[10px] font-bold text-emerald-500 bg-emerald-500/10 rounded"
+                              onClick={() =>
+                                openSideOver({
+                                  title: "EDIT AKUN",
+                                  width: "w-[500px]",
+                                  content: (
+                                    <UserAccountForm
+                                      isEditMode={true}
+                                      initialData={user}
+                                      onClose={closeSideOver}
+                                    />
+                                  ),
+                                })
+                              }
+                              className="p-1.5 text-(--text-secondary) hover:text-blue-500 rounded"
                             >
-                              RESTORE
+                              <Edit2 className="w-3.5 h-3.5" />
                             </button>
-                          )
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              {userAccounts.length === 0 && (
+                          )}
+                          {hasWriteAccess && (
+                            <button
+                              onClick={() => handleArchive(user.id)}
+                              className="p-1.5 text-(--text-secondary) hover:text-rose-500 rounded"
+                            >
+                              <Archive className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        hasWriteAccess && (
+                          <button
+                            onClick={() => handleRestore(user.id)}
+                            className="px-3 py-1 text-[10px] font-bold text-emerald-500 bg-emerald-500/10 rounded"
+                          >
+                            RESTORE
+                          </button>
+                        )
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {scopedUserAccounts.length === 0 && (
                 <tr>
                   <td
                     colSpan={5}

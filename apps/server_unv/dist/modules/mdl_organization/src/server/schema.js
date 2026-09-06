@@ -79,6 +79,8 @@ export const divisions = pgTable("divisions", {
     companyId: text("company_id")
         .notNull()
         .references(() => companies.id),
+    regionId: text("region_id"),
+    outletId: text("outlet_id"),
     name: text("name").notNull(),
     isActive: boolean("is_active").default(true),
     aggregateVersion: integer("aggregate_version").notNull().default(1),
@@ -194,7 +196,7 @@ export const userAccounts = pgTable("user_accounts", {
     username: varchar("username", { length: 50 }).notNull().unique(),
     passwordHash: text("password_hash").notNull(),
     pin: varchar("pin", { length: 10 }),
-    role: varchar("role", { length: 50 }).notNull(),
+    role: varchar("role", { length: 50 }).notNull().default("STAFF"),
     positionId: text("position_id"),
     lastLogin: timestamp("last_login"),
     isActive: boolean("is_active").default(true),

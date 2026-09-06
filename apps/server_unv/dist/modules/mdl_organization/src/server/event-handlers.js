@@ -196,6 +196,8 @@ export const organizationHandlers = {
         await tx.insert(schema.divisions).values({
             id: event.aggregateId,
             companyId: event.payload.companyId,
+            regionId: event.payload.regionId || null,
+            outletId: event.payload.outletId || null,
             name: event.payload.name,
             isActive: true,
             aggregateVersion: event.aggregateVersion,
@@ -406,6 +408,7 @@ export const organizationHandlers = {
     },
     // 8. USER ACCOUNTS
     USER_ACCOUNT_CREATED: async (tx, event) => {
+        const validRole = event.payload.role || "STAFF";
         await tx
             .insert(schema.userAccounts)
             .values({
@@ -415,8 +418,8 @@ export const organizationHandlers = {
             passwordHash: event.payload.passwordHash ||
                 event.payload.password ||
                 "DEFAULT_HASH",
-            pin: event.payload.pin || null, // <-- SIMPAN PIN
-            role: event.payload.role,
+            pin: event.payload.pin || null,
+            role: validRole,
             positionId: event.payload.positionId || null,
             isActive: true,
             aggregateVersion: event.aggregateVersion,
@@ -425,10 +428,10 @@ export const organizationHandlers = {
             .onConflictDoUpdate({
             target: schema.userAccounts.id,
             set: {
-                role: event.payload.role,
+                role: validRole,
                 positionId: event.payload.positionId || null,
                 passwordHash: event.payload.passwordHash || event.payload.password || undefined,
-                pin: event.payload.pin || undefined, // <-- UPDATE PIN JIKA ADA
+                pin: event.payload.pin || undefined,
                 aggregateVersion: event.aggregateVersion,
                 lastEventId: event.id,
                 updatedAt: new Date(),

@@ -205,6 +205,8 @@ export const organizationHandlers: Record<
     await tx.insert(schema.divisions).values({
       id: event.aggregateId,
       companyId: event.payload.companyId,
+      regionId: event.payload.regionId || null,
+      outletId: event.payload.outletId || null,
       name: event.payload.name,
       isActive: true,
       aggregateVersion: event.aggregateVersion,

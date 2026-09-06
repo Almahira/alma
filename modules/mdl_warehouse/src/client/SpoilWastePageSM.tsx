@@ -42,7 +42,9 @@ export function SpoilWastePageSM() {
   // Mode Toggle: SPOIL (Bahan Rusak) vs WASTE (Menu Gagal)
   const [entryMode, setEntryMode] = useState<"SPOIL" | "WASTE">("SPOIL");
   const [viewStatus, setViewStatus] = useState<"AKTIF" | "ARSIP">("AKTIF");
-  const [filterType, setFilterType] = useState<"ALL" | "SPOIL" | "WASTE">("ALL");
+  const [filterType, setFilterType] = useState<"ALL" | "SPOIL" | "WASTE">(
+    "ALL",
+  );
   const [isAddFormOpen, setIsAddFormOpen] = useState(true);
 
   // Sticky State Form
@@ -65,13 +67,23 @@ export function SpoilWastePageSM() {
 
   const divisionOptions = useMemo(() => {
     return divisions
-      .filter(
-        (d) =>
-          d.status === "Aktif" &&
-          (!localCompanyId || d.companyId === localCompanyId),
-      )
+      .filter((d) => {
+        if (d.status !== "Aktif") return false;
+        if (localCompanyId && d.companyId && d.companyId !== localCompanyId)
+          return false;
+
+        // Cabang Outlet HANYA melihat divisi yang dibuat untuk cabang ini:
+        if (localOutletId) {
+          return d.outletId === localOutletId || !d.outletId;
+        }
+        // Region melihat divisi region atau divisi cabang wilayahnya:
+        if (localRegionId) {
+          return d.regionId === localRegionId || !d.regionId;
+        }
+        return true;
+      })
       .map((d) => ({ value: d.id, label: d.name }));
-  }, [divisions, localCompanyId]);
+  }, [divisions, localCompanyId, localOutletId, localRegionId]);
 
   useEffect(() => {
     if (!stickyDivisionId && divisionOptions.length > 0) {
@@ -544,7 +556,8 @@ export function SpoilWastePageSM() {
                     </span>
                   </div>
                   <span className="font-mono font-black">
-                    Rugi: Rp {spoilCalculationPreview.totalCost.toLocaleString()}
+                    Rugi: Rp{" "}
+                    {spoilCalculationPreview.totalCost.toLocaleString()}
                   </span>
                 </div>
               )}
@@ -701,14 +714,18 @@ export function SpoilWastePageSM() {
 
             <div className="flex items-center justify-between pt-2 border-t border-(--border-color) text-xs">
               <div>
-                <span className="text-[9px] text-(--text-secondary) block">Terbuang:</span>
+                <span className="text-[9px] text-(--text-secondary) block">
+                  Terbuang:
+                </span>
                 <span className="font-mono font-bold text-rose-500 text-xs">
                   {doc.inputQty} {doc.inputUom}
                 </span>
               </div>
 
               <div className="text-right">
-                <span className="text-[9px] text-(--text-secondary) block">Kerugian HPP:</span>
+                <span className="text-[9px] text-(--text-secondary) block">
+                  Kerugian HPP:
+                </span>
                 <span className="font-mono font-black text-rose-500 text-xs">
                   Rp {(doc.totalLossCost || 0).toLocaleString()}
                 </span>
