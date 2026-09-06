@@ -11,14 +11,34 @@ import {
   MenuConfig,
   RouteConfig,
 } from "../../../packages/core_unv/src/plugin/types";
+
 // 1. SINGLETON MANAGER (Single Source of Truth)
 import { manager } from "./pluginRegistry";
+
 // 2. KOMPONEN UI INTI & LIFECYCLE (DESKTOP & SMARTPHONE)
 import { UniversalLayout } from "./shared-ui/UniversalLayout";
 import { UniversalLayoutSM } from "./shared-ui/UniversalLayoutSM";
-// 3. HALAMAN MOBILE KHUSUS SMARTPHONE
+
+// 3. HALAMAN MOBILE KHUSUS SMARTPHONE ("SM")
 import { ReceivingPageSM } from "../../../modules/mdl_receiving/src/client/ReceivingPageSM";
 import { ItemPageSM } from "../../../modules/mdl_item/src/client/ItemPageSM";
+import { PlusalesPageSM } from "../../../modules/mdl_plusales/src/client/PlusalesPageSM";
+import { WarehousePageSM } from "../../../modules/mdl_warehouse/src/client/WarehousePageSM";
+import { SpoilWastePageSM } from "../../../modules/mdl_warehouse/src/client/SpoilWastePageSM";
+import { StockOpnamePageSM } from "../../../modules/mdl_warehouse/src/client/StockOpnamePageSM";
+import { RecipePageSM } from "../../../modules/mdl_warehouse/src/client/RecipePageSM";
+import { VendorPageSM } from "../../../modules/mdl_vendor/src/client/VendorPageSM";
+import { OrganizationPageSM } from "../../../modules/mdl_organization/src/client/OrganizationPageSM";
+import { EmployeePageSM } from "../../../modules/mdl_organization/src/client/EmployeePageSM";
+import { AccountPageSM } from "../../../modules/mdl_organization/src/client/AccountPageSM";
+import { OwnerLedgerPageSM } from "../../../modules/mdl_executivepanel/src/client/OwnerLedgerPageSM";
+import { TargetConfigPageSM } from "../../../modules/mdl_executivepanel/src/client/TargetConfigPageSM";
+
+import { LandingPageSM } from "./system-ui/LandingPageSM";
+import { SetupWizardSM } from "./system-ui/SetupWizardSM";
+import { LoginPageSM } from "./system-ui/LoginPageSM";
+import { DataManagerSM } from "./system-ui/DataManagerSM";
+import { DiagnostikDashboardSM } from "./system-ui/DiagnostikDashboardSM";
 
 import { DataManager } from "./system-ui/DataManager";
 import { DiagnostikDashboard } from "./system-ui/DiagnostikDashboard";
@@ -95,7 +115,8 @@ function WorkspaceWrapper() {
 
   // 2. Jika mesin sudah terdaftar tapi belum ada aktor yang login / shift kasir:
   if (!hasActiveUser) {
-    return <LoginPage onLoginSuccess={() => window.location.reload()} />;
+    const LoginComponent = isMobile ? LoginPageSM : LoginPage;
+    return <LoginComponent onLoginSuccess={() => window.location.reload()} />;
   }
 
   // Khusus Executive Dashboard (Full Screen Mode)
@@ -127,13 +148,12 @@ function WorkspaceWrapper() {
           path="/system/maintenance"
           element={<SystemMaintenanceDashboard />}
         />
-
         {/* Rute Fasilitas Sistem Inti */}
         <Route
           path="/almaApp/diagnostik_log"
           element={
             <ModuleLifecycleWrapper contextId="system:diagnostik_log">
-              <DiagnostikDashboard />
+              {isMobile ? <DiagnostikDashboardSM /> : <DiagnostikDashboard />}
             </ModuleLifecycleWrapper>
           }
         />
@@ -141,7 +161,7 @@ function WorkspaceWrapper() {
           path="/system/data-manager"
           element={
             <ModuleLifecycleWrapper contextId="system:data_manager">
-              <DataManager />
+              {isMobile ? <DataManagerSM /> : <DataManager />}
             </ModuleLifecycleWrapper>
           }
         />
@@ -150,15 +170,93 @@ function WorkspaceWrapper() {
         {dynamicRoutes.map((route, idx) => {
           let pageElement = route.element;
 
-          // Override khusus smartphone untuk Receiving
-          if (route.path === "/transaksi/receiving" && isMobile) {
-            pageElement = <ReceivingPageSM />;
-          }
-
-          // Override khusus smartphone untuk Item / Katalog Master
-          // Mengganti semua rute dari plugin mdl_item dengan ItemPageSM saat mobile
-          if (route.pluginName === "mdl_item" && isMobile) {
-            pageElement = <ItemPageSM />;
+          if (isMobile) {
+            // 1. Receiving (Penerimaan Barang)
+            if (
+              route.path === "/transaksi/receiving" ||
+              route.path.includes("receiving")
+            ) {
+              pageElement = <ReceivingPageSM />;
+            }
+            // 2. Item Master & Katalog
+            else if (
+              route.pluginName === "mdl_item" ||
+              route.path.includes("item")
+            ) {
+              pageElement = <ItemPageSM />;
+            }
+            // 3. Plusales (Rekap Penjualan Kasir)
+            else if (
+              route.pluginName === "mdl_plusales" ||
+              route.path.includes("plusales") ||
+              route.path.includes("sales")
+            ) {
+              pageElement = <PlusalesPageSM />;
+            }
+            // 4. Spoil & Waste
+            else if (
+              route.path.includes("spoil") ||
+              route.path.includes("waste")
+            ) {
+              pageElement = <SpoilWastePageSM />;
+            }
+            // 5. Stok Opname
+            else if (route.path.includes("opname")) {
+              pageElement = <StockOpnamePageSM />;
+            }
+            // 6. Master Resep & BOM
+            else if (
+              route.path.includes("resep") ||
+              route.path.includes("recipe")
+            ) {
+              pageElement = <RecipePageSM />;
+            }
+            // 7. Distribusi Gudang
+            else if (
+              route.path.includes("distribusi") ||
+              route.path.includes("distribution") ||
+              route.pluginName === "mdl_warehouse"
+            ) {
+              pageElement = <WarehousePageSM />;
+            }
+            // 8. Vendor Pemasok
+            else if (
+              route.pluginName === "mdl_vendor" ||
+              route.path.includes("vendor")
+            ) {
+              pageElement = <VendorPageSM />;
+            }
+            // 9. Karyawan & Penugasan
+            else if (route.path.includes("employee")) {
+              pageElement = <EmployeePageSM />;
+            }
+            // 10. Akun Pengguna & PIN
+            else if (route.path.includes("account")) {
+              pageElement = <AccountPageSM />;
+            }
+            // 11. Organisasi & Hierarki
+            else if (
+              route.path.includes("organization") ||
+              route.pluginName === "mdl_organization"
+            ) {
+              pageElement = <OrganizationPageSM />;
+            }
+            // 12. Target & Kuota Biaya
+            else if (
+              route.path.includes("target") ||
+              route.path.includes("kuota")
+            ) {
+              pageElement = <TargetConfigPageSM />;
+            }
+            // 13. Buku Kas Pemilik & Deviden
+            else if (
+              route.path.includes("owner") ||
+              route.path.includes("prive") ||
+              route.path.includes("ledger") ||
+              route.pluginName === "mdl_executivepanel"
+            ) {
+              pageElement = <OwnerLedgerPageSM />;
+            }
           }
 
           return (
@@ -210,6 +308,19 @@ export default function App() {
     typeof window !== "undefined" &&
     !!localStorage.getItem("__unv_deviceToken");
 
+  const [isMobile, setIsMobile] = useState<boolean>(
+    typeof window !== "undefined" ? window.innerWidth < 640 : false,
+  );
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 640);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  const LandingComponent = isMobile ? LandingPageSM : LandingPage;
+  const SetupComponent = isMobile ? SetupWizardSM : SetupWizard;
+
   return (
     <BrowserRouter>
       <Routes>
@@ -217,17 +328,21 @@ export default function App() {
         <Route
           path="/"
           element={
-            isProvisioned ? <Navigate to="/app" replace /> : <LandingPage />
+            isProvisioned ? (
+              <Navigate to="/app" replace />
+            ) : (
+              <LandingComponent />
+            )
           }
         />
-        <Route path="/pricing" element={<LandingPage />} />
-        <Route path="/billing" element={<LandingPage />} />
+        <Route path="/pricing" element={<LandingComponent />} />
+        <Route path="/billing" element={<LandingComponent />} />
 
         {/* 2. PORTAL AKTIVASI & SETUP PERANGKAT KASIR */}
         <Route
           path="/setup"
           element={
-            <SetupWizard
+            <SetupComponent
               onComplete={() => (window.location.href = "/master/organization")}
             />
           }
