@@ -2,147 +2,366 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
-/**
- * 1. CETAK FAKTUR SATUAN / SURAT JALAN (SINGLE INVOICE DETAIL)
- */
-export const printSingleInvoicePdf = (
-  doc: any,
-  entityName: string, // Nama Vendor (pada Hutang) ATAU Nama Outlet (pada Piutang)
-  locationName: string, // Lokasi Unit yang sedang aktif / login
+export interface InvoicePrintContext {
+  doc: any;
+  vendorName: string;
+  locationName: string;
+  companyName?: string;
+  regionName?: string;
+  regionAddress?: string;
+  activeActorName?: string;
+  activeActorPhone?: string;
   bankInfo?: {
     bankName?: string;
     bankAccount?: string;
     bankAccountName?: string;
-  },
-) => {
+  };
+}
+
+/**
+ * 1. CETAK INVOICE DARI BARIS AKSI (ICON PRINT)
+ * Menghasilkan tampilan Invoice elegan persis template HTML/CSS heksagon merah-hitam.
+ */
+export const printSingleInvoicePdf = (context: InvoicePrintContext) => {
+  const {
+    doc,
+    vendorName,
+    locationName,
+    companyName = "ALMA ENTERPRISE",
+    regionName = "JAWA BARAT",
+    regionAddress = "Bandung, Jawa Barat",
+    activeActorName = "Rendi Faizal",
+    activeActorPhone = "0812-3456-7890",
+    bankInfo,
+  } = context;
+
   const isPiutang = doc.documentType === "PIUTANG";
-  const pdf = new jsPDF("p", "pt", "a4");
+  const items = doc.items || [];
+  const formattedDate = new Date(doc.date).toLocaleDateString("id-ID", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  });
+  const totalAmountNum = Math.round(Number(doc.totalAmount || 0));
 
-  // Header Dokumen Resmi
-  pdf.setFontSize(15);
-  pdf.setFont("helvetica", "bold");
-  pdf.text(
-    isPiutang
-      ? "SURAT JALAN & DISTRIBUSI CABANG (PIUTANG)"
-      : doc.documentType === "PETTYCASH"
-        ? "BUKTI PENGELUARAN KAS KECIL (PETTYCASH)"
-        : "BUKTI PENERIMAAN BARANG / NOTA (HUTANG)",
-    40,
-    45,
-  );
+  // Render baris tabel HTML
+  const itemsHtml = items
+    .map((it: any) => {
+      const price = Math.round(Number(it.price) || 0);
+      const subtotal = Math.round(Number(it.subtotal || it.qty * price) || 0);
+      return `
+      <tr>
+        <td style="text-align: left;">${it.name || it.itemId}${it.isExpense ? " [BIAYA]" : ""}</td>
+        <td>Rp ${price.toLocaleString("id-ID")}</td>
+        <td>${it.qty || 1}</td>
+        <td>Rp ${subtotal.toLocaleString("id-ID")}</td>
+      </tr>
+    `;
+    })
+    .join("");
 
-  pdf.setFontSize(9);
-  pdf.setFont("helvetica", "normal");
-  pdf.setTextColor(100);
-  pdf.text(`No. Dokumen : ${doc.invoiceNumber}`, 40, 65);
-  pdf.text(
-    `Tanggal      : ${new Date(doc.date).toLocaleDateString("id-ID")}`,
-    40,
-    78,
-  );
+  const bankNameText = bankInfo?.bankName || "-";
+  const bankAccountText = bankInfo?.bankAccount || "-";
+  const bankOwnerText = bankInfo?.bankAccountName || "-";
 
-  // =========================================================================
-  // PENYELARASAN IDENTITAS PENYEDIA (PENGIRIM) VS KONSUMEN (PENERIMA)
-  // =========================================================================
-  if (isPiutang) {
-    // Pada Piutang: Gudang Region = Pengirim (Penyedia), Outlet Cabang = Penerima (Konsumen)
-    pdf.text(`Gudang Pengirim (Penyedia) : ${locationName}`, 40, 91);
-    pdf.text(`Cabang Penerima (Konsumen) : ${entityName}`, 320, 65);
-    pdf.text(
-      `Jatuh Tempo Pembayaran     : ${doc.dueDate ? new Date(doc.dueDate).toLocaleDateString("id-ID") : "TEMPO INTERNAL"}`,
-      320,
-      78,
-    );
+  // HTML Template Sesuai Blueprint Rendi
+  const fullHtml = `<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Invoice - ${doc.invoiceNumber}</title>
+    <style>
+      :root {
+        --primary: #e60012;
+        --dark: #1a1a1a;
+        --gray: #2b2b2b;
+        --light-bg: #f8fafc;
+        --text-color: #1e293b;
+      }
+      * { box-sizing: border-box; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+        background: #e2e8f0;
+        margin: 0;
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+      .invoice-container {
+        width: 210mm;
+        min-height: 297mm;
+        background: white;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+        position: relative;
+        overflow: hidden;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      .bg-header-red {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 35%;
+        height: 160px;
+        background: var(--primary);
+        clip-path: polygon(0 0, 80% 0, 100% 50%, 80% 100%, 0 100%);
+        z-index: 1;
+      }
+      .bg-header-dark {
+        position: absolute;
+        top: 40px;
+        left: 24%;
+        width: 12%;
+        height: 80px;
+        background: var(--gray);
+        clip-path: polygon(0 0, 70% 0, 100% 50%, 70% 100%, 0 100%, 30% 50%);
+        z-index: 3;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .bg-header-black {
+        position: absolute;
+        top: 40px;
+        right: 0;
+        width: 70%;
+        height: 80px;
+        background: var(--dark);
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding-left: 90px;
+        padding-right: 40px;
+      }
+      .company-branding { color: white; display: flex; flex-direction: column; }
+      .company-name { font-size: 16px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
+      .company-tagline { font-size: 9px; color: #cbd5e1; letter-spacing: 0.5px; margin-top: 2px; }
+      .invoice-title { font-size: 28px; font-weight: 900; color: white; letter-spacing: 2px; }
+      .bg-footer-black {
+        position: absolute;
+        bottom: 40px;
+        right: 0;
+        width: 100%;
+        height: 60px;
+        background: var(--dark);
+        z-index: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .bg-footer-dark {
+        position: absolute;
+        bottom: 40px;
+        left: 0;
+        width: 15%;
+        height: 60px;
+        background: var(--gray);
+        clip-path: polygon(0 0, 100% 0, 60% 50%, 100% 100%, 0 100%);
+        z-index: 2;
+      }
+      .bg-footer-red {
+        position: absolute;
+        bottom: 0;
+        right: 0;
+        width: 35%;
+        height: 120px;
+        background: var(--primary);
+        clip-path: polygon(20% 0, 100% 0, 100% 100%, 20% 100%, 0 50%);
+        z-index: 2;
+      }
+      .thank-you { color: #f1f5f9; font-size: 11px; letter-spacing: 0.5px; font-weight: 500; z-index: 3; position: relative; }
+      .content {
+        position: absolute;
+        top: 170px;
+        left: 0;
+        right: 0;
+        bottom: 120px;
+        padding: 0 40px;
+        display: flex;
+        flex-direction: column;
+        z-index: 10;
+      }
+      .billing-section { display: flex; justify-content: space-between; margin-bottom: 20px; }
+      .billing-to h4 { margin: 0 0 6px 0; font-size: 11px; color: #64748b; font-weight: bold; text-transform: uppercase; }
+      .billing-to h2 { margin: 0 0 4px 0; font-size: 18px; color: var(--primary); font-weight: 800; }
+      .meta-table { width: 240px; border-collapse: collapse; font-size: 11px; }
+      .meta-table td { padding: 5px 0; border-bottom: 1px solid #e2e8f0; font-weight: 600; }
+      .meta-table td:last-child { text-align: right; color: var(--dark); font-weight: bold; }
+      .invoice-table { width: 100%; border-collapse: collapse; font-size: 11px; text-align: center; margin-bottom: 15px; }
+      .invoice-table th { background: var(--primary); color: white; padding: 10px; font-weight: bold; text-transform: uppercase; font-size: 10px; }
+      .invoice-table td { padding: 9px 10px; color: #334155; border-bottom: 1px solid #f1f5f9; }
+      .invoice-table tr:nth-child(even) td { background: var(--light-bg); }
+      .totals-section { display: flex; justify-content: flex-end; margin-bottom: 20px; }
+      .totals-box { width: 260px; }
+      .totals-box table { width: 100%; border-collapse: collapse; font-size: 11px; }
+      .totals-box td { padding: 6px 8px; text-align: right; }
+      .totals-box td:first-child { text-align: left; font-weight: bold; color: #475569; }
+      .net-total-row td { background: var(--primary); color: white; font-weight: 900; font-size: 13px; }
+      .bottom-section { display: flex; justify-content: space-between; align-items: flex-end; margin-top: auto; margin-bottom: 15px; }
+      .left-info { display: flex; flex-direction: column; gap: 15px; width: 55%; }
+      .payment-info h4, .deal-with-us h4 { margin: 0 0 6px 0; font-size: 11px; font-weight: bold; color: var(--dark); text-transform: uppercase; }
+      .payment-info table { font-size: 10px; line-height: 1.6; color: #475569; }
+      .payment-info td:first-child { width: 120px; font-weight: bold; color: #1e293b; }
+      .deal-with-us p { margin: 3px 0; font-size: 10px; color: #475569; display: flex; align-items: center; gap: 6px; }
+      .signature { text-align: center; font-size: 11px; color: var(--text-color); width: 180px; }
+      .signature-name { font-family: "Brush Script MT", "Segoe Script", cursive; font-size: 24px; margin-bottom: 5px; border-bottom: 1px solid #1e293b; padding: 0 15px; display: inline-block; color: #0f172a; }
+      @media print {
+        body { margin: 0; padding: 0; background: white; }
+        .invoice-container { box-shadow: none; border: none; }
+        @page { margin: 0; size: A4; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="invoice-container">
+      <div class="bg-header-red"></div>
+      <div class="bg-header-dark">
+        <svg viewBox="0 0 40 40" width="34" height="34">
+          <polygon points="20,2 38,12 38,28 20,38 2,28 2,12" fill="none" stroke="#e60012" stroke-width="2.5" />
+          <polygon points="20,10 30,16 30,24 20,30 10,24 10,16" fill="none" stroke="#fff" stroke-width="2.5" />
+        </svg>
+      </div>
+      <div class="bg-header-black">
+        <div class="company-branding">
+          <div class="company-name">${companyName}</div>
+          <div class="company-tagline">${regionName}</div>
+        </div>
+        <div class="invoice-title">${isPiutang ? "SURAT JALAN" : "INVOICE"}</div>
+      </div>
+
+      <div class="bg-footer-dark"></div>
+      <div class="bg-footer-black">
+        <div class="thank-you">Dokumen ini diterbitkan otomatis oleh Sistem ALMA. Harap periksa fisik barang saat serah terima.</div>
+      </div>
+      <div class="bg-footer-red"></div>
+
+      <div class="content">
+        <div class="billing-section">
+          <div class="billing-to">
+            <h4>${isPiutang ? "DITAGIHKAN KEPADA (OUTLET):" : "DITAGIHKAN OLEH (VENDOR):"}</h4>
+            <h2>${vendorName.toUpperCase()}</h2>
+            <p>${isPiutang ? "Unit Cabang Operasional" : "Penyedia / Vendor Mitra"}</p>
+          </div>
+          <div>
+            <table class="meta-table">
+              <tr>
+                <td>No. Dokumen:</td>
+                <td>${doc.invoiceNumber}</td>
+              </tr>
+              <tr>
+                <td>Tanggal:</td>
+                <td>${formattedDate}</td>
+              </tr>
+              <tr>
+                <td>Jatuh Tempo:</td>
+                <td>${doc.dueDate ? new Date(doc.dueDate).toLocaleDateString("id-ID") : "CASH / LUNAS"}</td>
+              </tr>
+            </table>
+          </div>
+        </div>
+
+        <table class="invoice-table">
+          <thead>
+            <tr>
+              <th style="text-align: left;">Nama Barang / Item</th>
+              <th>Harga Unit</th>
+              <th>Kuantitas</th>
+              <th>Sub Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsHtml || '<tr><td colspan="4" style="padding: 20px;">Tidak ada rincian barang</td></tr>'}
+          </tbody>
+        </table>
+
+        <div class="totals-section">
+          <div class="totals-box">
+            <table>
+              <tr>
+                <td>Sub Total:</td>
+                <td>Rp ${totalAmountNum.toLocaleString("id-ID")}</td>
+              </tr>
+              <tr class="net-total-row">
+                <td>Net Total:</td>
+                <td>Rp ${totalAmountNum.toLocaleString("id-ID")}</td>
+              </tr>
+            </table>
+          </div>
+        </div>
+
+        <div class="bottom-section">
+          <div class="left-info">
+            <div class="payment-info">
+              <h4>Informasi Pembayaran:</h4>
+              <table>
+                <tr>
+                  <td>No Rekening:</td>
+                  <td>${bankAccountText}</td>
+                </tr>
+                <tr>
+                  <td>Pemilik Rekening:</td>
+                  <td>${bankOwnerText}</td>
+                </tr>
+                <tr>
+                  <td>Bank:</td>
+                  <td>${bankNameText}</td>
+                </tr>
+              </table>
+            </div>
+            <div class="deal-with-us">
+              <h4>Hubungi Kami:</h4>
+              <p>📍 ${regionAddress}</p>
+              <p>📞 ${activeActorPhone}</p>
+            </div>
+          </div>
+
+          <div class="signature">
+            <div class="signature-name">${activeActorName}</div>
+            <p>${isPiutang ? "Petugas Gudang Pengirim" : "Penanggung Jawab"}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>`;
+
+  // Buka jendela cetak A4 langsung
+  const printWindow = window.open("", "_blank", "width=900,height=1100");
+  if (printWindow) {
+    printWindow.document.write(fullHtml);
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => {
+      printWindow.print();
+    }, 400);
   } else {
-    // Pada Hutang: Vendor = Penyedia, Outlet/Gudang = Penerima
-    pdf.text(`Unit Penerima   : ${locationName}`, 40, 91);
-    pdf.text(`Vendor/Penyedia : ${entityName}`, 320, 65);
-    pdf.text(
-      `Jatuh Tempo     : ${doc.dueDate ? new Date(doc.dueDate).toLocaleDateString("id-ID") : "CASH / LUNAS"}`,
-      320,
-      78,
-    );
-    if (bankInfo?.bankName) {
-      pdf.text(
-        `Rekening Bank   : ${bankInfo.bankName} - ${bankInfo.bankAccount || ""} (a.n ${bankInfo.bankAccountName || ""})`,
-        320,
-        91,
-      );
+    // Fallback iframe jika popup browser terblokir
+    const iframe = document.createElement("iframe");
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "0";
+    document.body.appendChild(iframe);
+    const frameDoc = iframe.contentWindow?.document;
+    if (frameDoc) {
+      frameDoc.open();
+      frameDoc.write(fullHtml);
+      frameDoc.close();
+      setTimeout(() => {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+        setTimeout(() => document.body.removeChild(iframe), 1500);
+      }, 400);
     }
   }
-
-  // Tabel Rincian Barang
-  const tableRows = (doc.items || []).map((item: any, idx: number) => [
-    idx + 1,
-    item.name || item.itemId,
-    item.isExpense ? "JASA" : "BARANG",
-    item.qty,
-    `Rp ${(item.price || 0).toLocaleString("id-ID")}`,
-    `Rp ${(item.subtotal || 0).toLocaleString("id-ID")}`,
-  ]);
-
-  autoTable(pdf, {
-    head: [
-      ["NO", "NAMA ITEM / JASA", "TIPE", "QTY", "HARGA SATUAN", "SUBTOTAL"],
-    ],
-    body: tableRows,
-    startY: 110,
-    theme: "striped",
-    headStyles: {
-      fillColor: isPiutang ? [14, 165, 233] : [249, 115, 22], // Biru untuk Piutang, Oranye untuk Hutang
-      textColor: 255,
-      fontStyle: "bold",
-    },
-    styles: { fontSize: 9, cellPadding: 5 },
-  });
-
-  const finalY = (pdf as any).lastAutoTable.finalY + 20;
-
-  // Ringkasan Total & Sisa Tagihan
-  pdf.setFontSize(10);
-  pdf.setFont("helvetica", "bold");
-  pdf.setTextColor(40);
-  pdf.text(
-    `TOTAL NILAI DOKUMEN : Rp ${(doc.totalAmount || 0).toLocaleString("id-ID")}`,
-    340,
-    finalY,
-  );
-  pdf.text(
-    `SUDAH DIBAYAR       : Rp ${(doc.paidAmount || 0).toLocaleString("id-ID")}`,
-    340,
-    finalY + 15,
-  );
-  pdf.setTextColor(225, 29, 72);
-  pdf.text(
-    `SISA KEKURANGAN     : Rp ${((doc.totalAmount || 0) - (doc.paidAmount || 0)).toLocaleString("id-ID")}`,
-    340,
-    finalY + 30,
-  );
-
-  // Tanda Tangan Sesuai Jenis Dokumen
-  pdf.setTextColor(40);
-  pdf.setFont("helvetica", "normal");
-  if (isPiutang) {
-    pdf.text("Pengirim (Petugas Gudang Pusat),", 40, finalY + 60);
-    pdf.text("( ________________________ )", 40, finalY + 110);
-
-    pdf.text("Penerima (Petugas Cabang Outlet),", 320, finalY + 60);
-    pdf.text("( ________________________ )", 320, finalY + 110);
-  } else {
-    pdf.text("Penerima / Petugas Cabang,", 40, finalY + 60);
-    pdf.text("( ________________________ )", 40, finalY + 110);
-
-    pdf.text("Mengetahui (Supervisor / Manager),", 320, finalY + 60);
-    pdf.text("( ________________________ )", 320, finalY + 110);
-  }
-
-  pdf.save(
-    `${isPiutang ? "SuratJalan_Distribusi" : "Faktur"}_${doc.invoiceNumber}.pdf`,
-  );
 };
 
 /**
- * 2. CETAK LAPORAN RINGKASAN PERIODE (UNTUK FINANCE / REKAP TAGIHAN)
+ * 2. CETAK LAPORAN REKAP PERIODE DARI HEADER (SURAT JALAN & REKAP FINANCE)
  */
 export const printSummaryPeriodPdf = (
   groupedDocs: Record<string, any>,
@@ -150,42 +369,49 @@ export const printSummaryPeriodPdf = (
   dateEnd: string,
   outletName: string = "SEMUA CABANG",
 ) => {
-  // Cek apakah data ini rumpun Piutang Distribusi
   const firstGroup = Object.values(groupedDocs)[0];
   const isPiutang = firstGroup?.docs?.[0]?.documentType === "PIUTANG";
 
   const pdf = new jsPDF("p", "pt", "a4");
 
-  pdf.setFontSize(15);
+  // Header Laporan Modern
+  pdf.setFillColor(
+    isPiutang ? 14 : 234,
+    isPiutang ? 165 : 88,
+    isPiutang ? 233 : 12,
+  );
+  pdf.rect(0, 0, 595, 6, "F");
+
+  pdf.setFontSize(16);
   pdf.setFont("helvetica", "bold");
+  pdf.setTextColor(30, 41, 59);
   pdf.text(
     isPiutang
-      ? "REKAPITULASI DISTRIBUSI & PIUTANG CABANG (FINANCE)"
-      : "PENGAJUAN PEMBAYARAN VENDOR (RINGKASAN FINANCE)",
+      ? "REKAPITULASI SURAT JALAN & DISTRIBUSI CABANG"
+      : "PENGAJUAN PEMBAYARAN VENDOR (REKAP FINANCE)",
     40,
-    40,
+    45,
   );
 
   pdf.setFontSize(9);
   pdf.setFont("helvetica", "normal");
   pdf.setTextColor(100);
   pdf.text(
-    `${isPiutang ? "Gudang Pengirim (Pusat)" : "Cabang / Unit"} : ${outletName}`,
+    `${isPiutang ? "Gudang Pengirim" : "Unit / Lokasi"} : ${outletName}`,
     40,
-    58,
+    62,
   );
   pdf.text(
-    `Periode       : ${dateStart ? new Date(dateStart).toLocaleDateString("id-ID") : "Awal"} s/d ${dateEnd ? new Date(dateEnd).toLocaleDateString("id-ID") : "Sekarang"}`,
+    `Periode : ${dateStart ? new Date(dateStart).toLocaleDateString("id-ID") : "Awal"} s/d ${dateEnd ? new Date(dateEnd).toLocaleDateString("id-ID") : "Sekarang"}`,
     40,
-    71,
+    75,
   );
 
-  let currentY = 90;
+  let currentY = 95;
 
   Object.entries(groupedDocs).forEach(([_, group]) => {
     if (group.docs.length === 0) return;
 
-    // Header Grup (Vendor vs Outlet Penerima)
     pdf.setFontSize(10);
     pdf.setFont("helvetica", "bold");
     pdf.setTextColor(
@@ -194,21 +420,10 @@ export const printSummaryPeriodPdf = (
       isPiutang ? 233 : 12,
     );
     pdf.text(
-      `${isPiutang ? "CABANG PENERIMA (KONSUMEN): " : ""}${group.title.toUpperCase()}`,
+      `${isPiutang ? "CABANG PENERIMA (KONSUMEN): " : "VENDOR: "}${group.title.toUpperCase()}`,
       40,
       currentY,
     );
-
-    pdf.setFontSize(8.5);
-    pdf.setFont("helvetica", "normal");
-    pdf.setTextColor(70);
-    if (group.bankInfo && !isPiutang) {
-      pdf.text(
-        `Rekening: ${group.bankInfo.bankName || "-"} | No: ${group.bankInfo.bankAccount || "-"} | a.n: ${group.bankInfo.bankAccountName || "-"}`,
-        40,
-        currentY + 13,
-      );
-    }
 
     const rows = group.docs.map((d: any) => [
       new Date(d.date).toLocaleDateString("id-ID"),
@@ -226,17 +441,18 @@ export const printSummaryPeriodPdf = (
           isPiutang ? "NO. SURAT JALAN" : "NO. INVOICE",
           "TEMPO",
           "STATUS",
-          "SUDAH DIBAYAR",
-          "TOTAL NILAI",
+          "DIBAYAR",
+          "TOTAL",
         ],
       ],
       body: rows,
-      startY: currentY + 20,
+      startY: currentY + 12,
       theme: "grid",
       headStyles: {
-        fillColor: isPiutang ? [14, 165, 233] : [51, 65, 85],
+        fillColor: isPiutang ? [14, 165, 233] : [30, 41, 59],
         textColor: 255,
         fontStyle: "bold",
+        fontSize: 8,
       },
       styles: { fontSize: 8, cellPadding: 4 },
     });
@@ -246,26 +462,25 @@ export const printSummaryPeriodPdf = (
     pdf.setFont("helvetica", "bold");
     pdf.setTextColor(15, 23, 42);
     pdf.text(
-      `TOTAL ${isPiutang ? "TAGIHAN " : "PENGAJUAN "}${group.title.toUpperCase()} : Rp ${(group.total || 0).toLocaleString("id-ID")}`,
-      260,
+      `TOTAL ${group.title.toUpperCase()} : Rp ${(group.total || 0).toLocaleString("id-ID")}`,
+      300,
       currentY,
     );
     currentY += 25;
 
-    // Cek ganti halaman jika sudah di ujung bawah
     if (currentY > 750) {
       pdf.addPage();
-      currentY = 40;
+      currentY = 45;
     }
   });
 
   pdf.save(
-    `${isPiutang ? "Rekap_Piutang_Cabang" : "Rekap_Finance"}_${outletName}_${Date.now()}.pdf`,
+    `${isPiutang ? "Rekap_Surat_Jalan_Distribusi" : "Rekap_Finance"}_${Date.now()}.pdf`,
   );
 };
 
 /**
- * 3. CETAK LAPORAN RINCIAN DETAIL PERIODE (UNTUK AUDIT & OPERASIONAL GUDANG)
+ * 3. CETAK LAPORAN RINCIAN DETAIL PERIODE DARI HEADER
  */
 export const printDetailedPeriodPdf = (
   groupedDocs: Record<string, any>,
@@ -278,36 +493,39 @@ export const printDetailedPeriodPdf = (
 
   const pdf = new jsPDF("p", "pt", "a4");
 
-  pdf.setFontSize(15);
+  pdf.setFillColor(
+    isPiutang ? 14 : 234,
+    isPiutang ? 165 : 88,
+    isPiutang ? 233 : 12,
+  );
+  pdf.rect(0, 0, 595, 6, "F");
+
+  pdf.setFontSize(16);
   pdf.setFont("helvetica", "bold");
+  pdf.setTextColor(30, 41, 59);
   pdf.text(
     isPiutang
-      ? "LAPORAN RINCIAN PENGIRIMAN & DISTRIBUSI CABANG (AUDIT)"
-      : "LAPORAN RINCIAN PENERIMAAN BARANG (OPERASIONAL & AUDIT)",
+      ? "LAPORAN RINCIAN SURAT JALAN & PENGIRIMAN CABANG"
+      : "LAPORAN RINCIAN PENERIMAAN BARANG & NOTA (AUDIT)",
     40,
-    40,
+    45,
   );
 
   pdf.setFontSize(9);
   pdf.setFont("helvetica", "normal");
   pdf.setTextColor(100);
   pdf.text(
-    `${isPiutang ? "Gudang Pengirim" : "Cabang / Unit"} : ${outletName}`,
+    `Unit : ${outletName} | Periode : ${dateStart || "Awal"} s/d ${dateEnd || "Sekarang"}`,
     40,
-    58,
-  );
-  pdf.text(
-    `Periode       : ${dateStart ? new Date(dateStart).toLocaleDateString("id-ID") : "Awal"} s/d ${dateEnd ? new Date(dateEnd).toLocaleDateString("id-ID") : "Sekarang"}`,
-    40,
-    71,
+    62,
   );
 
-  let currentY = 90;
+  let currentY = 85;
 
   Object.entries(groupedDocs).forEach(([_, group]) => {
     if (group.docs.length === 0) return;
 
-    pdf.setFontSize(11);
+    pdf.setFontSize(10);
     pdf.setFont("helvetica", "bold");
     pdf.setTextColor(
       isPiutang ? 14 : 234,
@@ -315,30 +533,18 @@ export const printDetailedPeriodPdf = (
       isPiutang ? 233 : 12,
     );
     pdf.text(
-      `${isPiutang ? "CABANG TUJUAN (KONSUMEN): " : "VENDOR: "}${group.title.toUpperCase()}`,
+      `${isPiutang ? "OUTLET PENERIMA: " : "VENDOR: "}${group.title.toUpperCase()}`,
       40,
       currentY,
     );
-
-    if (group.bankInfo && !isPiutang) {
-      pdf.setFontSize(8.5);
-      pdf.setFont("helvetica", "normal");
-      pdf.setTextColor(80);
-      pdf.text(
-        `Bank: ${group.bankInfo.bankName || "-"} | No: ${group.bankInfo.bankAccount || "-"} | a.n: ${group.bankInfo.bankAccountName || "-"}`,
-        40,
-        currentY + 13,
-      );
-    }
-
-    currentY += 22;
+    currentY += 16;
 
     group.docs.forEach((d: any) => {
-      pdf.setFontSize(9);
+      pdf.setFontSize(8.5);
       pdf.setFont("helvetica", "bold");
       pdf.setTextColor(30, 41, 59);
       pdf.text(
-        `  ▶ ${isPiutang ? "Surat Jalan" : "Invoice"}: ${d.invoiceNumber} | Tgl: ${new Date(d.date).toLocaleDateString("id-ID")} | Total: Rp ${(d.totalAmount || 0).toLocaleString("id-ID")}`,
+        `▶ Nota: ${d.invoiceNumber} | Tgl: ${new Date(d.date).toLocaleDateString("id-ID")} | Total: Rp ${(d.totalAmount || 0).toLocaleString("id-ID")}`,
         40,
         currentY,
       );
@@ -353,32 +559,24 @@ export const printDetailedPeriodPdf = (
       ]);
 
       autoTable(pdf, {
-        head: [
-          ["NO", "NAMA BARANG / JASA", "TIPE", "QTY", "HARGA", "SUBTOTAL"],
-        ],
+        head: [["NO", "NAMA ITEM / JASA", "TIPE", "QTY", "HARGA", "SUBTOTAL"]],
         body: itemRows,
         startY: currentY + 6,
         theme: "striped",
-        headStyles: {
-          fillColor: isPiutang ? [14, 165, 233] : [71, 85, 105],
-          textColor: 255,
-          fontSize: 7.5,
-        },
+        headStyles: { fillColor: [71, 85, 105], textColor: 255, fontSize: 7.5 },
         styles: { fontSize: 7.5, cellPadding: 3 },
       });
 
-      currentY = (pdf as any).lastAutoTable.finalY + 15;
+      currentY = (pdf as any).lastAutoTable.finalY + 14;
 
       if (currentY > 750) {
         pdf.addPage();
-        currentY = 40;
+        currentY = 45;
       }
     });
 
-    currentY += 15;
+    currentY += 10;
   });
 
-  pdf.save(
-    `${isPiutang ? "Rekap_Detail_Distribusi" : "Rekap_Detail_Operasional"}_${outletName}_${Date.now()}.pdf`,
-  );
+  pdf.save(`Laporan_Detail_Receiving_${Date.now()}.pdf`);
 };
