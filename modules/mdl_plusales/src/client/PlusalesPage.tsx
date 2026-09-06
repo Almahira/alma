@@ -1,4 +1,3 @@
-// File: modules/mdl_plusales/src/client/PlusalesPage.tsx
 import React, { useState, useMemo } from "react";
 import {
   Wallet,
@@ -21,17 +20,17 @@ import { useExecutivePanelStore } from "../../../mdl_executivepanel/src/client/s
 import { globalCommandBus } from "../../../../packages/core_unv/src/cqrs/CommandBus";
 import { useUniversalModal } from "../../../../apps/client_unv/src/shared-ui/UniversalLayout";
 import { sysToast } from "../../../../apps/client_unv/src/shared-ui/useToastStore";
-
 import { PlusalesFormModal } from "./form-plusales";
 import {
   printModReportPdf,
   printMonthlyRevenuePdf,
 } from "./features/pdf-plusales";
 import { exportExcelPlusales } from "./features/excel-plusales";
+import {
+  useUniversalSort,
+  SortHeader,
+} from "../../../../apps/client_unv/src/shared-ui/useUniversalSort";
 
-// =========================================================================
-// 1. KOMPONEN MODAL VIEW DETAIL TIMBANGAN
-// =========================================================================
 const PlusalesDetailModal: React.FC<{
   doc: any;
   onClose: () => void;
@@ -40,7 +39,6 @@ const PlusalesDetailModal: React.FC<{
 
   return (
     <div className="p-6 space-y-4 max-w-2xl bg-(--bg-card) text-(--text-primary)">
-      {/* HEADER RINGKASAN OMSET & TANGGAL */}
       <div className="grid grid-cols-2 gap-4 bg-(--surface-hover) p-4 rounded-xl text-xs font-bold border border-(--border-color)">
         <div>
           <span className="text-[10px] text-(--text-secondary) uppercase font-black block">
@@ -72,14 +70,12 @@ const PlusalesDetailModal: React.FC<{
         </div>
       </div>
 
-      {/* RINCIAN REALISASI PEMBAYARAN */}
       <div className="space-y-2">
         <div className="text-[11px] font-black text-(--text-secondary) uppercase tracking-wider flex items-center gap-1.5">
           <Receipt className="w-3.5 h-3.5 text-emerald-500" /> RINCIAN REALISASI
-          PEMBAYARAN &amp; KAS:
+          PEMBAYARAN & KAS:
         </div>
 
-        {/* Dynamic Items (Non-Tunai / Compliment) */}
         {(doc.dynamicItems || []).map((it: any, i: number) => (
           <div
             key={i}
@@ -110,7 +106,6 @@ const PlusalesDetailModal: React.FC<{
           </div>
         ))}
 
-        {/* Pettycash Kasir Keluar */}
         <div className="flex justify-between items-center text-xs p-2.5 bg-blue-500/10 border border-blue-500/20 rounded-lg text-blue-500 font-bold">
           <span>PENGELUARAN KAS KASIR (PETTYCASH)</span>
           <span className="font-mono font-black">
@@ -118,7 +113,6 @@ const PlusalesDetailModal: React.FC<{
           </span>
         </div>
 
-        {/* Cash on Hand */}
         <div className="flex justify-between items-center text-xs p-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-emerald-500 font-bold">
           <span>UANG FISIK KASIR (CASH ON HAND)</span>
           <span className="font-mono font-black">
@@ -127,7 +121,6 @@ const PlusalesDetailModal: React.FC<{
         </div>
       </div>
 
-      {/* STATUS KESEIMBANGAN TIMBANGAN */}
       <div className="p-3.5 bg-(--surface-hover) rounded-xl border border-(--border-color) flex items-center justify-between">
         <div>
           <span className="text-[10px] font-black uppercase text-(--text-secondary) block">
@@ -150,7 +143,6 @@ const PlusalesDetailModal: React.FC<{
         </div>
       </div>
 
-      {/* Catatan Selisih */}
       {doc.discrepancyNote && (
         <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs text-rose-500 font-medium">
           <strong className="font-black uppercase">Catatan Selisih:</strong> "
@@ -158,7 +150,6 @@ const PlusalesDetailModal: React.FC<{
         </div>
       )}
 
-      {/* Footer Tombol */}
       <div className="flex justify-end pt-3 border-t border-(--border-color)">
         <button
           onClick={onClose}
@@ -171,22 +162,16 @@ const PlusalesDetailModal: React.FC<{
   );
 };
 
-// =========================================================================
-// 2. HALAMAN UTAMA: PLUSALES PAGE
-// =========================================================================
 export function PlusalesPage() {
   const { documents } = usePlusalesStore();
-  const { allocations } = useExecutivePanelStore(); // <-- MEMBACA ALOKASI RESMI DARI EXECUTIVE PANEL
+  const { allocations } = useExecutivePanelStore();
   const { outlets } = useOrgStore();
   const { openCenterModal, closeCenterModal, openAlert } = useUniversalModal();
 
   const [viewStatus, setViewStatus] = useState<"AKTIF" | "ARSIP">("AKTIF");
-
-  // State Form Inline Budgeting
   const [budgetInputName, setBudgetInputName] = useState("");
   const [budgetInputPct, setBudgetInputPct] = useState<number | "">("");
 
-  // Filter Bulan (Default: Bulan Berjalan YYYY-MM)
   const currentMonthStr = new Date().toISOString().slice(0, 7);
   const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthStr);
 
@@ -197,10 +182,8 @@ export function PlusalesPage() {
     ? currentOutlet.name.toUpperCase()
     : "SEMUA OUTLET";
 
-  // Filter Dokumen Berdasarkan Bulan & Status
   const filteredDocs = useMemo(() => {
     return documents.filter((d) => {
-      // ---> PENYEKATAN OUTLET MUTLAK <---
       if (localOutletId && d.outletId && d.outletId !== localOutletId) {
         return false;
       }
@@ -215,7 +198,12 @@ export function PlusalesPage() {
     });
   }, [documents, selectedMonth, viewStatus, localOutletId, localCompanyId]);
 
-  // Akumulasi Statistik Bulan Terpilih
+  const {
+    sortedItems: sortedDocs,
+    sortConfig,
+    requestSort,
+  } = useUniversalSort(filteredDocs, { key: "date", direction: "desc" });
+
   const monthlyStats = useMemo(() => {
     const totalGross = filteredDocs.reduce(
       (sum, d) => sum + (d.grossSales || 0),
@@ -236,7 +224,6 @@ export function PlusalesPage() {
     return { totalGross, totalNet, totalCash, totalEDC };
   }, [filteredDocs]);
 
-  // Filter Alokasi Cadangan Resmi Bulan Ini
   const currentMonthAllocations = useMemo(() => {
     return allocations.filter((a) => a.month === selectedMonth);
   }, [allocations, selectedMonth]);
@@ -259,7 +246,6 @@ export function PlusalesPage() {
     });
   };
 
-  // Simpan Alokasi via Event Sourcing CQRS (Bebas localStorage)
   const handleSaveBudgetInline = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!budgetInputName.trim() || Number(budgetInputPct) <= 0) {
@@ -317,17 +303,13 @@ export function PlusalesPage() {
 
   return (
     <div className="relative h-full flex flex-col overflow-hidden bg-(--bg-card)">
-      {/* ========================================================================= */}
-      {/* HEADER 2 PANEL */}
-      {/* ========================================================================= */}
       <div className="p-6 bg-(--surface-hover) border-b border-(--border-color) shrink-0 grid grid-cols-1 lg:grid-cols-12 gap-6 shadow-xs">
-        {/* PANEL KIRI: REVENUE SALES */}
         <div className="lg:col-span-7 bg-(--bg-card) p-5 rounded-2xl border border-(--border-color) shadow-xs flex flex-col justify-between">
           <div className="flex items-center justify-between border-b border-(--border-color) pb-3">
             <div>
               <h2 className="text-base font-black text-(--text-primary) tracking-tight flex items-center gap-2">
-                <Wallet className="w-5 h-5 text-orange-500" /> REVENUE SALES
-                &amp; KAS
+                <Wallet className="w-5 h-5 text-orange-500" /> REVENUE SALES &
+                KAS
               </h2>
               <p className="text-[11px] text-(--text-secondary) font-bold mt-0.5">
                 {outletName} • Periode: {currentMonthLabel}
@@ -387,7 +369,6 @@ export function PlusalesPage() {
           </div>
         </div>
 
-        {/* PANEL KANAN: BUDGETING DARI EXECUTIVE PANEL */}
         <div className="lg:col-span-5 bg-(--bg-card) p-5 rounded-2xl border border-(--border-color) shadow-xs flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between border-b border-(--border-color) pb-2 mb-2">
@@ -483,9 +464,6 @@ export function PlusalesPage() {
         </div>
       </div>
 
-      {/* ========================================================================= */}
-      {/* FILTER BULAN & TOMBOL INPUT */}
-      {/* ========================================================================= */}
       <div className="px-6 py-3 bg-(--bg-card) border-b border-(--border-color) flex items-center justify-between shrink-0">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2 bg-(--bg-input) border border-(--border-color) rounded-xl px-3 py-1.5 shadow-xs">
@@ -557,31 +535,79 @@ export function PlusalesPage() {
         </div>
       </div>
 
-      {/* ========================================================================= */}
-      {/* TABEL DATA REKAPAN HARIAN */}
-      {/* ========================================================================= */}
       <div className="flex-1 overflow-auto p-6 custom-scrollbar">
         <div className="bg-(--bg-card) border border-(--border-color) rounded-2xl shadow-xs overflow-hidden">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-(--surface-hover) border-b border-(--border-color) text-[10px] uppercase font-black text-(--text-secondary) tracking-wider">
-                <th className="px-4 py-3">Tanggal &amp; Hari</th>
-                <th className="px-4 py-3 text-right text-orange-500">
-                  Gross Sales
-                </th>
-                <th className="px-4 py-3 text-right">Net Sales</th>
-                <th className="px-4 py-3 text-right">Diskon</th>
-                <th className="px-4 py-3 text-right">Tax (PB1)</th>
-                <th className="px-4 py-3 text-right">Service</th>
-                <th className="px-4 py-3 text-right text-emerald-500">
-                  Cash on Hand
-                </th>
-                <th className="px-4 py-3 text-center">Status</th>
+                <SortHeader
+                  label="Tanggal & Hari"
+                  sortKey="date"
+                  currentSort={sortConfig}
+                  onSort={requestSort}
+                  className="px-4 py-3"
+                />
+                <SortHeader
+                  label="Gross Sales"
+                  sortKey="grossSales"
+                  currentSort={sortConfig}
+                  onSort={requestSort}
+                  align="right"
+                  className="px-4 py-3 text-right text-orange-500"
+                />
+                <SortHeader
+                  label="Net Sales"
+                  sortKey="netSales"
+                  currentSort={sortConfig}
+                  onSort={requestSort}
+                  align="right"
+                  className="px-4 py-3 text-right"
+                />
+                <SortHeader
+                  label="Diskon"
+                  sortKey="discount"
+                  currentSort={sortConfig}
+                  onSort={requestSort}
+                  align="right"
+                  className="px-4 py-3 text-right"
+                />
+                <SortHeader
+                  label="Tax (PB1)"
+                  sortKey="tax"
+                  currentSort={sortConfig}
+                  onSort={requestSort}
+                  align="right"
+                  className="px-4 py-3 text-right"
+                />
+                <SortHeader
+                  label="Service"
+                  sortKey="service"
+                  currentSort={sortConfig}
+                  onSort={requestSort}
+                  align="right"
+                  className="px-4 py-3 text-right"
+                />
+                <SortHeader
+                  label="Cash on Hand"
+                  sortKey="cashOnHand"
+                  currentSort={sortConfig}
+                  onSort={requestSort}
+                  align="right"
+                  className="px-4 py-3 text-right text-emerald-500"
+                />
+                <SortHeader
+                  label="Status"
+                  sortKey="balanceDifference"
+                  currentSort={sortConfig}
+                  onSort={requestSort}
+                  align="center"
+                  className="px-4 py-3 text-center"
+                />
                 <th className="px-4 py-3 text-right w-36">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-(--border-color) text-xs font-semibold text-(--text-primary)">
-              {filteredDocs.map((doc) => {
+              {sortedDocs.map((doc) => {
                 const diff = doc.balanceDifference || 0;
                 return (
                   <tr
@@ -713,7 +739,7 @@ export function PlusalesPage() {
                 );
               })}
 
-              {filteredDocs.length === 0 && (
+              {sortedDocs.length === 0 && (
                 <tr>
                   <td
                     colSpan={9}

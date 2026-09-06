@@ -117,19 +117,39 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
       case "RECEIVING_CREATED":
       case "RECEIVING_UPDATED":
       case "RECEIVING_COMPLETED": {
-        const items = payload.data?.items || payload.items || [];
-        // Tentukan wilayah harga (Outlet > Region > Holding > DEFAULT)
+        const p = payload;
+        const documentType = p.reference?.documentType || p.documentType;
+        const supplierId = p.reference?.supplierId || p.vendorId;
+        const regionId = p.location?.regionId || p.regionId;
+        const vendorSource = p.data?.vendorSource;
+
+        // =====================================================================
+        // ATURAN MUTLAK HARGA FLUKTUATIF (ANTI-COMPOUNDING RUNAWAY)
+        // =====================================================================
+        // 1. Jika ini transaksi PIUTANG (distribusi gudang), JANGAN ubah harga beli master!
+        if (documentType === "PIUTANG") break;
+
+        // 2. Jika supplier adalah GUDANG INTERNAL (regionId === supplierId), JANGAN ubah harga beli master!
+        if (
+          vendorSource === "INTERNAL" ||
+          (supplierId && regionId && supplierId === regionId)
+        ) {
+          break;
+        }
+
+        // HANYA VENDOR EKSTERNAL (Pasar/Pabrik) yang berhak memperbarui HPP Master Item:
+        const items = p.data?.items || p.items || [];
         const scopeKey =
-          payload.location?.outletId ||
-          payload.outletId ||
-          payload.location?.regionId ||
-          payload.regionId ||
-          payload.organization?.companyId ||
-          payload.companyId ||
+          p.location?.outletId ||
+          p.outletId ||
+          p.location?.regionId ||
+          p.regionId ||
+          p.organization?.companyId ||
+          p.companyId ||
           "DEFAULT";
 
         items.forEach((item: any) => {
-          if (item.isExpense) return; // Abaikan jasa/biaya operasional
+          if (item.isExpense) return;
 
           const product = this.products.get(item.itemId);
           if (product) {
@@ -143,7 +163,6 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
 
             const newBasePrice = Math.round(Number(item.price) || 0);
             const margin = Number(scopePricing.marginPercentage) || 0;
-            // Harga jual otomatis menyesuaikan margin persentase
             const newSellingPrice =
               margin > 0
                 ? Math.round(newBasePrice + newBasePrice * (margin / 100))
@@ -158,7 +177,6 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
               sellingPrice: newSellingPrice,
             };
 
-            // Cadangkan ke DEFAULT jika DEFAULT belum pernah disetel
             if (!currentPricing["DEFAULT"]) {
               currentPricing["DEFAULT"] = currentPricing[scopeKey];
             }

@@ -412,13 +412,16 @@ export const InvoiceDetailModal: React.FC<{
   onClose: () => void;
 }> = ({ document, vendorName, locationName, onClose }) => {
   const items = document.items || [];
+  const isPiutang = document.documentType === "PIUTANG";
 
   return (
     <div className="p-5 space-y-5 max-w-3xl">
       <div className="grid grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-800/60 p-4 rounded-xl border border-slate-200 dark:border-slate-700 text-xs">
         <div>
           <span className="text-slate-400 text-[10px] uppercase font-bold block">
-            No. Invoice / Referensi:
+            {isPiutang
+              ? "No. Surat Jalan / Referensi:"
+              : "No. Invoice / Faktur:"}
           </span>
           <span className="font-black text-slate-900 dark:text-white font-mono text-sm">
             {document.invoiceNumber}
@@ -432,16 +435,18 @@ export const InvoiceDetailModal: React.FC<{
         </div>
         <div>
           <span className="text-slate-400 text-[10px] uppercase font-bold block">
-            Vendor / Sumber:
+            {isPiutang ? "Gudang Pengirim (Penyedia):" : "Vendor / Pemasok:"}
           </span>
           <span className="font-black text-orange-600 text-sm">
-            {vendorName}
+            {/* Pada Piutang: locationName adalah Gudang Pengirim */}
+            {isPiutang ? locationName : vendorName}
           </span>
           <span className="text-slate-400 text-[10px] uppercase font-bold block mt-2">
-            Lokasi Unit:
+            {isPiutang ? "Outlet Penerima (Konsumen):" : "Unit Penerima:"}
           </span>
           <span className="font-bold text-slate-800 dark:text-slate-200">
-            {locationName}
+            {/* Pada Piutang: vendorName adalah Nama Outlet Cabang */}
+            {isPiutang ? vendorName : locationName}
           </span>
         </div>
       </div>

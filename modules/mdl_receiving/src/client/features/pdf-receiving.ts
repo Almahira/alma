@@ -3,24 +3,33 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
 /**
- * 1. CETAK FAKTUR SATUAN (SINGLE INVOICE DETAIL)
+ * 1. CETAK FAKTUR SATUAN / SURAT JALAN (SINGLE INVOICE DETAIL)
  */
 export const printSingleInvoicePdf = (
   doc: any,
-  vendorName: string,
-  locationName: string,
+  entityName: string, // Nama Vendor (pada Hutang) ATAU Nama Outlet (pada Piutang)
+  locationName: string, // Lokasi Unit yang sedang aktif / login
   bankInfo?: {
     bankName?: string;
     bankAccount?: string;
     bankAccountName?: string;
   },
 ) => {
+  const isPiutang = doc.documentType === "PIUTANG";
   const pdf = new jsPDF("p", "pt", "a4");
 
-  // Header Faktur
-  pdf.setFontSize(16);
+  // Header Dokumen Resmi
+  pdf.setFontSize(15);
   pdf.setFont("helvetica", "bold");
-  pdf.text("BUKTI PENERIMAAN BARANG / NOTA", 40, 45);
+  pdf.text(
+    isPiutang
+      ? "SURAT JALAN & DISTRIBUSI CABANG (PIUTANG)"
+      : doc.documentType === "PETTYCASH"
+        ? "BUKTI PENGELUARAN KAS KECIL (PETTYCASH)"
+        : "BUKTI PENERIMAAN BARANG / NOTA (HUTANG)",
+    40,
+    45,
+  );
 
   pdf.setFontSize(9);
   pdf.setFont("helvetica", "normal");
@@ -31,20 +40,35 @@ export const printSingleInvoicePdf = (
     40,
     78,
   );
-  pdf.text(`Lokasi       : ${locationName}`, 40, 91);
 
-  pdf.text(`Vendor/Penyedia : ${vendorName}`, 320, 65);
-  pdf.text(
-    `Jatuh Tempo     : ${doc.dueDate ? new Date(doc.dueDate).toLocaleDateString("id-ID") : "CASH / LUNAS"}`,
-    320,
-    78,
-  );
-  if (bankInfo?.bankName) {
+  // =========================================================================
+  // PENYELARASAN IDENTITAS PENYEDIA (PENGIRIM) VS KONSUMEN (PENERIMA)
+  // =========================================================================
+  if (isPiutang) {
+    // Pada Piutang: Gudang Region = Pengirim (Penyedia), Outlet Cabang = Penerima (Konsumen)
+    pdf.text(`Gudang Pengirim (Penyedia) : ${locationName}`, 40, 91);
+    pdf.text(`Cabang Penerima (Konsumen) : ${entityName}`, 320, 65);
     pdf.text(
-      `Rekening Bank   : ${bankInfo.bankName} - ${bankInfo.bankAccount || ""} (a.n ${bankInfo.bankAccountName || ""})`,
+      `Jatuh Tempo Pembayaran     : ${doc.dueDate ? new Date(doc.dueDate).toLocaleDateString("id-ID") : "TEMPO INTERNAL"}`,
       320,
-      91,
+      78,
     );
+  } else {
+    // Pada Hutang: Vendor = Penyedia, Outlet/Gudang = Penerima
+    pdf.text(`Unit Penerima   : ${locationName}`, 40, 91);
+    pdf.text(`Vendor/Penyedia : ${entityName}`, 320, 65);
+    pdf.text(
+      `Jatuh Tempo     : ${doc.dueDate ? new Date(doc.dueDate).toLocaleDateString("id-ID") : "CASH / LUNAS"}`,
+      320,
+      78,
+    );
+    if (bankInfo?.bankName) {
+      pdf.text(
+        `Rekening Bank   : ${bankInfo.bankName} - ${bankInfo.bankAccount || ""} (a.n ${bankInfo.bankAccountName || ""})`,
+        320,
+        91,
+      );
+    }
   }
 
   // Tabel Rincian Barang
@@ -53,8 +77,8 @@ export const printSingleInvoicePdf = (
     item.name || item.itemId,
     item.isExpense ? "JASA" : "BARANG",
     item.qty,
-    `Rp ${(item.price || 0).toLocaleString()}`,
-    `Rp ${(item.subtotal || 0).toLocaleString()}`,
+    `Rp ${(item.price || 0).toLocaleString("id-ID")}`,
+    `Rp ${(item.subtotal || 0).toLocaleString("id-ID")}`,
   ]);
 
   autoTable(pdf, {
@@ -65,7 +89,7 @@ export const printSingleInvoicePdf = (
     startY: 110,
     theme: "striped",
     headStyles: {
-      fillColor: [249, 115, 22],
+      fillColor: isPiutang ? [14, 165, 233] : [249, 115, 22], // Biru untuk Piutang, Oranye untuk Hutang
       textColor: 255,
       fontStyle: "bold",
     },
@@ -79,36 +103,46 @@ export const printSingleInvoicePdf = (
   pdf.setFont("helvetica", "bold");
   pdf.setTextColor(40);
   pdf.text(
-    `TOTAL NILAI NOTA : Rp ${(doc.totalAmount || 0).toLocaleString()}`,
+    `TOTAL NILAI DOKUMEN : Rp ${(doc.totalAmount || 0).toLocaleString("id-ID")}`,
     340,
     finalY,
   );
   pdf.text(
-    `SUDAH DIBAYAR    : Rp ${(doc.paidAmount || 0).toLocaleString()}`,
+    `SUDAH DIBAYAR       : Rp ${(doc.paidAmount || 0).toLocaleString("id-ID")}`,
     340,
     finalY + 15,
   );
   pdf.setTextColor(225, 29, 72);
   pdf.text(
-    `SISA KEKURANGAN  : Rp ${((doc.totalAmount || 0) - (doc.paidAmount || 0)).toLocaleString()}`,
+    `SISA KEKURANGAN     : Rp ${((doc.totalAmount || 0) - (doc.paidAmount || 0)).toLocaleString("id-ID")}`,
     340,
     finalY + 30,
   );
 
-  // Tanda Tangan
+  // Tanda Tangan Sesuai Jenis Dokumen
   pdf.setTextColor(40);
   pdf.setFont("helvetica", "normal");
-  pdf.text("Penerima / Petugas Cabang,", 40, finalY + 60);
-  pdf.text("( ________________________ )", 40, finalY + 110);
+  if (isPiutang) {
+    pdf.text("Pengirim (Petugas Gudang Pusat),", 40, finalY + 60);
+    pdf.text("( ________________________ )", 40, finalY + 110);
 
-  pdf.text("Mengetahui (Supervisor / Manager),", 320, finalY + 60);
-  pdf.text("( ________________________ )", 320, finalY + 110);
+    pdf.text("Penerima (Petugas Cabang Outlet),", 320, finalY + 60);
+    pdf.text("( ________________________ )", 320, finalY + 110);
+  } else {
+    pdf.text("Penerima / Petugas Cabang,", 40, finalY + 60);
+    pdf.text("( ________________________ )", 40, finalY + 110);
 
-  pdf.save(`Faktur_${doc.invoiceNumber}.pdf`);
+    pdf.text("Mengetahui (Supervisor / Manager),", 320, finalY + 60);
+    pdf.text("( ________________________ )", 320, finalY + 110);
+  }
+
+  pdf.save(
+    `${isPiutang ? "SuratJalan_Distribusi" : "Faktur"}_${doc.invoiceNumber}.pdf`,
+  );
 };
 
 /**
- * 2. CETAK LAPORAN RINGKASAN PERIODE (UNTUK FINANCE / KASIR BESAR)
+ * 2. CETAK LAPORAN RINGKASAN PERIODE (UNTUK FINANCE / REKAP TAGIHAN)
  */
 export const printSummaryPeriodPdf = (
   groupedDocs: Record<string, any>,
@@ -116,16 +150,30 @@ export const printSummaryPeriodPdf = (
   dateEnd: string,
   outletName: string = "SEMUA CABANG",
 ) => {
+  // Cek apakah data ini rumpun Piutang Distribusi
+  const firstGroup = Object.values(groupedDocs)[0];
+  const isPiutang = firstGroup?.docs?.[0]?.documentType === "PIUTANG";
+
   const pdf = new jsPDF("p", "pt", "a4");
 
   pdf.setFontSize(15);
   pdf.setFont("helvetica", "bold");
-  pdf.text("PENGAJUAN PEMBAYARAN VENDOR (RINGKASAN FINANCE)", 40, 40);
+  pdf.text(
+    isPiutang
+      ? "REKAPITULASI DISTRIBUSI & PIUTANG CABANG (FINANCE)"
+      : "PENGAJUAN PEMBAYARAN VENDOR (RINGKASAN FINANCE)",
+    40,
+    40,
+  );
 
   pdf.setFontSize(9);
   pdf.setFont("helvetica", "normal");
   pdf.setTextColor(100);
-  pdf.text(`Cabang / Unit : ${outletName}`, 40, 58);
+  pdf.text(
+    `${isPiutang ? "Gudang Pengirim (Pusat)" : "Cabang / Unit"} : ${outletName}`,
+    40,
+    58,
+  );
   pdf.text(
     `Periode       : ${dateStart ? new Date(dateStart).toLocaleDateString("id-ID") : "Awal"} s/d ${dateEnd ? new Date(dateEnd).toLocaleDateString("id-ID") : "Sekarang"}`,
     40,
@@ -137,16 +185,24 @@ export const printSummaryPeriodPdf = (
   Object.entries(groupedDocs).forEach(([_, group]) => {
     if (group.docs.length === 0) return;
 
-    // Header Grup Vendor + Info Rekening Bank
+    // Header Grup (Vendor vs Outlet Penerima)
     pdf.setFontSize(10);
     pdf.setFont("helvetica", "bold");
-    pdf.setTextColor(234, 88, 12);
-    pdf.text(`${group.title.toUpperCase()}`, 40, currentY);
+    pdf.setTextColor(
+      isPiutang ? 14 : 234,
+      isPiutang ? 165 : 88,
+      isPiutang ? 233 : 12,
+    );
+    pdf.text(
+      `${isPiutang ? "CABANG PENERIMA (KONSUMEN): " : ""}${group.title.toUpperCase()}`,
+      40,
+      currentY,
+    );
 
     pdf.setFontSize(8.5);
     pdf.setFont("helvetica", "normal");
     pdf.setTextColor(70);
-    if (group.bankInfo) {
+    if (group.bankInfo && !isPiutang) {
       pdf.text(
         `Rekening: ${group.bankInfo.bankName || "-"} | No: ${group.bankInfo.bankAccount || "-"} | a.n: ${group.bankInfo.bankAccountName || "-"}`,
         40,
@@ -159,15 +215,15 @@ export const printSummaryPeriodPdf = (
       d.invoiceNumber,
       d.dueDate ? new Date(d.dueDate).toLocaleDateString("id-ID") : "CASH",
       d.totalAmount - d.paidAmount <= 0 ? "LUNAS" : "BELUM LUNAS",
-      `Rp ${(d.paidAmount || 0).toLocaleString()}`,
-      `Rp ${(d.totalAmount || 0).toLocaleString()}`,
+      `Rp ${(d.paidAmount || 0).toLocaleString("id-ID")}`,
+      `Rp ${(d.totalAmount || 0).toLocaleString("id-ID")}`,
     ]);
 
     autoTable(pdf, {
       head: [
         [
           "TANGGAL",
-          "NO. INVOICE",
+          isPiutang ? "NO. SURAT JALAN" : "NO. INVOICE",
           "TEMPO",
           "STATUS",
           "SUDAH DIBAYAR",
@@ -178,7 +234,7 @@ export const printSummaryPeriodPdf = (
       startY: currentY + 20,
       theme: "grid",
       headStyles: {
-        fillColor: [51, 65, 85],
+        fillColor: isPiutang ? [14, 165, 233] : [51, 65, 85],
         textColor: 255,
         fontStyle: "bold",
       },
@@ -190,7 +246,7 @@ export const printSummaryPeriodPdf = (
     pdf.setFont("helvetica", "bold");
     pdf.setTextColor(15, 23, 42);
     pdf.text(
-      `TOTAL PENGAJUAN ${group.title.toUpperCase()} : Rp ${(group.total || 0).toLocaleString()}`,
+      `TOTAL ${isPiutang ? "TAGIHAN " : "PENGAJUAN "}${group.title.toUpperCase()} : Rp ${(group.total || 0).toLocaleString("id-ID")}`,
       260,
       currentY,
     );
@@ -203,11 +259,13 @@ export const printSummaryPeriodPdf = (
     }
   });
 
-  pdf.save(`Rekap_Finance_${outletName}_${Date.now()}.pdf`);
+  pdf.save(
+    `${isPiutang ? "Rekap_Piutang_Cabang" : "Rekap_Finance"}_${outletName}_${Date.now()}.pdf`,
+  );
 };
 
 /**
- * 3. CETAK LAPORAN RINCIAN DETAIL PERIODE (UNTUK OPERATIONAL MANAGER / AUDIT)
+ * 3. CETAK LAPORAN RINCIAN DETAIL PERIODE (UNTUK AUDIT & OPERASIONAL GUDANG)
  */
 export const printDetailedPeriodPdf = (
   groupedDocs: Record<string, any>,
@@ -215,16 +273,29 @@ export const printDetailedPeriodPdf = (
   dateEnd: string,
   outletName: string = "SEMUA CABANG",
 ) => {
+  const firstGroup = Object.values(groupedDocs)[0];
+  const isPiutang = firstGroup?.docs?.[0]?.documentType === "PIUTANG";
+
   const pdf = new jsPDF("p", "pt", "a4");
 
   pdf.setFontSize(15);
   pdf.setFont("helvetica", "bold");
-  pdf.text("LAPORAN RINCIAN PENERIMAAN BARANG (OPERASIONAL & AUDIT)", 40, 40);
+  pdf.text(
+    isPiutang
+      ? "LAPORAN RINCIAN PENGIRIMAN & DISTRIBUSI CABANG (AUDIT)"
+      : "LAPORAN RINCIAN PENERIMAAN BARANG (OPERASIONAL & AUDIT)",
+    40,
+    40,
+  );
 
   pdf.setFontSize(9);
   pdf.setFont("helvetica", "normal");
   pdf.setTextColor(100);
-  pdf.text(`Cabang / Unit : ${outletName}`, 40, 58);
+  pdf.text(
+    `${isPiutang ? "Gudang Pengirim" : "Cabang / Unit"} : ${outletName}`,
+    40,
+    58,
+  );
   pdf.text(
     `Periode       : ${dateStart ? new Date(dateStart).toLocaleDateString("id-ID") : "Awal"} s/d ${dateEnd ? new Date(dateEnd).toLocaleDateString("id-ID") : "Sekarang"}`,
     40,
@@ -238,10 +309,18 @@ export const printDetailedPeriodPdf = (
 
     pdf.setFontSize(11);
     pdf.setFont("helvetica", "bold");
-    pdf.setTextColor(234, 88, 12);
-    pdf.text(`VENDOR: ${group.title.toUpperCase()}`, 40, currentY);
+    pdf.setTextColor(
+      isPiutang ? 14 : 234,
+      isPiutang ? 165 : 88,
+      isPiutang ? 233 : 12,
+    );
+    pdf.text(
+      `${isPiutang ? "CABANG TUJUAN (KONSUMEN): " : "VENDOR: "}${group.title.toUpperCase()}`,
+      40,
+      currentY,
+    );
 
-    if (group.bankInfo) {
+    if (group.bankInfo && !isPiutang) {
       pdf.setFontSize(8.5);
       pdf.setFont("helvetica", "normal");
       pdf.setTextColor(80);
@@ -259,7 +338,7 @@ export const printDetailedPeriodPdf = (
       pdf.setFont("helvetica", "bold");
       pdf.setTextColor(30, 41, 59);
       pdf.text(
-        `▶ Invoice: ${d.invoiceNumber} | Tgl: ${new Date(d.date).toLocaleDateString("id-ID")} | Total: Rp ${(d.totalAmount || 0).toLocaleString()}`,
+        `  ▶ ${isPiutang ? "Surat Jalan" : "Invoice"}: ${d.invoiceNumber} | Tgl: ${new Date(d.date).toLocaleDateString("id-ID")} | Total: Rp ${(d.totalAmount || 0).toLocaleString("id-ID")}`,
         40,
         currentY,
       );
@@ -269,8 +348,8 @@ export const printDetailedPeriodPdf = (
         it.name || it.itemId,
         it.isExpense ? "JASA" : "BARANG",
         it.qty,
-        `Rp ${(it.price || 0).toLocaleString()}`,
-        `Rp ${(it.subtotal || 0).toLocaleString()}`,
+        `Rp ${(it.price || 0).toLocaleString("id-ID")}`,
+        `Rp ${(it.subtotal || 0).toLocaleString("id-ID")}`,
       ]);
 
       autoTable(pdf, {
@@ -280,7 +359,11 @@ export const printDetailedPeriodPdf = (
         body: itemRows,
         startY: currentY + 6,
         theme: "striped",
-        headStyles: { fillColor: [71, 85, 105], textColor: 255, fontSize: 7.5 },
+        headStyles: {
+          fillColor: isPiutang ? [14, 165, 233] : [71, 85, 105],
+          textColor: 255,
+          fontSize: 7.5,
+        },
         styles: { fontSize: 7.5, cellPadding: 3 },
       });
 
@@ -295,5 +378,7 @@ export const printDetailedPeriodPdf = (
     currentY += 15;
   });
 
-  pdf.save(`Rekap_Detail_Operasional_${outletName}_${Date.now()}.pdf`);
+  pdf.save(
+    `${isPiutang ? "Rekap_Detail_Distribusi" : "Rekap_Detail_Operasional"}_${outletName}_${Date.now()}.pdf`,
+  );
 };

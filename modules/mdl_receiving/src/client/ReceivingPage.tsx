@@ -1,4 +1,3 @@
-// File: modules/mdl_receiving/src/client/ReceivingPage.tsx
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -30,7 +29,6 @@ import { globalCommandBus } from "../../../../packages/core_unv/src/cqrs/Command
 import { useUniversalModal } from "../../../../apps/client_unv/src/shared-ui/UniversalLayout";
 import { sysToast } from "../../../../apps/client_unv/src/shared-ui/useToastStore";
 import { UniversalCombobox } from "../../../../apps/client_unv/src/shared-ui/UniversalCombobox";
-
 import {
   ReceivingForm,
   PaymentModal,
@@ -42,10 +40,11 @@ import {
   printDetailedPeriodPdf,
 } from "./features/pdf-receiving";
 import { exportExcelReceiving } from "./features/excel-receiving";
+import {
+  useUniversalSort,
+  SortHeader,
+} from "../../../../apps/client_unv/src/shared-ui/useUniversalSort";
 
-// =========================================================================
-// 1. KOMPONEN: ROW ACTION MENU (PORTAL-BASED)
-// =========================================================================
 function RowActionMenu({
   doc,
   onPay,
@@ -67,7 +66,6 @@ function RowActionMenu({
   const [coords, setCoords] = useState({ top: 0, left: 0 });
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-
   const isPaid = doc.totalAmount - doc.paidAmount <= 0;
 
   useEffect(() => {
@@ -105,7 +103,6 @@ function RowActionMenu({
       const menuHeight = 180;
       let top = rect.bottom + 4;
       let left = rect.right - menuWidth;
-
       if (top + menuHeight > window.innerHeight) {
         top = rect.top - menuHeight - 4;
       }
@@ -113,7 +110,6 @@ function RowActionMenu({
       if (left + menuWidth > window.innerWidth - 8) {
         left = window.innerWidth - menuWidth - 8;
       }
-
       setCoords({ top, left });
     }
     setOpen((prev) => !prev);
@@ -134,7 +130,6 @@ function RowActionMenu({
       >
         <MoreVertical className="w-3.5 h-3.5" />
       </button>
-
       {open &&
         createPortal(
           <div
@@ -147,10 +142,8 @@ function RowActionMenu({
               maxHeight: "80vh",
               overflowY: "auto",
             }}
-            // ---> PERBAIKAN: Ganti bg-(--bg-card) dengan background SOLID eksplisit <---
             className="w-52 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 py-1.5 animate-in fade-in zoom-in-95 duration-150 text-xs font-bold text-slate-800 dark:text-slate-100"
           >
-            {/* 1. BAYAR CICILAN */}
             {!isPaid && doc.status !== "CANCELLED" && (
               <button
                 onClick={() => handleAction(onPay)}
@@ -159,7 +152,6 @@ function RowActionMenu({
                 <DollarSign className="w-4 h-4" /> Bayar Cicilan
               </button>
             )}
-            {/* 2. EDIT DRAFT */}
             {doc.status === "DRAFT" && !isPaid && (
               <button
                 onClick={() => handleAction(onEdit)}
@@ -168,7 +160,6 @@ function RowActionMenu({
                 <Edit2 className="w-4 h-4" /> Edit Draft
               </button>
             )}
-            {/* 3. SELESAIKAN & KUNCI DOKUMEN */}
             {doc.status === "DRAFT" && (
               <button
                 onClick={() => handleAction(onComplete)}
@@ -177,7 +168,6 @@ function RowActionMenu({
                 <CheckCircle2 className="w-4 h-4" /> Selesaikan / Kunci
               </button>
             )}
-            {/* 4. ARSIPKAN NOTA DRAFT */}
             {doc.status === "DRAFT" && (
               <button
                 onClick={() => handleAction(onArchive)}
@@ -186,7 +176,6 @@ function RowActionMenu({
                 <Archive className="w-4 h-4" /> Arsipkan Nota
               </button>
             )}
-            {/* 5. BATALKAN TRANSAKSI SELESAI (VOID) */}
             {doc.status === "COMPLETED" && (
               <button
                 onClick={() => handleAction(onCancel)}
@@ -195,7 +184,6 @@ function RowActionMenu({
                 <Ban className="w-4 h-4" /> Batalkan (VOID)
               </button>
             )}
-            {/* 6. BUKA KEMBALI NOTA YANG DI-VOID KE DRAFT */}
             {doc.status === "CANCELLED" && (
               <>
                 <button
@@ -219,9 +207,6 @@ function RowActionMenu({
   );
 }
 
-// =========================================================================
-// 2. HALAMAN UTAMA: RECEIVING PAGE
-// =========================================================================
 export function ReceivingPage() {
   const { documents } = useReceivingStore();
   const { vendors } = useVendorStore();
@@ -251,7 +236,6 @@ export function ReceivingPage() {
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
     {},
   );
-
   const [isActionMenuOpen, setIsActionMenuOpen] = useState(false);
   const actionMenuRef = useRef<HTMLDivElement>(null);
 
@@ -280,45 +264,67 @@ export function ReceivingPage() {
     }
   };
 
-  const filteredDocs = documents.filter((doc) => {
-    if (doc.documentType !== activeTab) return false;
-
-    // ============================================================
-    // PERTAHANAN SPASIAL UI KASIR (DEFENSE IN DEPTH)
-    // ============================================================
+  const filteredDocs = useMemo(() => {
     const localOutletId = localStorage.getItem("__unv_outletId");
     const localRegionId = localStorage.getItem("__unv_regionId");
+    const localCompanyId = localStorage.getItem("__unv_companyId");
 
-    // Jika mesin ini adalah Mesin Outlet Cabang:
-    if (localOutletId) {
-      // Wajib hanya menampilkan transaksi milik outlet ini
-      if (doc.outletId && doc.outletId !== localOutletId) return false;
-      // Jika doc.outletId kosong (milik Region/Gudang Pusat), sembunyikan dari cabang!
-      if (!doc.outletId) return false;
-    }
-    // Jika mesin ini adalah Mesin Gudang Region:
-    else if (localRegionId) {
-      if (doc.regionId && doc.regionId !== localRegionId) return false;
-    }
+    return documents
+      .filter((doc) => {
+        if (doc.documentType !== activeTab) return false;
 
-    // Filter Status Aktif vs Arsip
-    const isDocActive = doc.isActive !== false;
-    if (viewStatus === "AKTIF" && !isDocActive) return false;
-    if (viewStatus === "ARSIP" && isDocActive) return false;
+        if (localOutletId) {
+          if (doc.outletId && doc.outletId !== localOutletId) return false;
+          if (!doc.outletId) return false;
+        } else if (localRegionId) {
+          if (doc.regionId && doc.regionId !== localRegionId) return false;
+        }
+        if (
+          localCompanyId &&
+          doc.companyId &&
+          doc.companyId !== localCompanyId
+        ) {
+          return false;
+        }
 
-    if (filterEntityId) {
-      if (activeTab === "HUTANG" && doc.vendorId !== filterEntityId)
-        return false;
-      if (activeTab === "PIUTANG" && doc.outletId !== filterEntityId)
-        return false;
-    }
-    if (dateStart && new Date(doc.date) < new Date(dateStart)) return false;
-    if (dateEnd && new Date(doc.date) > new Date(dateEnd)) return false;
-    const isPaid = doc.totalAmount - doc.paidAmount <= 0;
-    if (filterStatus === "PAID" && !isPaid) return false;
-    if (filterStatus === "UNPAID" && isPaid) return false;
-    return true;
-  });
+        const isDocActive = doc.isActive !== false;
+        if (viewStatus === "AKTIF" && !isDocActive) return false;
+        if (viewStatus === "ARSIP" && isDocActive) return false;
+
+        if (filterEntityId) {
+          if (activeTab === "HUTANG" && doc.vendorId !== filterEntityId)
+            return false;
+          if (activeTab === "PIUTANG" && doc.outletId !== filterEntityId)
+            return false;
+        }
+        if (dateStart && new Date(doc.date) < new Date(dateStart)) return false;
+        if (dateEnd && new Date(doc.date) > new Date(dateEnd)) return false;
+
+        const sisa = (doc.totalAmount || 0) - (doc.paidAmount || 0);
+        const isPaid = sisa <= 0;
+        if (filterStatus === "PAID" && !isPaid) return false;
+        if (filterStatus === "UNPAID" && isPaid) return false;
+        return true;
+      })
+      .map((doc) => ({
+        ...doc,
+        sisa: Math.max(0, (doc.totalAmount || 0) - (doc.paidAmount || 0)),
+      }));
+  }, [
+    documents,
+    activeTab,
+    viewStatus,
+    filterEntityId,
+    dateStart,
+    dateEnd,
+    filterStatus,
+  ]);
+
+  const {
+    sortedItems: sortedDocs,
+    sortConfig,
+    requestSort,
+  } = useUniversalSort(filteredDocs, { key: "date", direction: "desc" });
 
   const groupedData = useMemo(() => {
     const groups: Record<
@@ -332,7 +338,7 @@ export function ReceivingPage() {
       }
     > = {};
 
-    filteredDocs.forEach((doc) => {
+    sortedDocs.forEach((doc) => {
       let key = "LAINNYA";
       let title = "Transaksi Umum";
       let bankInfo: any = null;
@@ -369,7 +375,7 @@ export function ReceivingPage() {
       groups[key].total += doc.totalAmount;
     });
     return groups;
-  }, [filteredDocs, activeTab, vendors, outlets, regions]);
+  }, [sortedDocs, activeTab, vendors, outlets, regions]);
 
   const filterOptions =
     activeTab === "HUTANG"
@@ -389,7 +395,6 @@ export function ReceivingPage() {
     const outId = localStorage.getItem("__unv_outletId");
     const regId = localStorage.getItem("__unv_regionId");
     const compId = localStorage.getItem("__unv_companyId");
-
     const out = outlets.find((o) => o.id === outId);
     if (out) return `Outlet ${out.name.toUpperCase()}`;
     const reg = regions.find((r) => r.id === regId);
@@ -413,16 +418,13 @@ export function ReceivingPage() {
 
   return (
     <div className="relative h-full flex flex-col overflow-hidden bg-(--bg-card)">
-      {/* HEADER UTAMA: COMPACT & MERGED FILTER BAR */}
       <div className="bg-(--bg-card) border-b border-(--border-color) shrink-0 shadow-xs z-10">
         <div className="h-16 px-6 flex items-center justify-between">
           <h2 className="text-xl font-black text-(--text-primary) tracking-tight flex items-center gap-2">
             <ShoppingCart className="w-5 h-5 text-emerald-500" /> Penerimaan &
             Tagihan Operasional
           </h2>
-
           <div className="flex items-center gap-3">
-            {/* RELOKASI: PILL TOGGLE TAB AKTIF VS ARSIP DI SAMPING TOMBOL EXPORT */}
             <div className="flex items-center bg-(--bg-input) p-1 rounded-xl border border-(--border-color)">
               <button
                 onClick={() => setViewStatus("AKTIF")}
@@ -446,7 +448,6 @@ export function ReceivingPage() {
               </button>
             </div>
 
-            {/* MENU AKSI EXPORT & CETAK LAPORAN */}
             <div className="relative" ref={actionMenuRef}>
               <button
                 onClick={() => setIsActionMenuOpen(!isActionMenuOpen)}
@@ -457,7 +458,6 @@ export function ReceivingPage() {
                   className={`w-3.5 h-3.5 transition-transform ${isActionMenuOpen ? "rotate-180" : ""}`}
                 />
               </button>
-
               {isActionMenuOpen && (
                 <div className="absolute right-0 mt-2 w-64 bg-(--bg-card) rounded-xl shadow-2xl border border-(--border-color) py-2 z-50 animate-in fade-in zoom-in-95 duration-150">
                   <button
@@ -527,7 +527,6 @@ export function ReceivingPage() {
           </div>
         </div>
 
-        {/* TABS HAK AKSES */}
         <div className="flex items-center gap-6 px-6">
           <button
             onClick={() => {
@@ -542,7 +541,6 @@ export function ReceivingPage() {
           >
             <Receipt className="w-4 h-4" /> HUTANG (PEMBELIAN)
           </button>
-
           {canAccessPiutang && (
             <button
               onClick={() => {
@@ -558,7 +556,6 @@ export function ReceivingPage() {
               <FileText className="w-4 h-4" /> PIUTANG (DISTRIBUSI CABANG)
             </button>
           )}
-
           <button
             onClick={() => {
               setActiveTab("PETTYCASH");
@@ -575,7 +572,6 @@ export function ReceivingPage() {
         </div>
       </div>
 
-      {/* FILTER BAR PERIODE */}
       <div className="px-6 py-3 bg-(--bg-card) border-b border-(--border-color) flex items-center gap-3 shrink-0">
         <Filter className="w-4 h-4 text-(--text-secondary)" />
         {activeTab !== "PETTYCASH" && (
@@ -606,7 +602,6 @@ export function ReceivingPage() {
             title="Tanggal Akhir Periode"
           />
         </div>
-
         <select
           value={filterStatus}
           onChange={(e) => setFilterStatus(e.target.value)}
@@ -618,7 +613,6 @@ export function ReceivingPage() {
         </select>
       </div>
 
-      {/* DAFTAR DOKUMEN TERKELOMPOK */}
       <div className="flex-1 overflow-auto p-6 custom-scrollbar">
         {Object.keys(groupedData).length === 0 ? (
           <div className="bg-(--bg-card) rounded-xl border border-(--border-color) p-10 text-center text-(--text-secondary) font-semibold text-sm">
@@ -628,7 +622,6 @@ export function ReceivingPage() {
           Object.entries(groupedData).map(([key, group]) => {
             const isExpanded = expandedGroups[key] !== false;
             const belumLunas = group.total - group.lunas;
-
             return (
               <div
                 key={key}
@@ -653,26 +646,25 @@ export function ReceivingPage() {
                       </div>
                     )}
                   </div>
-
                   <div className="flex items-center gap-4">
                     <div className="flex items-center gap-2 text-xs font-bold bg-(--bg-input) border border-(--border-color) px-3 py-1 rounded-md">
                       <span className="text-(--text-secondary)">
                         Belum Lunas:
                       </span>{" "}
                       <span className="text-rose-500 font-mono font-bold">
-                        Rp {belumLunas.toLocaleString()}
+                        Rp {belumLunas.toLocaleString("id-ID")}
                       </span>
                     </div>
                     <div className="flex items-center gap-2 text-xs font-bold bg-(--bg-input) border border-(--border-color) px-3 py-1 rounded-md">
                       <span className="text-(--text-secondary)">Lunas:</span>{" "}
                       <span className="text-emerald-500 font-mono font-bold">
-                        Rp {group.lunas.toLocaleString()}
+                        Rp {group.lunas.toLocaleString("id-ID")}
                       </span>
                     </div>
                     <div className="flex items-center gap-2 text-xs font-black bg-(--text-primary) text-(--bg-card) px-3 py-1 rounded-md">
                       <span>Total:</span>{" "}
                       <span className="font-mono">
-                        Rp {group.total.toLocaleString()}
+                        Rp {group.total.toLocaleString("id-ID")}
                       </span>
                     </div>
                     <ChevronDown
@@ -685,22 +677,50 @@ export function ReceivingPage() {
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="bg-(--bg-card) border-b border-(--border-color) text-[10px] uppercase font-black text-(--text-secondary) tracking-wider">
-                        <th className="px-4 py-2">Tgl & Nota</th>
-                        <th className="px-4 py-2">Jatuh Tempo</th>
-                        <th className="px-4 py-2 text-center">Status</th>
-                        <th className="px-4 py-2 text-right text-rose-500">
-                          Kekurangan
-                        </th>
-                        <th className="px-4 py-2 text-right">Nilai Nota</th>
+                        <SortHeader
+                          label="Tgl & Nota"
+                          sortKey="date"
+                          currentSort={sortConfig}
+                          onSort={requestSort}
+                          className="px-4 py-2"
+                        />
+                        <SortHeader
+                          label="Jatuh Tempo"
+                          sortKey="dueDate"
+                          currentSort={sortConfig}
+                          onSort={requestSort}
+                          className="px-4 py-2"
+                        />
+                        <SortHeader
+                          label="Status"
+                          sortKey="paymentStatus"
+                          currentSort={sortConfig}
+                          onSort={requestSort}
+                          align="center"
+                          className="px-4 py-2 text-center"
+                        />
+                        <SortHeader
+                          label="Kekurangan"
+                          sortKey="sisa"
+                          currentSort={sortConfig}
+                          onSort={requestSort}
+                          align="right"
+                          className="px-4 py-2 text-right text-rose-500"
+                        />
+                        <SortHeader
+                          label="Nilai Nota"
+                          sortKey="totalAmount"
+                          currentSort={sortConfig}
+                          onSort={requestSort}
+                          align="right"
+                          className="px-4 py-2 text-right"
+                        />
                         <th className="px-4 py-2 text-right w-36">Aksi</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-(--border-color) text-xs font-semibold text-(--text-primary)">
                       {group.docs.map((doc) => {
-                        const sisa = doc.totalAmount - doc.paidAmount;
-                        const isPaid = sisa <= 0;
-                        const isCancelled = doc.status === "CANCELLED";
-
+                        const sisa = doc.sisa;
                         return (
                           <tr
                             key={doc.id}
@@ -721,7 +741,6 @@ export function ReceivingPage() {
                                 {doc.invoiceNumber}
                               </div>
                             </td>
-
                             <td className="px-4 py-1.5">
                               {doc.dueDate ? (
                                 <div className="text-[10px] text-rose-500 font-bold font-mono">
@@ -735,9 +754,7 @@ export function ReceivingPage() {
                                 </span>
                               )}
                             </td>
-
                             <td className="px-4 py-1.5 text-center">
-                              {/* 1. STATUS DOKUMEN */}
                               <div
                                 className={`inline-block px-2 py-0.5 text-[9px] font-black rounded uppercase border ${
                                   doc.status === "COMPLETED"
@@ -749,8 +766,6 @@ export function ReceivingPage() {
                               >
                                 {doc.status}
                               </div>
-
-                              {/* 2. STATUS PEMBAYARAN RESMI DARI DATABASE */}
                               <div
                                 className={`inline-block px-2 py-0.5 text-[9px] font-black rounded uppercase ml-1 border ${
                                   doc.paymentStatus === "VOID" ||
@@ -773,17 +788,15 @@ export function ReceivingPage() {
                                       : "BELUM LUNAS"}
                               </div>
                             </td>
-
                             <td className="px-4 py-1.5 text-right font-mono text-rose-500 font-bold">
-                              Rp {sisa.toLocaleString()}
+                              Rp {sisa.toLocaleString("id-ID")}
                             </td>
                             <td className="px-4 py-1.5 text-right font-mono text-(--text-primary) font-bold">
-                              Rp {doc.totalAmount.toLocaleString()}
+                              Rp{" "}
+                              {(doc.totalAmount || 0).toLocaleString("id-ID")}
                             </td>
-
                             <td className="px-4 py-1.5 text-right whitespace-nowrap">
                               <div className="flex items-center justify-end gap-1">
-                                {/* 1. VIEW DETAIL (MATA) */}
                                 <button
                                   onClick={() =>
                                     openCenterModal({
@@ -803,8 +816,6 @@ export function ReceivingPage() {
                                 >
                                   <Eye className="w-3.5 h-3.5" />
                                 </button>
-
-                                {/* 2. PRINT FAKTUR SATUAN */}
                                 <button
                                   onClick={() =>
                                     printSingleInvoicePdf(
@@ -819,9 +830,7 @@ export function ReceivingPage() {
                                 >
                                   <Printer className="w-3.5 h-3.5" />
                                 </button>
-
                                 {viewStatus === "AKTIF" ? (
-                                  /* 3. MENU LACI AKSI DENGAN SOLUSI REOPEN ANTI-INPUT ULANG */
                                   <RowActionMenu
                                     doc={doc}
                                     onPay={() =>
@@ -900,7 +909,6 @@ export function ReceivingPage() {
                                     }
                                   />
                                 ) : (
-                                  /* 4. TOMBOL RESTORE (JIKA DI TAB ARSIP) */
                                   <button
                                     onClick={() =>
                                       handleAction("RESTORE_RECEIVING", {

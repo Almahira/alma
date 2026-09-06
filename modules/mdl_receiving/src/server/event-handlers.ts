@@ -21,6 +21,22 @@ async function updateProductPricingFromReceiving(
   p: any,
   items: any[],
 ) {
+  const documentType = p.reference?.documentType || p.documentType;
+  const supplierId = p.reference?.supplierId || p.vendorId;
+  const regionId = p.location?.regionId || p.regionId;
+  const vendorSource = p.data?.vendorSource;
+
+  // 1. Lewati jika transaksi PIUTANG
+  if (documentType === "PIUTANG") return;
+
+  // 2. Lewati jika suplai dari GUDANG INTERNAL
+  if (
+    vendorSource === "INTERNAL" ||
+    (supplierId && regionId && supplierId === regionId)
+  ) {
+    return;
+  }
+
   const scopeKey =
     p.location?.outletId ||
     p.outletId ||
@@ -31,7 +47,7 @@ async function updateProductPricingFromReceiving(
     "DEFAULT";
 
   for (const item of items) {
-    if (item.isExpense) continue; // Abaikan jika ini jasa / biaya operasional
+    if (item.isExpense) continue;
 
     const currentItem = await tx
       .select()
@@ -50,8 +66,6 @@ async function updateProductPricingFromReceiving(
 
       const newBasePrice = Math.round(Number(item.price) || 0);
       const margin = Number(scopePricing.marginPercentage) || 0;
-
-      // Hitung ulang harga jual berdasarkan margin produk
       const newSellingPrice =
         margin > 0
           ? Math.round(newBasePrice + newBasePrice * (margin / 100))
@@ -66,7 +80,6 @@ async function updateProductPricingFromReceiving(
         sellingPrice: newSellingPrice,
       };
 
-      // Set default jika belum pernah ada
       if (!currentPricing["DEFAULT"]) {
         currentPricing["DEFAULT"] = currentPricing[scopeKey];
       }
