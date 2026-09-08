@@ -324,12 +324,16 @@ app.get("/api/events/pull/tx", async (req, res) => {
       }
       // 3. JIKA PERANGKAT ADALAH GUDANG PUSAT / REGION (Tanpa Outlet)
       else if (filterRegionId) {
-        // Gudang Region hanya berhak menarik event regionnya atau transaksi internalnya
         if (evt.regionId !== filterRegionId) {
           return;
         }
-        // Jika event milik cabang spesifik, gudang pusat regional tidak perlu menarik transaksi kasir cabang
-        if (evt.outletId) {
+        // HANYA tolak transaksi operasional lokal cabang (seperti PLUSALES kasir)
+        // Transaksi RECEIVING/PIUTANG suplai atau DISTRIBUSI dari gudang HARUS tetap ditarik oleh Region
+        const isBranchOnlyLocal =
+          evt.type.startsWith("TX_PLUSALES") ||
+          evt.aggregateType === "PLUSALES_DOCUMENT";
+
+        if (evt.outletId && isBranchOnlyLocal) {
           return;
         }
       }

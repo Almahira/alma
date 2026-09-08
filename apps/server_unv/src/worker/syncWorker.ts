@@ -118,18 +118,19 @@ export async function startSyncWorker(io: Server) {
         // 1. Jika ini event master data tingkat holding (Company), tembakkan ke seluruh company
         if (payloadCompanyId && !payloadRegionId && !payloadOutletId) {
           io.to(`company:${payloadCompanyId}`).emit("SYNC_NEEDED", syncPayload);
-        }
-        // 2. Jika event tingkat Regional (Gudang Pusat), tembakkan ke room region & holding
-        else if (payloadRegionId && !payloadOutletId) {
-          io.to(`region:${payloadRegionId}`).emit("SYNC_NEEDED", syncPayload);
-        }
-        // 3. Jika event transaksi Cabang Outlet, tembakkan spesifik ke outlet & holding
-        else if (payloadOutletId) {
-          io.to(`outlet:${payloadOutletId}`).emit("SYNC_NEEDED", syncPayload);
-        }
-        // 4. Fallback global
-        else {
-          io.emit("SYNC_NEEDED", syncPayload);
+        } else {
+          if (payloadRegionId) {
+            io.to(`region:${payloadRegionId}`).emit("SYNC_NEEDED", syncPayload);
+          }
+          if (payloadOutletId) {
+            io.to(`outlet:${payloadOutletId}`).emit("SYNC_NEEDED", syncPayload);
+          }
+          if (payloadCompanyId) {
+            io.to(`company:${payloadCompanyId}`).emit(
+              "SYNC_NEEDED",
+              syncPayload,
+            );
+          }
         }
 
         // Tetap broadcast dashboard refresh secara global

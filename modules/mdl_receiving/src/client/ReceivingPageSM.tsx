@@ -110,16 +110,46 @@ export function ReceivingPageSM() {
   };
 
   const filteredDocs = documents.filter((doc) => {
-    if (doc.documentType !== activeTab) return false;
-
     const localOutletId = localStorage.getItem("__unv_outletId");
     const localRegionId = localStorage.getItem("__unv_regionId");
+    const localCompanyId = localStorage.getItem("__unv_companyId");
 
+    // 1. Perspektif Outlet vs Region
     if (localOutletId) {
-      if (doc.outletId && doc.outletId !== localOutletId) return false;
-      if (!doc.outletId) return false;
+      if (doc.outletId !== localOutletId) return false;
+
+      if (activeTab === "HUTANG") {
+        const isHutangVendor = doc.documentType === "HUTANG";
+        const isKirimanGudang = doc.documentType === "PIUTANG";
+        if (!isHutangVendor && !isKirimanGudang) return false;
+      } else if (activeTab === "PETTYCASH") {
+        if (doc.documentType !== "PETTYCASH") return false;
+      } else {
+        return false;
+      }
     } else if (localRegionId) {
-      if (doc.regionId && doc.regionId !== localRegionId) return false;
+      if (doc.regionId !== localRegionId) return false;
+
+      if (activeTab === "HUTANG") {
+        if (doc.documentType !== "HUTANG") return false;
+        if (doc.outletId) return false; // Mencegah belanja cabang bocor ke Region
+        if (doc.vendorId === localRegionId) return false;
+      } else if (activeTab === "PIUTANG") {
+        const isPiutangResmi = doc.documentType === "PIUTANG";
+        const isTagihanDariCabang =
+          doc.documentType === "HUTANG" && doc.vendorId === localRegionId;
+        if (!isPiutangResmi && !isTagihanDariCabang) return false;
+      } else if (activeTab === "PETTYCASH") {
+        if (doc.documentType !== "PETTYCASH") return false;
+        if (doc.outletId) return false;
+      }
+    } else {
+      if (doc.documentType !== activeTab) return false;
+    }
+
+    // 2. Company & Status
+    if (localCompanyId && doc.companyId && doc.companyId !== localCompanyId) {
+      return false;
     }
 
     const isDocActive = doc.isActive !== false;
@@ -127,16 +157,23 @@ export function ReceivingPageSM() {
     if (viewStatus === "ARSIP" && isDocActive) return false;
 
     if (filterEntityId) {
-      if (activeTab === "HUTANG" && doc.vendorId !== filterEntityId)
+      if (activeTab === "HUTANG") {
+        const actualSupplierId = doc.vendorId || doc.regionId;
+        if (actualSupplierId !== filterEntityId) return false;
+      }
+      if (activeTab === "PIUTANG" && doc.outletId !== filterEntityId) {
         return false;
-      if (activeTab === "PIUTANG" && doc.outletId !== filterEntityId)
-        return false;
+      }
     }
+
     if (dateStart && new Date(doc.date) < new Date(dateStart)) return false;
     if (dateEnd && new Date(doc.date) > new Date(dateEnd)) return false;
-    const isPaid = doc.totalAmount - doc.paidAmount <= 0;
+
+    const sisa = (doc.totalAmount || 0) - (doc.paidAmount || 0);
+    const isPaid = sisa <= 0;
     if (filterStatus === "PAID" && !isPaid) return false;
     if (filterStatus === "UNPAID" && isPaid) return false;
+
     return true;
   });
 
@@ -158,13 +195,18 @@ export function ReceivingPageSM() {
       let bankInfo: any = null;
 
       if (activeTab === "HUTANG") {
-        key = doc.vendorId || "unknown";
-        const isRegion = regions.find((r) => r.id === doc.vendorId);
+        const supplierKey = doc.vendorId || doc.regionId || "unknown";
+        key = supplierKey;
+
+        const isRegion = regions.find(
+          (r) => r.id === doc.vendorId || r.id === doc.regionId,
+        );
+
         if (isRegion) {
           title = `[INTERNAL] GUDANG PUSAT [${isRegion.name}]`;
         } else {
           const v = vendors.find((vend) => vend.id === doc.vendorId);
-          title = v ? v.name : "Unknown Vendor";
+          title = v ? v.name : "Vendor Pemasok Luar";
           if (v) {
             bankInfo = {
               bankName: v.bankName,
