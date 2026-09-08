@@ -275,45 +275,56 @@ export function ReceivingPage() {
     return documents
       .filter((doc) => {
         // ==============================================================
-        // 1. ISOLASI & PERSPEKTIF SPASIAL (OUTLET VS REGION)
+        // 1. ATURAN FILTER BERDASARKAN TAB & PERAN PERANGKAT
         // ==============================================================
         if (localOutletId) {
-          // A. JIKA PERANGKAT ADALAH OUTLET:
-          // Wajib milik cabang ini
+          // A. DI MESIN OUTLET:
           if (doc.outletId !== localOutletId) return false;
 
           if (activeTab === "HUTANG") {
-            // Loloskan Hutang ke vendor luar ATAU Piutang/kiriman dari Gudang Pusat
             const isHutangVendor = doc.documentType === "HUTANG";
             const isKirimanGudang = doc.documentType === "PIUTANG";
             if (!isHutangVendor && !isKirimanGudang) return false;
           } else if (activeTab === "PETTYCASH") {
             if (doc.documentType !== "PETTYCASH") return false;
           } else {
-            return false; // Outlet tidak memiliki tab Piutang
+            return false;
           }
-        } else if (localRegionId) {
-          // B. JIKA PERANGKAT ADALAH GUDANG PUSAT (REGION):
-          if (doc.regionId !== localRegionId) return false;
+        } else {
+          // B. DI MESIN REGION ATAU HOLDING PUSAT:
+          if (activeTab === "PIUTANG") {
+            // Syarat masuk tab PIUTANG:
+            // 1. Dokumen wajib memiliki outletId (tagihan ditujukan ke outlet cabang)
+            if (!doc.outletId) return false;
 
-          if (activeTab === "HUTANG") {
-            // HANYA belanja Gudang sendiri ke vendor luar (Bukan milik cabang & bukan tagihan internal)
-            if (doc.documentType !== "HUTANG") return false;
-            if (doc.outletId) return false; // 🔒 Mencegah belanja cabang bocor ke Region
-            if (doc.vendorId === localRegionId) return false;
-          } else if (activeTab === "PIUTANG") {
-            // Tampilkan kiriman ke cabang (Dokumen PIUTANG atau HUTANG cabang ke Region)
+            // 2. Loloskan jika tipe PIUTANG atau transaksi HUTANG cabang ke Region
             const isPiutangResmi = doc.documentType === "PIUTANG";
-            const isTagihanDariCabang =
-              doc.documentType === "HUTANG" && doc.vendorId === localRegionId;
-            if (!isPiutangResmi && !isTagihanDariCabang) return false;
+            const isHutangCabangKeRegion =
+              doc.documentType === "HUTANG" &&
+              (!doc.vendorId ||
+                doc.vendorId === doc.regionId ||
+                regions.some((r) => r.id === doc.vendorId));
+
+            if (!isPiutangResmi && !isHutangCabangKeRegion) return false;
+
+            // Jika perangkat adalah Region tertentu, cocokkan regionId
+            if (
+              localRegionId &&
+              doc.regionId &&
+              doc.regionId !== localRegionId
+            ) {
+              return false;
+            }
+          } else if (activeTab === "HUTANG") {
+            // Tab HUTANG Region: HANYA belanja Gudang sendiri ke vendor luar
+            if (doc.documentType !== "HUTANG") return false;
+            if (doc.outletId) return false; // Jangan tampilkan belanja milik cabang
+            if (localRegionId && doc.vendorId === localRegionId) return false;
+            if (localRegionId && doc.regionId !== localRegionId) return false;
           } else if (activeTab === "PETTYCASH") {
             if (doc.documentType !== "PETTYCASH") return false;
             if (doc.outletId) return false;
           }
-        } else {
-          // C. HOLDING PUSAT (COMPANY LEVEL):
-          if (doc.documentType !== activeTab) return false;
         }
 
         // ==============================================================
@@ -332,7 +343,7 @@ export function ReceivingPage() {
         if (viewStatus === "ARSIP" && isDocActive) return false;
 
         // ==============================================================
-        // 3. FILTER DROPDOWN ENTITAS (VENDOR / OUTLET)
+        // 3. FILTER DROPDOWN ENTITAS
         // ==============================================================
         if (filterEntityId) {
           if (activeTab === "HUTANG") {
@@ -395,31 +406,46 @@ export function ReceivingPage() {
       let bankInfo: any = null;
 
       if (activeTab === "HUTANG") {
-        // Deteksi apakah vendor berasal dari vendorId atau regionId (jika kiriman gudang)
-        const supplierKey = doc.vendorId || doc.regionId || "unknown";
-        key = supplierKey;
+        // 1. Cek apakah ini Vendor Eksternal Asli
+        const extVendor = doc.vendorId
+          ? vendors.find((v) => v.id === doc.vendorId)
+          : null;
 
-        const isRegion = regions.find(
-          (r) => r.id === doc.vendorId || r.id === doc.regionId,
-        );
+        // 2. Cek apakah vendorId merujuk ke Regional
+        const regVendor = doc.vendorId
+          ? regions.find((r) => r.id === doc.vendorId)
+          : null;
 
-        if (isRegion) {
-          title = `[INTERNAL] GUDANG PUSAT [${isRegion.name}]`;
+        // 3. Fallback jika kiriman internal tanpa vendorId (ambil dari regionId)
+        const fallbackReg =
+          !doc.vendorId && doc.regionId
+            ? regions.find((r) => r.id === doc.regionId)
+            : null;
+
+        if (extVendor) {
+          key = extVendor.id;
+          title = extVendor.name; // Contoh: "PT MAJU KASIH"
+          bankInfo = {
+            bankName: extVendor.bankName,
+            bankAccount: extVendor.bankAccount,
+            bankAccountName: extVendor.bankAccountName,
+          };
+        } else if (regVendor) {
+          key = regVendor.id;
+          title = regVendor.name; // Contoh: "BANDUNG BARAT"
+        } else if (fallbackReg) {
+          key = fallbackReg.id;
+          title = fallbackReg.name; // Contoh: "BANDUNG BARAT"
         } else {
-          const v = vendors.find((vend) => vend.id === doc.vendorId);
-          title = v ? v.name : "Vendor Pemasok Luar";
-          if (v) {
-            bankInfo = {
-              bankName: v.bankName,
-              bankAccount: v.bankAccount,
-              bankAccountName: v.bankAccountName,
-            };
-          }
+          key = doc.vendorId || doc.regionId || "unknown";
+          title = "Vendor Umum";
         }
       } else if (activeTab === "PIUTANG") {
         key = doc.outletId || "unknown";
-        title =
-          outlets.find((o) => o.id === doc.outletId)?.name || "Unknown Outlet";
+        const targetOutlet = outlets.find((o) => o.id === doc.outletId);
+        title = targetOutlet
+          ? targetOutlet.name
+          : `Outlet [${(doc.outletId || "").substring(0, 8)}]`;
       } else {
         key = "PETTYCASH_GROUP";
         title = "PENGELUARAN PETTYCASH & KAS BON";
