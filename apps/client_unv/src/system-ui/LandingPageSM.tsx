@@ -78,8 +78,13 @@ const CheckoutModalSM: React.FC<{
         return new Promise((resolve, reject) => {
           if ((window as any).snap) return resolve();
           const script = document.createElement("script");
+
+          // GANTI KE URL PRODUKSI:
           script.src = "https://app.midtrans.com/snap/snap.js";
+
+          // MASUKKAN CLIENT KEY PRODUKSI ANDA:
           script.setAttribute("data-client-key", "Mid-client-7ZHoQPtcHnpcwglB");
+
           script.onload = () => resolve();
           script.onerror = () =>
             reject(new Error("Gagal memuat sistem pembayaran Midtrans."));
@@ -249,7 +254,9 @@ const CheckoutModalSM: React.FC<{
               disabled={isLoading}
               className="w-full py-3 bg-linear-to-r from-orange-500 to-orange-600 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-lg shadow-orange-500/25 mt-2 disabled:opacity-50"
             >
-              {isLoading ? "Menghubungkan..." : "Bayar via Midtrans (QRIS / VA)"}
+              {isLoading
+                ? "Menghubungkan..."
+                : "Bayar via Midtrans (QRIS / VA)"}
             </button>
           </form>
         )}
@@ -261,10 +268,16 @@ const CheckoutModalSM: React.FC<{
 // =========================================================================
 // KOMPONEN UTAMA LANDING PAGE MOBILE
 // =========================================================================
-export const LandingPageSM: React.FC<LandingPageSMProps> = ({ onStartSetup }) => {
+export const LandingPageSM: React.FC<LandingPageSMProps> = ({
+  onStartSetup,
+}) => {
   const navigate = useNavigate();
-  const [activeSection, setActiveSection] = useState<"FILOSOFI" | "BANDING" | "MODUL" | "PAKET">("FILOSOFI");
-  const [checkoutTier, setCheckoutTier] = useState<"PREMIUM" | "EXCLUSIVE" | null>(null);
+  const [activeSection, setActiveSection] = useState<
+    "FILOSOFI" | "BANDING" | "MODUL" | "PAKET"
+  >("FILOSOFI");
+  const [checkoutTier, setCheckoutTier] = useState<
+    "PREMIUM" | "EXCLUSIVE" | null
+  >(null);
   const [upgradeCompanyId, setUpgradeCompanyId] = useState<string | null>(null);
   const [expandedDimIdx, setExpandedDimIdx] = useState<number | null>(0);
 
@@ -326,7 +339,10 @@ export const LandingPageSM: React.FC<LandingPageSMProps> = ({ onStartSetup }) =>
     window.location.href = "/app";
   };
 
-  const scrollTo = (id: string, tab: "FILOSOFI" | "BANDING" | "MODUL" | "PAKET") => {
+  const scrollTo = (
+    id: string,
+    tab: "FILOSOFI" | "BANDING" | "MODUL" | "PAKET",
+  ) => {
     setActiveSection(tab);
     const el = document.getElementById(id);
     if (el) {
@@ -339,7 +355,8 @@ export const LandingPageSM: React.FC<LandingPageSMProps> = ({ onStartSetup }) =>
       dimensi: "Filosofi Data",
       alma: "Merekam setiap perubahan sebagai fakta abadi yang tidak dapat diubah (Immutable Events).",
       crud: "Hanya merekam keadaan terkini. Data lama ditimpa dan hilang selamanya.",
-      advantage: "ALMA menyimpan silsilah lengkap; CRUD hanya menyimpan foto terakhir.",
+      advantage:
+        "ALMA menyimpan silsilah lengkap; CRUD hanya menyimpan foto terakhir.",
     },
     {
       dimensi: "Audit Trail & Forensik",
@@ -357,31 +374,36 @@ export const LandingPageSM: React.FC<LandingPageSMProps> = ({ onStartSetup }) =>
       dimensi: "Kecepatan Kasir",
       alma: "Arsitektur CQRS (Jalur Tulis Transaksi & Jalur Baca Laporan terpisah 100%).",
       crud: "Model tunggal untuk baca dan tulis pada tabel relasional yang sama.",
-      advantage: "Kasir secepat kilat (O(1)) tanpa terhambat kalkulasi laporan bulanan.",
+      advantage:
+        "Kasir secepat kilat (O(1)) tanpa terhambat kalkulasi laporan bulanan.",
     },
     {
       dimensi: "Offline-First",
       alma: "Native Local-First: Berjalan berhari-hari tanpa internet, sync otomatis saat online.",
       crud: "Bergantung pada koneksi internet aktif 24/7. Rentan gangguan jaringan.",
-      advantage: "Kasir tetap melayani pelanggan 100% meski WiFi/internet padam.",
+      advantage:
+        "Kasir tetap melayani pelanggan 100% meski WiFi/internet padam.",
     },
     {
       dimensi: "Benturan Data Multi-Kasir",
       alma: "Mesin 3-Way Merge Otomatis + Hybrid Logical Clock (HLC) terdistribusi.",
       crud: "Last-Write-Wins (Data kasir terakhir menimpa perubahan sebelumnya tanpa jejak).",
-      advantage: "Tidak pernah kehilangan data saat banyak kasir menginput bersamaan.",
+      advantage:
+        "Tidak pernah kehilangan data saat banyak kasir menginput bersamaan.",
     },
     {
       dimensi: "Keamanan Perangkat",
       alma: "Device Registry Kriptografis (Ed25519 Keypair) + Remote Kill Switch instan.",
       crud: "Hanya username & password standar tanpa proteksi mesin fisik.",
-      advantage: "Tablet hilang/dicuri dapat langsung dibekukan dari jarak jauh.",
+      advantage:
+        "Tablet hilang/dicuri dapat langsung dibekukan dari jarak jauh.",
     },
     {
       dimensi: "Disaster Recovery",
       alma: "Ganti mesin baru, data 24 jam terakhir langsung pulih seketika dalam 30 detik.",
       crud: "Restore manual berjam-jam dari berkas backup yang rentan korup.",
-      advantage: "Operasional cabang pulih instan saat terjadi musibah perangkat.",
+      advantage:
+        "Operasional cabang pulih instan saat terjadi musibah perangkat.",
     },
   ];
 
@@ -433,7 +455,9 @@ export const LandingPageSM: React.FC<LandingPageSMProps> = ({ onStartSetup }) =>
             Z
           </div>
           <div>
-            <span className="font-black text-sm text-white tracking-wider">ALMA</span>
+            <span className="font-black text-sm text-white tracking-wider">
+              ALMA
+            </span>
             <span className="text-[9px] bg-orange-500/10 text-orange-400 border border-orange-500/20 px-1.5 py-0.2 rounded-full font-bold ml-1.5 uppercase">
               Mobile
             </span>
@@ -509,9 +533,11 @@ export const LandingPageSM: React.FC<LandingPageSMProps> = ({ onStartSetup }) =>
 
         <p className="text-xs text-slate-300 leading-relaxed font-medium">
           Platform ERP yang mencatat setiap mutasi kasir dan gudang sebagai{" "}
-          <strong className="text-white">fakta abadi yang tidak dapat ditimpa</strong>. Menjawab bukan hanya{" "}
-          <em>"Berapa sisa stok sekarang?"</em>, melainkan{" "}
-          <em>"Bagaimana cerita di balik angka tersebut?"</em>.
+          <strong className="text-white">
+            fakta abadi yang tidak dapat ditimpa
+          </strong>
+          . Menjawab bukan hanya <em>"Berapa sisa stok sekarang?"</em>,
+          melainkan <em>"Bagaimana cerita di balik angka tersebut?"</em>.
         </p>
 
         {/* 3 Keunggulan Sentral */}
@@ -521,9 +547,12 @@ export const LandingPageSM: React.FC<LandingPageSMProps> = ({ onStartSetup }) =>
               <Wifi className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="font-black text-xs text-white uppercase">100% Kebal Internet Mati</h3>
+              <h3 className="font-black text-xs text-white uppercase">
+                100% Kebal Internet Mati
+              </h3>
               <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
-                Kasir & dapur tetap bisa catat transaksi saat WiFi mati. Sync otomatis saat online.
+                Kasir & dapur tetap bisa catat transaksi saat WiFi mati. Sync
+                otomatis saat online.
               </p>
             </div>
           </div>
@@ -533,9 +562,12 @@ export const LandingPageSM: React.FC<LandingPageSMProps> = ({ onStartSetup }) =>
               <ShieldCheck className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="font-black text-xs text-white uppercase">Audit Trail Anti-Manipulasi</h3>
+              <h3 className="font-black text-xs text-white uppercase">
+                Audit Trail Anti-Manipulasi
+              </h3>
               <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
-                Fakta bisnis dilindungi rantai Hash SHA-256 dan kunci kriptografi Ed25519 per mesin.
+                Fakta bisnis dilindungi rantai Hash SHA-256 dan kunci
+                kriptografi Ed25519 per mesin.
               </p>
             </div>
           </div>
@@ -545,9 +577,12 @@ export const LandingPageSM: React.FC<LandingPageSMProps> = ({ onStartSetup }) =>
               <Zap className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="font-black text-xs text-white uppercase">Ganti Mesin Cepat 30 Detik</h3>
+              <h3 className="font-black text-xs text-white uppercase">
+                Ganti Mesin Cepat 30 Detik
+              </h3>
               <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
-                Tablet kasir rusak? Ganti HP/mesin baru, data transaksi 24 jam terakhir langsung pulih.
+                Tablet kasir rusak? Ganti HP/mesin baru, data transaksi 24 jam
+                terakhir langsung pulih.
               </p>
             </div>
           </div>
@@ -564,7 +599,10 @@ export const LandingPageSM: React.FC<LandingPageSMProps> = ({ onStartSetup }) =>
       </section>
 
       {/* 2. PERBANDINGAN ALMA VS CRUD (CARD ACCORDION VIEW) */}
-      <section id="section-perbandingan" className="px-4 py-6 border-t border-white/10 space-y-4">
+      <section
+        id="section-perbandingan"
+        className="px-4 py-6 border-t border-white/10 space-y-4"
+      >
         <div>
           <h2 className="text-xl font-black text-white uppercase tracking-tight">
             ALMA vs ERP Konvensional
@@ -632,7 +670,10 @@ export const LandingPageSM: React.FC<LandingPageSMProps> = ({ onStartSetup }) =>
       </section>
 
       {/* 3. MODUL BISNIS */}
-      <section id="section-modul" className="px-4 py-6 border-t border-white/10 space-y-4">
+      <section
+        id="section-modul"
+        className="px-4 py-6 border-t border-white/10 space-y-4"
+      >
         <div>
           <h2 className="text-xl font-black text-white uppercase tracking-tight">
             Ekosistem 6 Modul Bisnis
@@ -653,7 +694,9 @@ export const LandingPageSM: React.FC<LandingPageSMProps> = ({ onStartSetup }) =>
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between gap-1">
-                  <h3 className="font-black text-xs text-white uppercase truncate">{m.name}</h3>
+                  <h3 className="font-black text-xs text-white uppercase truncate">
+                    {m.name}
+                  </h3>
                   <span className="text-[8px] bg-white/5 text-slate-400 border border-white/10 px-1.5 py-0.2 rounded uppercase shrink-0">
                     {m.badge}
                   </span>
@@ -668,7 +711,10 @@ export const LandingPageSM: React.FC<LandingPageSMProps> = ({ onStartSetup }) =>
       </section>
 
       {/* 4. PAKET & LISENSI */}
-      <section id="section-paket" className="px-4 py-6 border-t border-white/10 space-y-4">
+      <section
+        id="section-paket"
+        className="px-4 py-6 border-t border-white/10 space-y-4"
+      >
         <div>
           <h2 className="text-xl font-black text-white uppercase tracking-tight">
             Pilihan Paket & Lisensi
@@ -691,14 +737,17 @@ export const LandingPageSM: React.FC<LandingPageSMProps> = ({ onStartSetup }) =>
               </p>
             </div>
             <div className="space-y-1.5 text-xs text-slate-300 font-semibold pt-1">
-              {["100% Gratis Selamanya", "7 Modul Bisnis Inti Lengkap", "Offline-First Tanpa Lisensi", "Export Excel & Cetak PDF"].map(
-                (t, i) => (
-                  <div key={i} className="flex items-center gap-1.5">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    <span>{t}</span>
-                  </div>
-                ),
-              )}
+              {[
+                "100% Gratis Selamanya",
+                "7 Modul Bisnis Inti Lengkap",
+                "Offline-First Tanpa Lisensi",
+                "Export Excel & Cetak PDF",
+              ].map((t, i) => (
+                <div key={i} className="flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span>{t}</span>
+                </div>
+              ))}
             </div>
             <button
               onClick={() => handleGoToSetup({ tier: "FREE" })}
@@ -723,7 +772,9 @@ export const LandingPageSM: React.FC<LandingPageSMProps> = ({ onStartSetup }) =>
               <h3 className="text-lg font-black text-white">Paket Premium</h3>
               <div className="text-xl font-black font-mono text-orange-400 mt-1">
                 Rp 5.489.000{" "}
-                <span className="text-xs text-slate-400 font-normal">/ tahun</span>
+                <span className="text-xs text-slate-400 font-normal">
+                  / tahun
+                </span>
               </div>
               <span className="text-[10px] text-emerald-400 font-bold block mt-0.5">
                 Setara Rp 457.000/bulan
@@ -759,7 +810,9 @@ export const LandingPageSM: React.FC<LandingPageSMProps> = ({ onStartSetup }) =>
               Enterprise & AI
             </span>
             <div>
-              <h3 className="text-lg font-black text-white">Konsultasi Khusus</h3>
+              <h3 className="text-lg font-black text-white">
+                Konsultasi Khusus
+              </h3>
               <p className="text-[11px] text-slate-400 mt-0.5">
                 Integrasi SOP Holding, AI Forecasting & Onboarding Langsung.
               </p>
@@ -779,10 +832,13 @@ export const LandingPageSM: React.FC<LandingPageSMProps> = ({ onStartSetup }) =>
       {/* 5. FOUNDER & KONTAK */}
       <section className="px-4 py-8 border-t border-white/10 text-center space-y-3">
         <blockquote className="text-sm font-bold text-slate-200 italic max-w-sm mx-auto">
-          "Data hari ini adalah hasil dari kejadian kemarin. ALMA mengingat semuanya."
+          "Data hari ini adalah hasil dari kejadian kemarin. ALMA mengingat
+          semuanya."
         </blockquote>
         <div className="text-xs font-black text-white">Rendi Faizal Dat</div>
-        <div className="text-[10px] text-orange-400 font-mono">System Architect of ALMA</div>
+        <div className="text-[10px] text-orange-400 font-mono">
+          System Architect of ALMA
+        </div>
 
         <div className="pt-2 flex justify-center gap-4 text-xs">
           <a

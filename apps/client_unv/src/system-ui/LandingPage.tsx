@@ -155,8 +155,13 @@ const CheckoutModal: React.FC<{
         return new Promise((resolve, reject) => {
           if ((window as any).snap) return resolve();
           const script = document.createElement("script");
+
+          // GANTI KE URL PRODUKSI:
           script.src = "https://app.midtrans.com/snap/snap.js";
+
+          // MASUKKAN CLIENT KEY PRODUKSI ANDA:
           script.setAttribute("data-client-key", "Mid-client-7ZHoQPtcHnpcwglB");
+
           script.onload = () => resolve();
           script.onerror = () =>
             reject(new Error("Gagal memuat sistem pembayaran Midtrans."));
