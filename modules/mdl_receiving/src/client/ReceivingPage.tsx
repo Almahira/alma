@@ -310,8 +310,8 @@ export function ReceivingPage() {
             // Jika perangkat adalah Region tertentu, cocokkan regionId
             if (
               localRegionId &&
-              doc.regionId &&
-              doc.regionId !== localRegionId
+              doc.regionId !== localRegionId &&
+              doc.vendorId !== localRegionId
             ) {
               return false;
             }

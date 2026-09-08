@@ -105,6 +105,12 @@ export async function startSyncWorker(io: Server) {
         const payloadRegionId = payload.location?.regionId || payload.regionId;
         const payloadOutletId = payload.location?.outletId || payload.outletId;
 
+        // EKSTRAK TARGET B2B (Vendor / Gudang Pusat)
+        const targetVendorId =
+          payload.reference?.supplierId ||
+          payload.vendorId ||
+          payload.data?.vendorId;
+
         const syncPayload = {
           eventId,
           type,
@@ -113,6 +119,7 @@ export async function startSyncWorker(io: Server) {
           companyId: payloadCompanyId,
           regionId: payloadRegionId,
           outletId: payloadOutletId,
+          targetVendorId: targetVendorId, // Lampirkan untuk referensi klien
         };
 
         // 1. Jika ini event master data tingkat holding (Company), tembakkan ke seluruh company
@@ -121,6 +128,10 @@ export async function startSyncWorker(io: Server) {
         } else {
           if (payloadRegionId) {
             io.to(`region:${payloadRegionId}`).emit("SYNC_NEEDED", syncPayload);
+          }
+          // --> TAMBAHAN: BROADCAST KE GUDANG TARGET JIKA TRANSAKSI B2B
+          if (targetVendorId && targetVendorId !== payloadRegionId) {
+            io.to(`region:${targetVendorId}`).emit("SYNC_NEEDED", syncPayload);
           }
           if (payloadOutletId) {
             io.to(`outlet:${payloadOutletId}`).emit("SYNC_NEEDED", syncPayload);
