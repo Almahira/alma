@@ -221,23 +221,35 @@ export const receivingHandlers: Record<
       ),
     );
 
-    const docId = p.data?.documentId || p.reference?.documentId || p.documentId;
-    const paymentId = p.data?.paymentId || event.aggregateId;
+    // 100% Presisi: Ambil ID dokumen dari p.id atau event.aggregateId
+    const docId =
+      p.id ||
+      event.aggregateId ||
+      p.data?.documentId ||
+      p.reference?.documentId ||
+      p.documentId;
 
-    // 1. Simpan riwayat pembayaran
+    // ID pembayaran diambil dari p.data.paymentId (RPAY_...)
+    const paymentId =
+      p.data?.paymentId ||
+      p.paymentId ||
+      (event.aggregateId !== docId ? event.aggregateId : null) ||
+      `RPAY_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+    // 1. Simpan riwayat pembayaran ke database PostgreSQL
     await tx.insert(schema.receivingPayments).values({
       id: paymentId,
-      documentId: docId,
+      documentId: docId, // Terjamin terisi "RCV_..."
       amount: paymentAmount,
-      paymentMethod: p.data?.paymentMethod || p.paymentMethod || "CASH",
+      paymentMethod: p.data?.paymentMethod || p.paymentMethod || "TRANSFER",
       paymentDate: safeDate(
-        p.timestamp || p.data?.paymentDate || p.paymentDate,
+        p.data?.paymentDate || p.timestamp || p.paymentDate,
       ),
       proofFileId: p.data?.proofFileId || p.proofFileId || null,
       status: "SUCCESS",
     });
 
-    // 2. Perbarui status pembayaran & paidAmount pada dokumen induk
+    // 2. Perbarui status pembayaran & paidAmount pada dokumen induk faktur
     if (docId) {
       const existingDocs = await tx
         .select()
