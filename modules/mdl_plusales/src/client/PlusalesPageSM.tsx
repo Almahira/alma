@@ -81,7 +81,8 @@ const PlusalesDetailModalSM: React.FC<{
       {/* Rincian Realisasi */}
       <div className="space-y-1.5">
         <span className="text-[10px] font-black text-(--text-secondary) uppercase tracking-wider flex items-center gap-1">
-          <Receipt className="w-3.5 h-3.5 text-emerald-500" /> Rincian Realisasi Kas & Non-Tunai:
+          <Receipt className="w-3.5 h-3.5 text-emerald-500" /> Rincian Realisasi
+          Kas & Non-Tunai:
         </span>
 
         {/* Dynamic Items */}
@@ -100,11 +101,15 @@ const PlusalesDetailModalSM: React.FC<{
               >
                 {it.category === "DEDUCTION" ? "[-] POT" : "[+] EDC"}
               </span>
-              <span className="font-bold text-(--text-primary) truncate">{it.name}</span>
+              <span className="font-bold text-(--text-primary) truncate">
+                {it.name}
+              </span>
             </div>
             <span
               className={`font-mono font-black ${
-                it.category === "DEDUCTION" ? "text-rose-500" : "text-emerald-500"
+                it.category === "DEDUCTION"
+                  ? "text-rose-500"
+                  : "text-emerald-500"
               }`}
             >
               {it.category === "DEDUCTION" ? "-" : ""} Rp{" "}
@@ -155,7 +160,9 @@ const PlusalesDetailModalSM: React.FC<{
 
       {doc.discrepancyNote && (
         <div className="p-2.5 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs text-rose-500">
-          <strong className="font-black uppercase text-[10px] block">Alasan Selisih:</strong>
+          <strong className="font-black uppercase text-[10px] block">
+            Alasan Selisih:
+          </strong>
           <span>"{doc.discrepancyNote}"</span>
         </div>
       )}
@@ -178,7 +185,7 @@ const PlusalesDetailModalSM: React.FC<{
 export function PlusalesPageSM() {
   const { documents } = usePlusalesStore();
   const { allocations } = useExecutivePanelStore();
-  const { outlets } = useOrgStore();
+  const { outlets, regions } = useOrgStore();
   const { openCenterModal, closeCenterModal, openAlert } = useUniversalModal();
 
   const [viewStatus, setViewStatus] = useState<"AKTIF" | "ARSIP">("AKTIF");
@@ -192,11 +199,30 @@ export function PlusalesPageSM() {
   const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthStr);
 
   const localCompanyId = localStorage.getItem("__unv_companyId") || "";
+  const localRegionId = localStorage.getItem("__unv_regionId") || "";
   const localOutletId = localStorage.getItem("__unv_outletId") || "";
-  const currentOutlet = outlets.find((o) => o.id === localOutletId);
+  const [filterOutletId, setFilterOutletId] = useState("");
+
+  const currentOutlet = outlets.find(
+    (o) => o.id === (localOutletId || filterOutletId),
+  );
+  const currentRegion = regions.find((r) => r.id === localRegionId);
   const outletName = currentOutlet
     ? currentOutlet.name.toUpperCase()
-    : "SEMUA OUTLET";
+    : currentRegion
+      ? `WILAYAH: ${currentRegion.name.toUpperCase()}`
+      : "SEMUA OUTLET";
+
+  const availableOutlets = useMemo(() => {
+    return outlets.filter((o) => {
+      if (o.status !== "Aktif") return false;
+      if (localCompanyId && o.companyId && o.companyId !== localCompanyId)
+        return false;
+      if (localRegionId && o.regionId && o.regionId !== localRegionId)
+        return false;
+      return true;
+    });
+  }, [outlets, localCompanyId, localRegionId]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -213,19 +239,35 @@ export function PlusalesPageSM() {
 
   // Filter Dokumen
   const filteredDocs = useMemo(() => {
-    return documents.filter((d) => {
-      if (localOutletId && d.outletId && d.outletId !== localOutletId) {
+    return documents.filter((d: any) => {
+      if (localCompanyId && d.companyId && d.companyId !== localCompanyId)
         return false;
-      }
-      if (localCompanyId && d.companyId && d.companyId !== localCompanyId) {
+      if (localRegionId && d.regionId && d.regionId !== localRegionId)
         return false;
+
+      if (localOutletId) {
+        if (d.outletId && d.outletId !== localOutletId) return false;
+      } else if (filterOutletId) {
+        if (d.outletId !== filterOutletId) return false;
       }
+
+      const isItemActive = d.isActive !== undefined ? d.isActive : d.is_active;
       const matchMonth = d.date && d.date.startsWith(selectedMonth);
       const matchStatus =
-        viewStatus === "AKTIF" ? d.isActive !== false : d.isActive === false;
+        viewStatus === "AKTIF"
+          ? isItemActive !== false
+          : isItemActive === false;
       return matchMonth && matchStatus;
     });
-  }, [documents, selectedMonth, viewStatus, localOutletId, localCompanyId]);
+  }, [
+    documents,
+    selectedMonth,
+    viewStatus,
+    localOutletId,
+    localRegionId,
+    localCompanyId,
+    filterOutletId,
+  ]);
 
   // Akumulasi Statistik
   const monthlyStats = useMemo(() => {
@@ -363,8 +405,8 @@ export function PlusalesPageSM() {
               )}
             </div>
 
-            {/* Tombol Buat Rekap Baru */}
-            {viewStatus === "AKTIF" && (
+            {/* Tombol Buat Rekap Baru hanya muncul di level Outlet */}
+            {viewStatus === "AKTIF" && localOutletId && (
               <button
                 onClick={() => {
                   setEditFormData(null);
@@ -431,6 +473,25 @@ export function PlusalesPageSM() {
             </select>
           </div>
 
+          {/* SELECTOR OUTLET UNTUK REGION */}
+          {!localOutletId && (
+            <div className="flex items-center gap-1.5 bg-(--bg-input) border border-orange-500/30 rounded-lg px-2 py-1 flex-1">
+              <Building2 className="w-3.5 h-3.5 text-orange-500 shrink-0" />
+              <select
+                value={filterOutletId}
+                onChange={(e) => setFilterOutletId(e.target.value)}
+                className="bg-transparent text-xs font-black text-orange-500 outline-none w-full cursor-pointer"
+              >
+                <option value="">SEMUA OUTLET</option>
+                {availableOutlets.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <div className="flex bg-(--bg-input) rounded-lg border border-(--border-color) p-0.5 shrink-0">
             <button
               onClick={() => setViewStatus("AKTIF")}
@@ -475,6 +536,12 @@ export function PlusalesPageSM() {
                       year: "numeric",
                     })}
                   </div>
+                  {!localOutletId && (
+                    <span className="inline-block mt-0.5 px-1.5 py-0.2 rounded text-[8px] font-black uppercase bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                      {outlets.find((o) => o.id === doc.outletId)?.name ||
+                        "OUTLET"}
+                    </span>
+                  )}
                   <div className="text-[9px] font-mono text-(--text-secondary) mt-0.5">
                     {doc.documentNumber}
                   </div>
@@ -496,19 +563,25 @@ export function PlusalesPageSM() {
               {/* Rincian Angka Card */}
               <div className="grid grid-cols-3 gap-2 py-1 border-t border-(--border-color) text-xs">
                 <div>
-                  <span className="text-[9px] text-(--text-secondary) block">Gross</span>
+                  <span className="text-[9px] text-(--text-secondary) block">
+                    Gross
+                  </span>
                   <span className="font-mono font-black text-orange-500 text-[11px]">
                     Rp {(doc.grossSales || 0).toLocaleString()}
                   </span>
                 </div>
                 <div>
-                  <span className="text-[9px] text-(--text-secondary) block">Net Sales</span>
+                  <span className="text-[9px] text-(--text-secondary) block">
+                    Net Sales
+                  </span>
                   <span className="font-mono font-bold text-(--text-primary) text-[11px]">
                     Rp {(doc.netSales || 0).toLocaleString()}
                   </span>
                 </div>
                 <div>
-                  <span className="text-[9px] text-(--text-secondary) block">Laci Kasir</span>
+                  <span className="text-[9px] text-(--text-secondary) block">
+                    Laci Kasir
+                  </span>
                   <span className="font-mono font-bold text-emerald-500 text-[11px]">
                     Rp {(doc.cashOnHand || 0).toLocaleString()}
                   </span>

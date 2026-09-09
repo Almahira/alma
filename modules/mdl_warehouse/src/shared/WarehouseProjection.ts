@@ -351,15 +351,47 @@ export class WarehouseProjection implements ProjectionHandler<WarehouseState> {
   public restoreState(state: WarehouseState): void {
     this.reset();
     if (state) {
-      state.distributions?.forEach((d) => this.distributions.set(d.id, d));
+      state.distributions?.forEach((d: any) => {
+        const isActive =
+          d.isActive !== undefined
+            ? Boolean(d.isActive)
+            : d.is_active !== undefined
+              ? Boolean(d.is_active)
+              : true;
+        this.distributions.set(d.id, { ...d, isActive });
+      });
       if (state.initialStocks) {
         Object.entries(state.initialStocks).forEach(([k, v]) =>
           this.initialStocks.set(k, v),
         );
       }
-      state.opnames?.forEach((o) => this.opnames.set(o.id, o));
-      state.spoilWastes?.forEach((sw) => this.spoilWastes.set(sw.id, sw));
-      state.recipes?.forEach((r) => this.recipes.set(r.id, r));
+      state.opnames?.forEach((o: any) => {
+        const isActive =
+          o.isActive !== undefined
+            ? Boolean(o.isActive)
+            : o.is_active !== undefined
+              ? Boolean(o.is_active)
+              : true;
+        this.opnames.set(o.id, { ...o, isActive });
+      });
+      state.spoilWastes?.forEach((sw: any) => {
+        const isActive =
+          sw.isActive !== undefined
+            ? Boolean(sw.isActive)
+            : sw.is_active !== undefined
+              ? Boolean(sw.is_active)
+              : true;
+        this.spoilWastes.set(sw.id, { ...sw, isActive });
+      });
+      state.recipes?.forEach((r: any) => {
+        const isActive =
+          r.isActive !== undefined
+            ? Boolean(r.isActive)
+            : r.is_active !== undefined
+              ? Boolean(r.is_active)
+              : true;
+        this.recipes.set(r.id, { ...r, isActive });
+      });
     }
   }
 }

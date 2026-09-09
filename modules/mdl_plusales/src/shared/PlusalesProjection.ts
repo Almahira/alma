@@ -230,7 +230,15 @@ export class PlusalesProjection implements ProjectionHandler<PlusalesState> {
   public restoreState(state: PlusalesState): void {
     this.documents.clear();
     if (state && state.documents) {
-      state.documents.forEach((d) => this.documents.set(d.id, d));
+      state.documents.forEach((d: any) => {
+        const isActive =
+          d.isActive !== undefined
+            ? Boolean(d.isActive)
+            : d.is_active !== undefined
+              ? Boolean(d.is_active)
+              : true;
+        this.documents.set(d.id, { ...d, isActive });
+      });
     }
   }
 }

@@ -45,6 +45,7 @@ export function SpoilWastePageSM() {
   const [filterType, setFilterType] = useState<"ALL" | "SPOIL" | "WASTE">(
     "ALL",
   );
+  const [filterOutletId, setFilterOutletId] = useState(""); // Tambahan untuk filter outlet (region/company)
   const [isAddFormOpen, setIsAddFormOpen] = useState(true);
 
   // Sticky State Form
@@ -355,16 +356,35 @@ export function SpoilWastePageSM() {
 
   const filteredList = useMemo(() => {
     return spoilWastes.filter((sw) => {
-      if (localOutletId && sw.outletId && sw.outletId !== localOutletId)
-        return false;
+      // 1. Penyekatan Company & Region
       if (localCompanyId && sw.companyId && sw.companyId !== localCompanyId)
         return false;
-      const matchStatus =
-        viewStatus === "AKTIF" ? sw.isActive !== false : sw.isActive === false;
+      if (localRegionId && sw.regionId && sw.regionId !== localRegionId)
+        return false;
+
+      // 2. Penyekatan Outlet
+      if (localOutletId) {
+        if (sw.outletId && sw.outletId !== localOutletId) return false;
+      } else if (filterOutletId) {
+        if (sw.outletId !== filterOutletId) return false;
+      }
+
+      // 3. Status Aktif vs Arsip (default AKTIF, tanpa UI toggle di mobile)
+      const isItemActive =
+        sw.isActive !== undefined ? sw.isActive : sw.isActive;
+      const matchStatus = isItemActive !== false; // hanya tampilkan aktif
       const matchType = filterType === "ALL" ? true : sw.type === filterType;
+
       return matchStatus && matchType;
     });
-  }, [spoilWastes, viewStatus, filterType, localOutletId, localCompanyId]);
+  }, [
+    spoilWastes,
+    filterType,
+    localOutletId,
+    localRegionId,
+    localCompanyId,
+    filterOutletId,
+  ]);
 
   const totalLossPeriod = useMemo(() => {
     return filteredList.reduce((sum, it) => sum + (it.totalLossCost || 0), 0);
@@ -635,40 +655,42 @@ export function SpoilWastePageSM() {
         </form>
       )}
 
-      {/* FILTER TIPE (ALL / SPOIL / WASTE) */}
-      <div className="px-3 py-2 bg-(--bg-card) border-b border-(--border-color) flex items-center justify-between shrink-0">
-        <select
-          value={filterType}
-          onChange={(e) => setFilterType(e.target.value as any)}
-          className="text-xs font-bold p-1.5 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none"
-        >
-          <option value="ALL">SEMUA TIPE</option>
-          <option value="SPOIL">HANYA SPOIL</option>
-          <option value="WASTE">HANYA WASTE</option>
-        </select>
-
-        <div className="flex bg-(--bg-input) rounded-lg border border-(--border-color) p-0.5">
-          <button
-            onClick={() => setViewStatus("AKTIF")}
-            className={`px-2.5 py-0.5 text-[10px] font-black rounded ${
-              viewStatus === "AKTIF"
-                ? "bg-rose-500 text-white"
-                : "text-(--text-secondary)"
-            }`}
+      {/* FILTER TIPE & OUTLET (Untuk Region/Company) */}
+      <div className="px-3 py-2 bg-(--bg-card) border-b border-(--border-color) flex flex-wrap items-center justify-between gap-2 shrink-0">
+        <div className="flex items-center gap-2">
+          <Filter className="w-3.5 h-3.5 text-(--text-secondary)" />
+          <select
+            value={filterType}
+            onChange={(e) => setFilterType(e.target.value as any)}
+            className="text-xs font-bold p-1.5 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none"
           >
-            AKTIF
-          </button>
-          <button
-            onClick={() => setViewStatus("ARSIP")}
-            className={`px-2.5 py-0.5 text-[10px] font-black rounded ${
-              viewStatus === "ARSIP"
-                ? "bg-slate-700 text-white"
-                : "text-(--text-secondary)"
-            }`}
-          >
-            ARSIP
-          </button>
+            <option value="ALL">SEMUA TIPE</option>
+            <option value="SPOIL">HANYA SPOIL</option>
+            <option value="WASTE">HANYA WASTE</option>
+          </select>
         </div>
+
+        {/* Filter Outlet untuk Region/Company (hanya jika bukan level outlet) */}
+        {!localOutletId && (
+          <select
+            value={filterOutletId}
+            onChange={(e) => setFilterOutletId(e.target.value)}
+            className="text-xs font-black p-1.5 bg-(--bg-input) text-orange-500 border border-orange-500/30 rounded-lg outline-none cursor-pointer"
+          >
+            <option value="">-- SEMUA OUTLET --</option>
+            {outlets
+              .filter(
+                (o) =>
+                  o.status === "Aktif" &&
+                  (!localRegionId || o.regionId === localRegionId),
+              )
+              .map((o) => (
+                <option key={o.id} value={o.id}>
+                  OUTLET: {o.name}
+                </option>
+              ))}
+          </select>
+        )}
       </div>
 
       {/* DAFTAR DATA KERUGIAN (KARTU MOBILE) */}
@@ -719,6 +741,21 @@ export function SpoilWastePageSM() {
                 </span>
                 <span className="font-mono font-bold text-rose-500 text-xs">
                   {doc.inputQty} {doc.inputUom}
+                </span>
+                {/* Tampilkan konversi jika UOM input berbeda dengan base UOM */}
+                {doc.inputUom !== doc.baseUom && (
+                  <span className="block text-[9px] text-(--text-secondary) font-mono">
+                    (= {doc.convertedBaseQty} {doc.baseUom})
+                  </span>
+                )}
+              </div>
+
+              <div className="text-right">
+                <span className="text-[9px] text-(--text-secondary) block">
+                  HPP Satuan:
+                </span>
+                <span className="font-mono font-bold text-(--text-secondary) text-xs">
+                  Rp {(doc.unitCost || 0).toLocaleString()}
                 </span>
               </div>
 

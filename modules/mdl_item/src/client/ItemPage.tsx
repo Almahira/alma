@@ -1445,20 +1445,77 @@ export function ItemPage() {
               </thead>
               <tbody className="divide-y divide-(--border-color) text-xs font-semibold text-(--text-primary)">
                 {products
-                  .filter((p) => {
+                  .filter((p: any) => {
                     const matchExpense =
                       activeTab === "EXPENSE"
                         ? p.isExpense === true
                         : !p.isExpense;
-                    const matchStatus =
-                      viewStatus === "AKTIF"
+
+                    // 1. Normalisasi Status Aktif vs Arsip
+                    const isProdActive =
+                      p.status !== undefined
                         ? p.status === "Aktif"
-                        : p.status === "Arsip";
-                    return (
-                      matchExpense &&
-                      matchStatus &&
-                      p.approvalStatus !== "MERGED"
-                    );
+                        : p.isActive !== undefined
+                          ? Boolean(p.isActive)
+                          : Boolean(p.is_active);
+                    const matchStatus =
+                      viewStatus === "AKTIF" ? isProdActive : !isProdActive;
+
+                    if (
+                      !matchExpense ||
+                      !matchStatus ||
+                      p.approvalStatus === "MERGED"
+                    ) {
+                      return false;
+                    }
+
+                    // 2. Filter Perusahaan
+                    const localCompanyId =
+                      localStorage.getItem("__unv_companyId") || "";
+                    const localRegionId =
+                      localStorage.getItem("__unv_regionId") || "";
+                    const localOutletId =
+                      localStorage.getItem("__unv_outletId") || "";
+
+                    if (
+                      localCompanyId &&
+                      p.companyId &&
+                      p.companyId !== localCompanyId
+                    ) {
+                      return false;
+                    }
+
+                    // 3. Penyekatan Spasial:
+                    // Jika produk APPROVED: terlihat bersama di seluruh cabang
+                    if (p.approvalStatus === "APPROVED") {
+                      if (
+                        p.regionId &&
+                        localRegionId &&
+                        p.regionId !== localRegionId
+                      ) {
+                        return false;
+                      }
+                      if (
+                        localOutletId &&
+                        p.outletId &&
+                        p.outletId !== localOutletId
+                      ) {
+                        return false;
+                      }
+                    } else if (p.approvalStatus === "PENDING") {
+                      // Jika produk PENDING (draf mentah):
+                      // Di Outlet: HANYA terlihat jika dibuat oleh outlet ini sendiri
+                      if (localOutletId) {
+                        if (p.outletId && p.outletId !== localOutletId)
+                          return false;
+                      } else if (localRegionId) {
+                        // Di Region: terlihat jika dibuat di wilayah region ini
+                        if (p.regionId && p.regionId !== localRegionId)
+                          return false;
+                      }
+                    }
+
+                    return true;
                   })
                   .map((p) => {
                     const uomName =
@@ -1804,10 +1861,36 @@ export function ItemPage() {
               </thead>
               <tbody className="divide-y divide-(--border-color) text-xs font-semibold text-(--text-primary)">
                 {products
-                  .filter(
-                    (p) =>
-                      p.approvalStatus === "PENDING" && p.status === "Aktif",
-                  )
+                  .filter((p: any) => {
+                    const isProdActive =
+                      p.status !== undefined
+                        ? p.status === "Aktif"
+                        : p.isActive !== undefined
+                          ? Boolean(p.isActive)
+                          : Boolean(p.is_active);
+                    if (p.approvalStatus !== "PENDING" || !isProdActive)
+                      return false;
+
+                    const localCompanyId =
+                      localStorage.getItem("__unv_companyId") || "";
+                    const localRegionId =
+                      localStorage.getItem("__unv_regionId") || "";
+
+                    if (
+                      localCompanyId &&
+                      p.companyId &&
+                      p.companyId !== localCompanyId
+                    )
+                      return false;
+                    if (
+                      localRegionId &&
+                      p.regionId &&
+                      p.regionId !== localRegionId
+                    )
+                      return false;
+
+                    return true;
+                  })
                   .map((p) => {
                     const comp = companies.find((c) => c.id === p.companyId);
                     const reg = regions.find((r) => r.id === p.regionId);

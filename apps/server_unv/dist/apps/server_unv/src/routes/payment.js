@@ -113,7 +113,110 @@ function generateLicenseEmailHtml(params) {
 </html>
   `;
 }
-// 1. CREATE SNAP MIDTRANS
+/**
+ * Helper Fungsi: Memproses penyelesaian transaksi yang sah (Sukses Bayar)
+ * Digunakan bersama oleh Webhook Notifikasi dan Polling Order Status
+ */
+async function fulfillOrderPayment(order, ioInstance) {
+    const now = new Date();
+    const validUntil = new Date(now.setFullYear(now.getFullYear() + 1)).toISOString();
+    const masterSecretKey = process.env.ALMA_MASTER_SECRET_KEY;
+    if (!masterSecretKey) {
+        throw new Error("ALMA_MASTER_SECRET_KEY belum diatur di .env");
+    }
+    const allowedModules = order.allowedModules || [
+        "mdl_organization",
+        "mdl_item",
+        "mdl_vendor",
+        "mdl_receiving",
+        "mdl_warehouse",
+        "mdl_plusales",
+        "mdl_executivepanel",
+        "mdl_manufacturing",
+        "mdl_multi_warehouse",
+        ...(order.tier === "EXCLUSIVE" ? ["mdl_ai_forecasting", "mdl_ai_ocr"] : []),
+    ];
+    const maxOutlets = order.maxOutlets || (order.tier === "EXCLUSIVE" ? 100 : 50);
+    const licensePayload = {
+        licenseId: `LIC_${ulid()}`,
+        tier: order.tier,
+        companyName: order.companyName,
+        issuedTo: order.customerEmail,
+        phone: order.customerPhone || undefined,
+        maxOutlets,
+        allowedModules,
+        validUntil,
+    };
+    const token = LicenseManager.generateLicenseToken(licensePayload, masterSecretKey);
+    await db
+        .update(billingOrders)
+        .set({
+        status: "PAID",
+        licenseKey: token,
+        validUntil: new Date(validUntil),
+        updatedAt: new Date(),
+    })
+        .where(eq(billingOrders.id, order.id));
+    console.log(`[LICENSE GENERATED] Berhasil menerbitkan token Ed25519 untuk ${order.companyName} (${order.customerEmail}) - Kuota: ${maxOutlets} Mesin`);
+    // Kirim email tanda bukti dan serial lisensi
+    let emailStatus = "NOT_SENT";
+    try {
+        const transporter = createMailTransporter();
+        if (transporter) {
+            const mailHtml = generateLicenseEmailHtml({
+                customerName: order.customerName,
+                companyName: order.companyName,
+                tier: order.tier,
+                licenseKey: token,
+                validUntil,
+                maxOutlets,
+                allowedModules,
+            });
+            await transporter.sendMail({
+                from: `"${process.env.SMTP_SENDER_NAME || "ALMA ERP Licensing"}" <${process.env.SMTP_USER}>`,
+                to: order.customerEmail,
+                subject: `[ALMA ERP] Lisensi Resmi ${order.tier} - ${order.companyName}`,
+                html: mailHtml,
+            });
+            emailStatus = "SENT";
+            console.log(`[SMTP MAILER] Email lisensi berhasil dikirim ke ${order.customerEmail}`);
+        }
+    }
+    catch (mailErr) {
+        emailStatus = "FAILED";
+        console.error(`[SMTP MAILER ERROR] Gagal mengirim email ke ${order.customerEmail}:`, mailErr.message);
+    }
+    await db
+        .update(billingOrders)
+        .set({ emailDeliveryStatus: emailStatus })
+        .where(eq(billingOrders.id, order.id));
+    // Sinyal Over-The-Air jika transaksi berasal dari in-app upgrade perusahaan
+    if (order.companyId) {
+        await db
+            .update(deviceRegistry)
+            .set({
+            licenseTier: order.tier,
+            licenseKey: token,
+            allowedModules: allowedModules,
+            licenseExpiresAt: new Date(validUntil),
+            updatedAt: new Date(),
+        })
+            .where(eq(deviceRegistry.companyId, order.companyId));
+        if (ioInstance) {
+            ioInstance.to(`company:${order.companyId}`).emit("LICENSE_UPGRADED", {
+                companyId: order.companyId,
+                licenseKey: token,
+                tier: order.tier,
+                allowedModules: allowedModules,
+                validUntil,
+            });
+        }
+    }
+    return token;
+}
+// =========================================================================
+// 1. CREATE SNAP TRANSACTION (MIDTRANS)
+// =========================================================================
 router.post("/create-snap", async (req, res) => {
     try {
         const { tier, companyName, customerName, email, phone, companyId } = req.body;
@@ -121,9 +224,9 @@ router.post("/create-snap", async (req, res) => {
             return res.status(400).json({ error: "Data pemesanan tidak lengkap." });
         }
         const orderId = `ALMA-ORD-${ulid()}`;
-        const amount = tier === "EXCLUSIVE" ? 5489000 : 5489000;
-        const tierName = tier === "EXCLUSIVE" ? "Paket Eksklusif AI" : "Paket Premium Enterprise";
+        const amount = 5489000;
         const maxOutlets = tier === "EXCLUSIVE" ? 100 : 50;
+        const itemName = `Lisensi ${tier} (1 Thn / ${maxOutlets} Mesin)`.slice(0, 50);
         const targetModules = [
             "mdl_organization",
             "mdl_item",
@@ -136,16 +239,19 @@ router.post("/create-snap", async (req, res) => {
             "mdl_multi_warehouse",
             ...(tier === "EXCLUSIVE" ? ["mdl_ai_forecasting", "mdl_ai_ocr"] : []),
         ];
-        const serverKey = process.env.MIDTRANS_SERVER_KEY;
-        if (!serverKey) {
+        const rawServerKey = process.env.MIDTRANS_SERVER_KEY;
+        if (!rawServerKey) {
             return res
                 .status(500)
-                .json({ error: "MIDTRANS_SERVER_KEY belum diatur di .env" });
+                .json({ error: "MIDTRANS_SERVER_KEY belum diatur di file .env" });
         }
-        const isProduction = process.env.MIDTRANS_IS_PRODUCTION === "true";
+        const serverKey = rawServerKey.trim();
+        const isProduction = String(process.env.MIDTRANS_IS_PRODUCTION).trim().toLowerCase() ===
+            "true";
         const midtransSnapUrl = isProduction
             ? "https://app.midtrans.com/snap/v1/transactions"
             : "https://app.sandbox.midtrans.com/snap/v1/transactions";
+        console.log(`[MIDTRANS CREATE] Mode: ${isProduction ? "PRODUKSI" : "SANDBOX"} | Endpoint: ${midtransSnapUrl}`);
         const authString = Buffer.from(`${serverKey}:`).toString("base64");
         const frontendUrl = process.env.FRONTEND_URL || "https://alma-client-unv.vercel.app";
         const snapPayload = {
@@ -154,22 +260,23 @@ router.post("/create-snap", async (req, res) => {
                 gross_amount: amount,
             },
             customer_details: {
-                first_name: customerName,
+                first_name: (customerName || "Pelanggan").slice(0, 50),
                 email: email,
-                phone: phone || "081234567890",
+                phone: (phone || "081234567890").slice(0, 19),
             },
             item_details: [
                 {
-                    id: tier,
+                    id: String(tier).slice(0, 50),
                     price: amount,
                     quantity: 1,
-                    name: `Lisensi 1 Tahun ${tierName} (${maxOutlets} Mesin)`,
+                    name: itemName, // <-- Menggunakan nama ringkas di bawah 50 karakter
                 },
             ],
             callbacks: {
                 finish: `${req.headers.origin || frontendUrl}/?payment=finish&orderId=${orderId}`,
             },
         };
+        // Rekam order ke database dengan status PENDING
         await db.insert(billingOrders).values({
             id: orderId,
             companyId: companyId || null,
@@ -195,12 +302,18 @@ router.post("/create-snap", async (req, res) => {
         });
         const snapData = await snapRes.json();
         if (!snapRes.ok) {
-            return res.status(200).json({
-                token: `DEV_SNAP_TOKEN_${orderId}`,
-                redirect_url: "#",
+            console.error("[MIDTRANS API REJECTED]:", snapData);
+            const errorMsg = (Array.isArray(snapData.error_messages)
+                ? snapData.error_messages.join(", ")
+                : snapData.message) ||
+                "Gagal membuat token pembayaran dari Midtrans. Periksa kecocokan Server Key.";
+            return res.status(snapRes.status || 400).json({
+                error: errorMsg,
+                detail: snapData,
                 orderId,
             });
         }
+        console.log(`[MIDTRANS SNAP SUCCESS] Token terbit: ${snapData.token}`);
         await db
             .update(billingOrders)
             .set({ paymentReference: snapData.token, updatedAt: new Date() })
@@ -216,14 +329,16 @@ router.post("/create-snap", async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+// =========================================================================
 // 2. MIDTRANS WEBHOOK NOTIFICATION
+// =========================================================================
 router.post("/notification", async (req, res) => {
     try {
         const notif = req.body;
         const orderId = notif.order_id;
         const transactionStatus = notif.transaction_status;
         const fraudStatus = notif.fraud_status;
-        console.log(`[MIDTRANS WEBHOOK] Notifikasi diterima untuk Order: ${orderId} [Status: ${transactionStatus}]`);
+        console.log(`[MIDTRANS WEBHOOK] Notifikasi diterima untuk Order: ${orderId} [Status: ${transactionStatus}, Fraud: ${fraudStatus || "N/A"}]`);
         const orderRows = await db
             .select()
             .from(billingOrders)
@@ -235,104 +350,9 @@ router.post("/notification", async (req, res) => {
         const order = orderRows[0];
         const isPaid = transactionStatus === "settlement" ||
             (transactionStatus === "capture" && fraudStatus === "accept");
-        if (isPaid) {
-            const now = new Date();
-            const validUntil = new Date(now.setFullYear(now.getFullYear() + 1)).toISOString();
-            const masterSecretKey = process.env.ALMA_MASTER_SECRET_KEY;
-            if (!masterSecretKey || masterSecretKey === "ALMA_SECRET_DEV_KEY") {
-                throw new Error("FATAL ERROR: ALMA_MASTER_SECRET_KEY produksi belum dikonfigurasi di .env");
-            }
-            const allowedModules = order.allowedModules || [
-                "mdl_organization",
-                "mdl_item",
-                "mdl_vendor",
-                "mdl_receiving",
-                "mdl_warehouse",
-                "mdl_plusales",
-                "mdl_executivepanel",
-                "mdl_manufacturing",
-                "mdl_multi_warehouse",
-                ...(order.tier === "EXCLUSIVE"
-                    ? ["mdl_ai_forecasting", "mdl_ai_ocr"]
-                    : []),
-            ];
-            const maxOutlets = order.maxOutlets || (order.tier === "EXCLUSIVE" ? 100 : 50);
-            const licensePayload = {
-                licenseId: `LIC_${ulid()}`,
-                tier: order.tier,
-                companyName: order.companyName,
-                issuedTo: order.customerEmail,
-                phone: order.customerPhone || undefined,
-                maxOutlets,
-                allowedModules,
-                validUntil,
-            };
-            const token = LicenseManager.generateLicenseToken(licensePayload, masterSecretKey);
-            await db
-                .update(billingOrders)
-                .set({
-                status: "PAID",
-                licenseKey: token,
-                validUntil: new Date(validUntil),
-                updatedAt: new Date(),
-            })
-                .where(eq(billingOrders.id, orderId));
-            console.log(`[LICENSE GENERATED] Sukses membuat token Ed25519 untuk ${order.companyName} (${order.customerEmail}) - Kuota: ${maxOutlets} Mesin`);
-            let emailStatus = "FAILED";
-            try {
-                const transporter = createMailTransporter();
-                if (transporter) {
-                    const mailHtml = generateLicenseEmailHtml({
-                        customerName: order.customerName,
-                        companyName: order.companyName,
-                        tier: order.tier,
-                        licenseKey: token,
-                        validUntil,
-                        maxOutlets,
-                        allowedModules,
-                    });
-                    await transporter.sendMail({
-                        from: `"${process.env.SMTP_SENDER_NAME || "ALMA ERP Licensing"}" <${process.env.SMTP_USER}>`,
-                        to: order.customerEmail,
-                        subject: `[ALMA ERP] Lisensi Resmi ${order.tier} - ${order.companyName}`,
-                        html: mailHtml,
-                    });
-                    emailStatus = "SENT";
-                }
-                else {
-                    emailStatus = "SENT";
-                }
-            }
-            catch (mailErr) {
-                console.error(`[SMTP MAILER ERROR] Gagal mengirim email ke ${order.customerEmail}:`, mailErr.message);
-            }
-            await db
-                .update(billingOrders)
-                .set({ emailDeliveryStatus: emailStatus })
-                .where(eq(billingOrders.id, orderId));
-            // OVER-THE-AIR UPGRADE HOOK
-            if (order.companyId) {
-                await db
-                    .update(deviceRegistry)
-                    .set({
-                    licenseTier: order.tier,
-                    licenseKey: token,
-                    allowedModules: allowedModules,
-                    licenseExpiresAt: new Date(validUntil),
-                    updatedAt: new Date(),
-                })
-                    .where(eq(deviceRegistry.companyId, order.companyId));
-                const io = req.app.get("io");
-                if (io) {
-                    io.to(`company:${order.companyId}`).emit("LICENSE_UPGRADED", {
-                        companyId: order.companyId,
-                        licenseKey: token,
-                        tier: order.tier,
-                        allowedModules: allowedModules,
-                        validUntil,
-                    });
-                }
-            }
+        if (isPaid && order.status !== "PAID") {
+            const io = req.app.get("io");
+            await fulfillOrderPayment(order, io);
         }
         else if (transactionStatus === "cancel" ||
             transactionStatus === "deny" ||
@@ -349,7 +369,9 @@ router.post("/notification", async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
-// 3. GET ORDER STATUS (POLLING / DEV SANDBOX)
+// =========================================================================
+// 3. GET ORDER STATUS (POLLING & VERIFIKASI LANGSUNG KE MIDTRANS)
+// =========================================================================
 router.get("/order-status/:orderId", async (req, res) => {
     try {
         const { orderId } = req.params;
@@ -362,50 +384,53 @@ router.get("/order-status/:orderId", async (req, res) => {
             return res.status(404).json({ error: "Order tidak ditemukan." });
         }
         const order = orderRows[0];
-        if (order.status === "PENDING" &&
-            orderId.startsWith("ALMA-ORD-") &&
-            process.env.NODE_ENV !== "production") {
-            const now = new Date();
-            const validUntil = new Date(now.setFullYear(now.getFullYear() + 1)).toISOString();
-            const allowedModules = order.allowedModules || [
-                "mdl_organization",
-                "mdl_item",
-                "mdl_vendor",
-                "mdl_receiving",
-                "mdl_warehouse",
-                "mdl_plusales",
-                "mdl_executivepanel",
-                "mdl_manufacturing",
-                "mdl_multi_warehouse",
-                ...(order.tier === "EXCLUSIVE"
-                    ? ["mdl_ai_forecasting", "mdl_ai_ocr"]
-                    : []),
-            ];
-            const maxOutlets = order.tier === "EXCLUSIVE" ? 100 : 50;
-            const masterSecretKey = process.env.ALMA_MASTER_SECRET_KEY;
-            if (!masterSecretKey || masterSecretKey === "ALMA_SECRET_DEV_KEY") {
-                throw new Error("FATAL ERROR: ALMA_MASTER_SECRET_KEY produksi belum dikonfigurasi di .env");
+        // Jika masih PENDING, periksa status terkini langsung ke Midtrans API
+        // (Sangat berguna saat pengujian lokal sandbox tanpa webhook ngrok)
+        if (order.status === "PENDING") {
+            const rawServerKey = process.env.MIDTRANS_SERVER_KEY;
+            if (rawServerKey) {
+                const serverKey = rawServerKey.trim();
+                const isProduction = String(process.env.MIDTRANS_IS_PRODUCTION).trim().toLowerCase() ===
+                    "true";
+                const midtransStatusUrl = isProduction
+                    ? `https://api.midtrans.com/v2/${orderId}/status`
+                    : `https://api.sandbox.midtrans.com/v2/${orderId}/status`;
+                const authString = Buffer.from(`${serverKey}:`).toString("base64");
+                try {
+                    const checkRes = await fetch(midtransStatusUrl, {
+                        method: "GET",
+                        headers: {
+                            Accept: "application/json",
+                            Authorization: `Basic ${authString}`,
+                        },
+                    });
+                    if (checkRes.ok) {
+                        const checkData = await checkRes.json();
+                        const txStatus = checkData.transaction_status;
+                        const fraudStatus = checkData.fraud_status;
+                        const isPaid = txStatus === "settlement" ||
+                            (txStatus === "capture" && fraudStatus === "accept");
+                        if (isPaid) {
+                            const io = req.app.get("io");
+                            const licenseToken = await fulfillOrderPayment(order, io);
+                            order.status = "PAID";
+                            order.licenseKey = licenseToken;
+                        }
+                        else if (txStatus === "cancel" ||
+                            txStatus === "deny" ||
+                            txStatus === "expire") {
+                            await db
+                                .update(billingOrders)
+                                .set({ status: "EXPIRED", updatedAt: new Date() })
+                                .where(eq(billingOrders.id, orderId));
+                            order.status = "EXPIRED";
+                        }
+                    }
+                }
+                catch (apiErr) {
+                    console.warn("[MIDTRANS STATUS SYNC WARN]:", apiErr);
+                }
             }
-            const token = LicenseManager.generateLicenseToken({
-                licenseId: `LIC_${ulid()}`,
-                tier: order.tier,
-                companyName: order.companyName,
-                issuedTo: order.customerEmail,
-                maxOutlets,
-                allowedModules,
-                validUntil,
-            }, masterSecretKey);
-            await db
-                .update(billingOrders)
-                .set({
-                status: "PAID",
-                licenseKey: token,
-                validUntil: new Date(validUntil),
-                updatedAt: new Date(),
-            })
-                .where(eq(billingOrders.id, orderId));
-            order.status = "PAID";
-            order.licenseKey = token;
         }
         res.status(200).json(order);
     }

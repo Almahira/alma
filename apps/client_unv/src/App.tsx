@@ -200,8 +200,10 @@ function WorkspaceWrapper() {
             ) {
               pageElement = <SpoilWastePageSM />;
             }
-            // 5. Stok Opname
-            else if (route.path.includes("opname")) {
+            // 5. Stok Opname (Bedakan Region vs Outlet di Layar Mobile)
+            else if (route.path === "/gudang/opname-region") {
+              pageElement = route.element; // Tetap render halaman Stok Opname Region
+            } else if (route.path.includes("opname")) {
               pageElement = <StockOpnamePageSM />;
             }
             // 6. Master Resep & BOM

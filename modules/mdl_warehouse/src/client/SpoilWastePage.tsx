@@ -64,6 +64,8 @@ export function SpoilWastePage() {
     "ALL",
   );
 
+  const [filterOutletId, setFilterOutletId] = useState("");
+
   const divisionOptions = useMemo(() => {
     return divisions
       .filter((d) => {
@@ -366,19 +368,40 @@ export function SpoilWastePage() {
   };
 
   const filteredList = useMemo(() => {
-    return spoilWastes.filter((sw) => {
-      // ---> PENYEKATAN CABANG <---
-      if (localOutletId && sw.outletId && sw.outletId !== localOutletId)
-        return false;
+    return spoilWastes.filter((sw: any) => {
+      // 1. Penyekatan Company & Region
       if (localCompanyId && sw.companyId && sw.companyId !== localCompanyId)
         return false;
+      if (localRegionId && sw.regionId && sw.regionId !== localRegionId)
+        return false;
 
+      // 2. Penyekatan Outlet
+      if (localOutletId) {
+        if (sw.outletId && sw.outletId !== localOutletId) return false;
+      } else if (filterOutletId) {
+        if (sw.outletId !== filterOutletId) return false;
+      }
+
+      // 3. Status Aktif vs Arsip (Mendukung isActive & is_active)
+      const isItemActive =
+        sw.isActive !== undefined ? sw.isActive : sw.is_active;
       const matchStatus =
-        viewStatus === "AKTIF" ? sw.isActive !== false : sw.isActive === false;
+        viewStatus === "AKTIF"
+          ? isItemActive !== false
+          : isItemActive === false;
       const matchType = filterType === "ALL" ? true : sw.type === filterType;
+
       return matchStatus && matchType;
     });
-  }, [spoilWastes, viewStatus, filterType, localOutletId, localCompanyId]);
+  }, [
+    spoilWastes,
+    viewStatus,
+    filterType,
+    localOutletId,
+    localRegionId,
+    localCompanyId,
+    filterOutletId,
+  ]);
 
   const totalLossPeriod = useMemo(() => {
     return filteredList.reduce((sum, it) => sum + (it.totalLossCost || 0), 0);
@@ -659,6 +682,27 @@ export function SpoilWastePage() {
             <option value="SPOIL">HANYA SPOIL (BAHAN MENTAH)</option>
             <option value="WASTE">HANYA WASTE (MENU GAGAL)</option>
           </select>
+          {/* FILTER OUTLET UNTUK REGION */}
+          {!localOutletId && (
+            <select
+              value={filterOutletId}
+              onChange={(e) => setFilterOutletId(e.target.value)}
+              className="text-xs font-black p-2 bg-(--bg-input) text-orange-500 border border-orange-500/30 rounded-xl outline-none cursor-pointer"
+            >
+              <option value="">-- SEMUA OUTLET --</option>
+              {outlets
+                .filter(
+                  (o) =>
+                    o.status === "Aktif" &&
+                    (!localRegionId || o.regionId === localRegionId),
+                )
+                .map((o) => (
+                  <option key={o.id} value={o.id}>
+                    OUTLET: {o.name}
+                  </option>
+                ))}
+            </select>
+          )}
         </div>
 
         <div className="text-xs font-black text-(--text-secondary)">

@@ -1,5 +1,5 @@
 // File: modules/mdl_executivepanel/src/client/TargetConfigPage.tsx
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import {
   Target,
   Building2,
@@ -17,10 +17,24 @@ export function TargetConfigPage() {
   const { targets } = useExecutivePanelStore();
   const { outlets } = useOrgStore();
 
+  const localCompanyId = localStorage.getItem("__unv_companyId") || "";
+  const localRegionId = localStorage.getItem("__unv_regionId") || "";
+
+  const availableOutlets = useMemo(() => {
+    return outlets.filter((o: any) => {
+      if (o.status !== "Aktif") return false;
+      if (localCompanyId && o.companyId && o.companyId !== localCompanyId)
+        return false;
+      if (localRegionId && o.regionId && o.regionId !== localRegionId)
+        return false;
+      return true;
+    });
+  }, [outlets, localCompanyId, localRegionId]);
+
   const currentMonthStr = new Date().toISOString().slice(0, 7);
   const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthStr);
   const [selectedOutletId, setSelectedOutletId] = useState<string>(
-    outlets[0]?.id || "",
+    availableOutlets[0]?.id || "",
   );
 
   const activeTargetKey = `${selectedOutletId}_${selectedMonth}`;
@@ -142,13 +156,11 @@ export function TargetConfigPage() {
                 onChange={(e) => setSelectedOutletId(e.target.value)}
                 className="w-full text-xs font-bold p-2.5 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none"
               >
-                {outlets
-                  .filter((o) => o.status === "Aktif")
-                  .map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.name}
-                    </option>
-                  ))}
+                {availableOutlets.map((o: any) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name}
+                  </option>
+                ))}
               </select>
             </div>
 

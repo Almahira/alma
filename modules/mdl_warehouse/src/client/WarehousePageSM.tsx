@@ -43,6 +43,7 @@ export function WarehousePageSM() {
   const [dateStart, setDateStart] = useState("");
   const [dateEnd, setDateEnd] = useState("");
   const [filterDivisionId, setFilterDivisionId] = useState("");
+  const [filterOutletId, setFilterOutletId] = useState(""); // Tambahan filter outlet
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [isAddFormOpen, setIsAddFormOpen] = useState(true);
 
@@ -57,6 +58,18 @@ export function WarehousePageSM() {
   const [inputQty, setInputQty] = useState<number | "">(1);
   const [inputNotes, setInputNotes] = useState("");
   const itemInputRef = useRef<HTMLInputElement>(null);
+
+  // Daftar outlet yang tersedia untuk filter (khusus Region/Holding)
+  const availableOutlets = useMemo(() => {
+    return outlets.filter((o) => {
+      if (o.status !== "Aktif") return false;
+      if (localCompanyId && o.companyId && o.companyId !== localCompanyId)
+        return false;
+      if (localRegionId && o.regionId && o.regionId !== localRegionId)
+        return false;
+      return true;
+    });
+  }, [outlets, localCompanyId, localRegionId]);
 
   const divisionOptions = useMemo(() => {
     return divisions
@@ -154,32 +167,52 @@ export function WarehousePageSM() {
       setSelectedItemId("");
       setInputQty(1);
       setInputNotes("");
+      // Fokus kembali ke input item untuk entri berikutnya
+      setTimeout(() => itemInputRef.current?.focus(), 50);
     } catch (err: any) {
       sysToast.error("Gagal Mencatat", err.message);
     }
   };
 
+  // Filter Ledger Distribusi dengan penyekatan company, region, outlet, status
   const filteredDistributions = useMemo(() => {
-    return distributions.filter((d) => {
-      if (localOutletId && d.outletId && d.outletId !== localOutletId)
-        return false;
+    return distributions.filter((d: any) => {
+      // 1. Penyekatan Company & Region
       if (localCompanyId && d.companyId && d.companyId !== localCompanyId)
         return false;
+      if (localRegionId && d.regionId && d.regionId !== localRegionId)
+        return false;
+
+      // 2. Penyekatan Outlet
+      if (localOutletId) {
+        if (d.outletId && d.outletId !== localOutletId) return false;
+      } else if (filterOutletId) {
+        if (d.outletId !== filterOutletId) return false;
+      }
+
+      // 3. Status Aktif vs Arsip (dukung camelCase dan snake_case)
+      const isItemActive = d.isActive !== undefined ? d.isActive : d.is_active;
       const matchStatus =
-        viewStatus === "AKTIF" ? d.isActive !== false : d.isActive === false;
+        viewStatus === "AKTIF"
+          ? isItemActive !== false
+          : isItemActive === false;
+
       const matchDivision =
         !filterDivisionId || d.divisionId === filterDivisionId;
       const matchStart = !dateStart || new Date(d.date) >= new Date(dateStart);
       const matchEnd = !dateEnd || new Date(d.date) <= new Date(dateEnd);
+
       return matchStatus && matchDivision && matchStart && matchEnd;
     });
   }, [
     distributions,
     viewStatus,
     filterDivisionId,
+    filterOutletId,
     dateStart,
     dateEnd,
     localOutletId,
+    localRegionId,
     localCompanyId,
   ]);
 
@@ -226,17 +259,19 @@ export function WarehousePageSM() {
           </div>
 
           <div className="flex items-center gap-1.5">
-            {/* Toggle Form Cepat */}
-            <button
-              onClick={() => setIsAddFormOpen(!isAddFormOpen)}
-              className={`p-1.5 text-xs font-black rounded-lg border flex items-center gap-1 ${
-                isAddFormOpen
-                  ? "bg-orange-500 text-white border-orange-500"
-                  : "bg-(--bg-input) text-(--text-secondary) border-(--border-color)"
-              }`}
-            >
-              <Plus className="w-4 h-4" /> {isAddFormOpen ? "Tutup" : "Catat"}
-            </button>
+            {/* Toggle Form Cepat hanya jika level outlet */}
+            {localOutletId && (
+              <button
+                onClick={() => setIsAddFormOpen(!isAddFormOpen)}
+                className={`p-1.5 text-xs font-black rounded-lg border flex items-center gap-1 ${
+                  isAddFormOpen
+                    ? "bg-orange-500 text-white border-orange-500"
+                    : "bg-(--bg-input) text-(--text-secondary) border-(--border-color)"
+                }`}
+              >
+                <Plus className="w-4 h-4" /> {isAddFormOpen ? "Tutup" : "Catat"}
+              </button>
+            )}
 
             {/* Tombol Export */}
             <button
@@ -276,107 +311,117 @@ export function WarehousePageSM() {
         </div>
       </div>
 
-      {/* FORM QUICK-ADD BERBASIS STICKY MEMORY (MOBILE COLLAPSIBLE) */}
-      {isAddFormOpen && (
-        <form
-          onSubmit={handleQuickSubmit}
-          className="p-3 bg-(--surface-hover) border-b border-(--border-color) shrink-0 space-y-2.5 animate-in slide-in-from-top-2"
-        >
-          <div className="grid grid-cols-2 gap-2">
+      {/* FORM QUICK-ADD ATAU BANNER MODE MONITORING */}
+      {localOutletId ? (
+        isAddFormOpen && (
+          <form
+            onSubmit={handleQuickSubmit}
+            className="p-3 bg-(--surface-hover) border-b border-(--border-color) shrink-0 space-y-2.5 animate-in slide-in-from-top-2"
+          >
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-0.5">
+                  Tanggal (Sticky)
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={stickyDate}
+                  onChange={(e) => setStickyDate(e.target.value)}
+                  className="w-full text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-0.5">
+                  Divisi Tujuan (Sticky)
+                </label>
+                <select
+                  value={stickyDivisionId}
+                  onChange={(e) => setStickyDivisionId(e.target.value)}
+                  required
+                  className="w-full text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none"
+                >
+                  {divisionOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
             <div>
               <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-0.5">
-                Tanggal (Sticky)
+                Pilih Barang (Stok Fisik)
               </label>
-              <input
-                type="date"
-                required
-                value={stickyDate}
-                onChange={(e) => setStickyDate(e.target.value)}
-                className="w-full text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none"
+              <UniversalCombobox
+                ref={itemInputRef}
+                options={productOptions}
+                value={selectedItemId}
+                onChange={(v) => setSelectedItemId(v)}
+                placeholder="Ketik lalu pilih barang..."
+                dropdownDirection="bottom"
               />
             </div>
-            <div>
-              <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-0.5">
-                Divisi Tujuan (Sticky)
-              </label>
-              <select
-                value={stickyDivisionId}
-                onChange={(e) => setStickyDivisionId(e.target.value)}
-                required
-                className="w-full text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none"
+
+            <div className="grid grid-cols-3 gap-2 items-end">
+              <div>
+                <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-0.5">
+                  Qty
+                </label>
+                <input
+                  type="number"
+                  required
+                  min={0.01}
+                  step="any"
+                  value={inputQty}
+                  onChange={(e) =>
+                    setInputQty(
+                      e.target.value === "" ? "" : Number(e.target.value),
+                    )
+                  }
+                  className="w-full text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none text-center font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-0.5">
+                  Satuan
+                </label>
+                <input
+                  type="text"
+                  disabled
+                  value={autoUomName}
+                  className="w-full text-xs font-bold p-2 bg-(--surface-hover) text-(--text-secondary) border border-(--border-color) rounded-lg text-center font-mono"
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="py-2 bg-orange-500 hover:bg-orange-600 text-white font-black text-xs rounded-lg shadow-sm flex items-center justify-center gap-1 cursor-pointer"
               >
-                {divisionOptions.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-0.5">
-              Pilih Barang (Stok Fisik)
-            </label>
-            <UniversalCombobox
-              options={productOptions}
-              value={selectedItemId}
-              onChange={(v) => setSelectedItemId(v)}
-              placeholder="Ketik lalu pilih barang..."
-              dropdownDirection="bottom"
-            />
-          </div>
-
-          <div className="grid grid-cols-3 gap-2 items-end">
-            <div>
-              <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-0.5">
-                Qty
-              </label>
-              <input
-                type="number"
-                required
-                min={0.01}
-                step="any"
-                value={inputQty}
-                onChange={(e) =>
-                  setInputQty(
-                    e.target.value === "" ? "" : Number(e.target.value),
-                  )
-                }
-                className="w-full text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none text-center font-mono"
-              />
+                <Plus className="w-3.5 h-3.5" /> Simpan
+              </button>
             </div>
 
             <div>
-              <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-0.5">
-                Satuan
-              </label>
               <input
                 type="text"
-                disabled
-                value={autoUomName}
-                className="w-full text-xs font-bold p-2 bg-(--surface-hover) text-(--text-secondary) border border-(--border-color) rounded-lg text-center font-mono"
+                value={inputNotes}
+                onChange={(e) => setInputNotes(e.target.value)}
+                placeholder="Catatan / keperluan masakan (opsional)..."
+                className="w-full text-xs font-bold p-1.5 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none placeholder:text-[10px]"
               />
             </div>
-
-            <button
-              type="submit"
-              className="py-2 bg-orange-500 hover:bg-orange-600 text-white font-black text-xs rounded-lg shadow-sm flex items-center justify-center gap-1 cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" /> Simpan
-            </button>
-          </div>
-
-          <div>
-            <input
-              type="text"
-              value={inputNotes}
-              onChange={(e) => setInputNotes(e.target.value)}
-              placeholder="Catatan / keperluan masakan (opsional)..."
-              className="w-full text-xs font-bold p-1.5 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none placeholder:text-[10px]"
-            />
-          </div>
-        </form>
+          </form>
+        )
+      ) : (
+        <div className="p-3 bg-blue-500/10 border-b border-blue-500/20 flex items-center justify-between text-xs font-bold text-blue-600 shrink-0">
+          <span>
+            Mode Monitoring Wilayah: Menampilkan data mutasi divisi dari seluruh
+            cabang di bawah region ini.
+          </span>
+        </div>
       )}
 
       {/* FILTER ACCORDION BAR */}
@@ -418,6 +463,22 @@ export function WarehousePageSM() {
 
       {isFilterOpen && (
         <div className="p-3 bg-(--surface-hover) border-b border-(--border-color) space-y-2 animate-in fade-in">
+          {/* Filter Outlet untuk Region/Holding */}
+          {!localOutletId && (
+            <select
+              value={filterOutletId}
+              onChange={(e) => setFilterOutletId(e.target.value)}
+              className="w-full text-xs font-bold p-2 bg-(--bg-input) text-orange-500 border border-orange-500/30 rounded-lg outline-none"
+            >
+              <option value="">-- SEMUA OUTLET CABANG --</option>
+              {availableOutlets.map((o) => (
+                <option key={o.id} value={o.id}>
+                  OUTLET: {o.name}
+                </option>
+              ))}
+            </select>
+          )}
+
           <select
             value={filterDivisionId}
             onChange={(e) => setFilterDivisionId(e.target.value)}
@@ -458,6 +519,13 @@ export function WarehousePageSM() {
           >
             <div className="flex items-start justify-between">
               <div>
+                {/* Menampilkan Outlet Asal jika bukan level outlet */}
+                {!localOutletId && (
+                  <span className="inline-block px-2 py-0.5 rounded text-[9px] font-black uppercase bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 mb-1">
+                    {outlets.find((o) => o.id === doc.outletId)?.name ||
+                      "GUDANG"}
+                  </span>
+                )}
                 <span className="px-2 py-0.5 rounded text-[9px] font-black uppercase bg-blue-500/10 text-blue-500 border border-blue-500/20">
                   {doc.divisionName}
                 </span>

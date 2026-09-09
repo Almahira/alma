@@ -7,9 +7,6 @@ import {
   Building2,
   Coins,
   Receipt,
-  Plus,
-  ArrowRightLeft,
-  ChevronDown,
 } from "lucide-react";
 import { useExecutivePanelStore } from "./store";
 import { useOrgStore } from "../../../mdl_organization/src/client/store";
@@ -22,28 +19,61 @@ export function OwnerLedgerPageSM() {
   const { outlets } = useOrgStore();
   const { documents: plusalesDocs } = usePlusalesStore();
 
+  const localCompanyId = localStorage.getItem("__unv_companyId") || "";
+  const localRegionId = localStorage.getItem("__unv_regionId") || "";
+
+  // Daftar outlet sah sesuai Company & Region
+  const availableOutlets = useMemo(() => {
+    return outlets.filter((o: any) => {
+      if (o.status !== "Aktif") return false;
+      if (localCompanyId && o.companyId && o.companyId !== localCompanyId)
+        return false;
+      if (localRegionId && o.regionId && o.regionId !== localRegionId)
+        return false;
+      return true;
+    });
+  }, [outlets, localCompanyId, localRegionId]);
+
   const currentMonthStr = new Date().toISOString().slice(0, 7);
   const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthStr);
   const [selectedOutletId, setSelectedOutletId] = useState<string>(
-    outlets[0]?.id || "",
+    availableOutlets[0]?.id || "",
   );
 
-  const [activeTab, setActiveTab] = useState<"ALLOCATION" | "WITHDRAWAL">("ALLOCATION");
+  const [activeTab, setActiveTab] = useState<"ALLOCATION" | "WITHDRAWAL">(
+    "ALLOCATION",
+  );
 
-  // HITUNG TOTAL NET SALES BULAN TERPILIH
+  // HITUNG TOTAL NET SALES BULAN TERPILIH (TERKUNCI KE COMPANY, REGION & OUTLET)
   const totalNetSalesMonth = useMemo(() => {
     return plusalesDocs
-      .filter((d) => {
+      .filter((d: any) => {
+        if (localCompanyId && d.companyId && d.companyId !== localCompanyId)
+          return false;
+        if (localRegionId && d.regionId && d.regionId !== localRegionId)
+          return false;
+
+        const isItemActive =
+          d.isActive !== undefined ? d.isActive : d.is_active;
+        const matchActive = isItemActive !== false;
         const matchMonth = d.date && d.date.startsWith(selectedMonth);
         const matchOutlet =
           !selectedOutletId || d.outletId === selectedOutletId;
-        const matchActive = d.isActive !== false;
+
         return matchMonth && matchOutlet && matchActive;
       })
       .reduce((sum, d) => sum + (d.netSales || 0), 0);
-  }, [plusalesDocs, selectedMonth, selectedOutletId]);
+  }, [
+    plusalesDocs,
+    selectedMonth,
+    selectedOutletId,
+    localCompanyId,
+    localRegionId,
+  ]);
 
-  // 1. STATE ALOKASI CADANGAN
+  // =========================================================================
+  // 1. STATE & HANDLER ALOKASI CADANGAN
+  // =========================================================================
   const [allocName, setAllocName] = useState("");
   const [allocPct, setAllocPct] = useState<number | "">("");
   const [allocNominal, setAllocNominal] = useState<number | "">("");
@@ -79,12 +109,11 @@ export function OwnerLedgerPageSM() {
     ) {
       return sysToast.error("Error", "Isi persentase (%) atau nominal (Rp)!");
     }
-    const companyId = localStorage.getItem("__unv_companyId") || "";
     try {
       await globalCommandBus.execute({
         type: "SET_EXECUTIVE_ALLOCATION",
         payload: {
-          companyId,
+          companyId: localCompanyId,
           outletId: selectedOutletId || null,
           month: selectedMonth,
           name: allocName.toUpperCase().trim(),
@@ -104,7 +133,9 @@ export function OwnerLedgerPageSM() {
     }
   };
 
-  // 2. STATE PENARIKAN OWNER / DEVIDEN
+  // =========================================================================
+  // 2. STATE & HANDLER PENARIKAN OWNER / DEVIDEN
+  // =========================================================================
   const [withdrawDate, setWithdrawDate] = useState(
     new Date().toISOString().split("T")[0],
   );
@@ -147,12 +178,8 @@ export function OwnerLedgerPageSM() {
     const hasPct = withdrawPct !== "" && Number(withdrawPct) > 0;
     const hasAmt = withdrawAmount !== "" && Number(withdrawAmount) > 0;
     if (!hasPct && !hasAmt) {
-      return sysToast.error(
-        "Error",
-        "Isi persentase (%) atau nominal (Rp)!",
-      );
+      return sysToast.error("Error", "Isi persentase (%) atau nominal (Rp)!");
     }
-    const companyId = localStorage.getItem("__unv_companyId") || "";
     const finalAmount = hasAmt
       ? Number(withdrawAmount)
       : hasPct
@@ -162,7 +189,8 @@ export function OwnerLedgerPageSM() {
       await globalCommandBus.execute({
         type: "CREATE_OWNER_LEDGER",
         payload: {
-          companyId,
+          companyId: localCompanyId,
+          regionId: localRegionId || null,
           outletId: selectedOutletId || null,
           date: withdrawDate,
           category: withdrawCategory,
@@ -187,17 +215,25 @@ export function OwnerLedgerPageSM() {
     }
   };
 
-  // Filter Alokasi
+  // =========================================================================
+  // 3. FILTER ALOKASI & PENARIKAN (HANYA DIDEKLARASIKAN SATU KALI)
+  // =========================================================================
   const filteredAllocations = useMemo(() => {
-    return allocations.filter(
-      (a) =>
+    return allocations.filter((a: any) => {
+      if (localCompanyId && a.companyId && a.companyId !== localCompanyId)
+        return false;
+      const isAct = a.isActive !== undefined ? a.isActive : a.is_active;
+      if (isAct === false) return false;
+
+      return (
         a.month === selectedMonth &&
-        (!selectedOutletId || !a.outletId || a.outletId === selectedOutletId),
-    );
-  }, [allocations, selectedMonth, selectedOutletId]);
+        (!selectedOutletId || !a.outletId || a.outletId === selectedOutletId)
+      );
+    });
+  }, [allocations, selectedMonth, selectedOutletId, localCompanyId]);
 
   const totalAllocNominal = useMemo(() => {
-    return filteredAllocations.reduce((sum, a) => {
+    return filteredAllocations.reduce((sum, a: any) => {
       const nominal =
         a.percentage > 0
           ? Math.round(totalNetSalesMonth * (a.percentage / 100))
@@ -207,22 +243,37 @@ export function OwnerLedgerPageSM() {
   }, [filteredAllocations, totalNetSalesMonth]);
 
   const totalAllocPct = useMemo(() => {
-    return filteredAllocations.reduce((sum, a) => sum + (a.percentage || 0), 0);
+    return filteredAllocations.reduce(
+      (sum, a: any) => sum + (a.percentage || 0),
+      0,
+    );
   }, [filteredAllocations]);
 
-  // Filter Penarikan
   const filteredWithdrawals = useMemo(() => {
-    return ownerLedgers.filter((o) => {
+    return ownerLedgers.filter((o: any) => {
+      if (localCompanyId && o.companyId && o.companyId !== localCompanyId)
+        return false;
+      if (localRegionId && o.regionId && o.regionId !== localRegionId)
+        return false;
+
+      const isAct = o.isActive !== undefined ? o.isActive : o.is_active;
+      if (isAct === false) return false;
+
       const matchMonth = o.date && o.date.startsWith(selectedMonth);
-      const matchActive = o.isActive !== false;
       const matchOutlet =
         !selectedOutletId || !o.outletId || o.outletId === selectedOutletId;
-      return matchMonth && matchActive && matchOutlet;
+      return matchMonth && matchOutlet;
     });
-  }, [ownerLedgers, selectedMonth, selectedOutletId]);
+  }, [
+    ownerLedgers,
+    selectedMonth,
+    selectedOutletId,
+    localCompanyId,
+    localRegionId,
+  ]);
 
   const totalWithdrawalPeriod = useMemo(() => {
-    return filteredWithdrawals.reduce((sum, o) => {
+    return filteredWithdrawals.reduce((sum, o: any) => {
       const amount =
         o.percentage && o.percentage > 0
           ? Math.round(totalNetSalesMonth * (o.percentage / 100))
@@ -231,6 +282,9 @@ export function OwnerLedgerPageSM() {
     }, 0);
   }, [filteredWithdrawals, totalNetSalesMonth]);
 
+  // =========================================================================
+  // 4. RENDER UI MOBILE
+  // =========================================================================
   return (
     <div className="relative h-full flex flex-col overflow-hidden bg-(--bg-card) text-(--text-primary)">
       {/* HEADER MOBILE */}
@@ -263,8 +317,8 @@ export function OwnerLedgerPageSM() {
               onChange={(e) => setSelectedOutletId(e.target.value)}
               className="bg-transparent text-xs font-bold text-(--text-primary) outline-none w-full"
             >
-              <option value="">-- SEMUA OUTLET --</option>
-              {outlets.map((o) => (
+              <option value="">-- SEMUA OUTLET WILAYAH --</option>
+              {availableOutlets.map((o: any) => (
                 <option key={o.id} value={o.id}>
                   {o.name}
                 </option>
@@ -288,7 +342,7 @@ export function OwnerLedgerPageSM() {
           <button
             type="button"
             onClick={() => setActiveTab("ALLOCATION")}
-            className={`py-1.5 text-xs font-black rounded-lg transition flex items-center justify-center gap-1.5 ${
+            className={`py-1.5 text-xs font-black rounded-lg transition flex items-center justify-center gap-1.5 cursor-pointer ${
               activeTab === "ALLOCATION"
                 ? "bg-orange-500 text-white shadow-xs"
                 : "text-(--text-secondary)"
@@ -299,7 +353,7 @@ export function OwnerLedgerPageSM() {
           <button
             type="button"
             onClick={() => setActiveTab("WITHDRAWAL")}
-            className={`py-1.5 text-xs font-black rounded-lg transition flex items-center justify-center gap-1.5 ${
+            className={`py-1.5 text-xs font-black rounded-lg transition flex items-center justify-center gap-1.5 cursor-pointer ${
               activeTab === "WITHDRAWAL"
                 ? "bg-emerald-500 text-white shadow-xs"
                 : "text-(--text-secondary)"
@@ -317,7 +371,6 @@ export function OwnerLedgerPageSM() {
           /* TAB 1: CADANGAN OPSIONAL OWNER                           */
           /* ========================================================= */
           <div className="space-y-3">
-            {/* Form Alokasi Cadangan */}
             <form
               onSubmit={handleSaveAllocation}
               className="p-3 bg-(--surface-hover) rounded-xl border border-(--border-color) space-y-2.5"
@@ -375,7 +428,7 @@ export function OwnerLedgerPageSM() {
 
               <button
                 type="submit"
-                className="w-full py-2 bg-orange-500 hover:bg-orange-600 text-white font-black text-xs uppercase rounded-lg shadow-sm"
+                className="w-full py-2 bg-orange-500 hover:bg-orange-600 text-white font-black text-xs uppercase rounded-lg shadow-sm cursor-pointer"
               >
                 + Set Alokasi Cadangan
               </button>
@@ -386,7 +439,7 @@ export function OwnerLedgerPageSM() {
               <span className="text-[10px] font-black text-(--text-secondary) uppercase tracking-wider block">
                 Daftar Cadangan Bulan Ini:
               </span>
-              {filteredAllocations.map((a) => {
+              {filteredAllocations.map((a: any) => {
                 const liveNominal =
                   a.percentage > 0
                     ? Math.round(totalNetSalesMonth * (a.percentage / 100))
@@ -397,7 +450,9 @@ export function OwnerLedgerPageSM() {
                     className="flex items-center justify-between p-2.5 bg-(--bg-card) rounded-xl border border-(--border-color) text-xs"
                   >
                     <div>
-                      <div className="font-bold text-(--text-primary)">{a.name}</div>
+                      <div className="font-bold text-(--text-primary)">
+                        {a.name}
+                      </div>
                       <span className="text-[10px] text-orange-500 font-mono font-semibold">
                         {a.percentage > 0
                           ? `[${a.percentage}% dari Net Sales]`
@@ -415,9 +470,12 @@ export function OwnerLedgerPageSM() {
                             type: "ARCHIVE_EXECUTIVE_ALLOCATION",
                             payload: { id: a.id },
                           });
-                          sysToast.success("Berhasil", "Alokasi dinonaktifkan.");
+                          sysToast.success(
+                            "Berhasil",
+                            "Alokasi dinonaktifkan.",
+                          );
                         }}
-                        className="text-(--text-secondary) hover:text-rose-500 p-1"
+                        className="text-(--text-secondary) hover:text-rose-500 p-1 cursor-pointer"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -427,7 +485,7 @@ export function OwnerLedgerPageSM() {
               })}
 
               {filteredAllocations.length === 0 && (
-                <div className="p-4 text-center text-slate-400 text-xs italic">
+                <div className="p-4 text-center text-(--text-secondary) text-xs italic">
                   Belum ada alokasi cadangan untuk bulan ini.
                 </div>
               )}
@@ -453,7 +511,6 @@ export function OwnerLedgerPageSM() {
           /* TAB 2: REALISASI PENARIKAN OWNER & DEVIDEN                */
           /* ========================================================= */
           <div className="space-y-3">
-            {/* Form Penarikan */}
             <form
               onSubmit={handleSaveWithdrawal}
               className="p-3 bg-(--surface-hover) rounded-xl border border-(--border-color) space-y-2.5"
@@ -496,7 +553,9 @@ export function OwnerLedgerPageSM() {
                   type="text"
                   required
                   value={recipientName}
-                  onChange={(e) => setRecipientName(e.target.value.toUpperCase())}
+                  onChange={(e) =>
+                    setRecipientName(e.target.value.toUpperCase())
+                  }
                   placeholder="PAK HAJI / MITRA..."
                   className="w-full text-xs font-bold p-2 bg-(--bg-input) border border-(--border-color) rounded-lg outline-none text-(--text-primary)"
                 />
@@ -565,7 +624,7 @@ export function OwnerLedgerPageSM() {
 
               <button
                 type="submit"
-                className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs uppercase rounded-lg shadow-sm"
+                className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs uppercase rounded-lg shadow-sm cursor-pointer"
               >
                 Simpan Penarikan Kas
               </button>
@@ -576,7 +635,7 @@ export function OwnerLedgerPageSM() {
               <span className="text-[10px] font-black text-(--text-secondary) uppercase tracking-wider block">
                 Riwayat Penarikan Bulan Ini:
               </span>
-              {filteredWithdrawals.map((doc) => {
+              {filteredWithdrawals.map((doc: any) => {
                 const liveAmount =
                   doc.percentage && doc.percentage > 0
                     ? Math.round(totalNetSalesMonth * (doc.percentage / 100))
@@ -613,9 +672,12 @@ export function OwnerLedgerPageSM() {
                             type: "ARCHIVE_OWNER_LEDGER",
                             payload: { id: doc.id },
                           });
-                          sysToast.success("Berhasil", "Catatan penarikan diarsipkan.");
+                          sysToast.success(
+                            "Berhasil",
+                            "Catatan penarikan diarsipkan.",
+                          );
                         }}
-                        className="text-(--text-secondary) hover:text-rose-500 p-0.5"
+                        className="text-(--text-secondary) hover:text-rose-500 p-0.5 cursor-pointer"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -625,7 +687,7 @@ export function OwnerLedgerPageSM() {
               })}
 
               {filteredWithdrawals.length === 0 && (
-                <div className="p-4 text-center text-slate-400 text-xs italic">
+                <div className="p-4 text-center text-(--text-secondary) text-xs italic">
                   Belum ada catatan penarikan untuk bulan ini.
                 </div>
               )}

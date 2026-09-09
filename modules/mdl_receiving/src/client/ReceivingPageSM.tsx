@@ -165,12 +165,18 @@ export function ReceivingPageSM() {
             if (localRegionId && doc.regionId !== localRegionId) return false;
           } else if (activeTab === "PETTYCASH") {
             if (doc.documentType !== "PETTYCASH") return false;
-            if (doc.outletId) return false;
+            if (localRegionId && doc.regionId && doc.regionId !== localRegionId)
+              return false;
+            if (filterEntityId === "REGION_ONLY") {
+              if (doc.outletId) return false;
+            } else if (filterEntityId) {
+              if (doc.outletId !== filterEntityId) return false;
+            }
           }
         }
 
         // ==============================================================
-        // 2. FILTER PERUSAHAAN & STATUS AKTIF
+        // 2. FILTER PERUSAHAAN & STATUS AKTIF (MENDUKUNG is_active)
         // ==============================================================
         if (
           localCompanyId &&
@@ -180,9 +186,10 @@ export function ReceivingPageSM() {
           return false;
         }
 
-        const isDocActive = doc.isActive !== false;
-        if (viewStatus === "AKTIF" && !isDocActive) return false;
-        if (viewStatus === "ARSIP" && isDocActive) return false;
+        const isDocActive =
+          doc.isActive !== undefined ? doc.isActive : doc.is_active;
+        if (viewStatus === "AKTIF" && isDocActive === false) return false;
+        if (viewStatus === "ARSIP" && isDocActive !== false) return false;
 
         // ==============================================================
         // 3. FILTER DROPDOWN ENTITAS
@@ -283,8 +290,19 @@ export function ReceivingPageSM() {
           ? targetOutlet.name
           : `Outlet [${(doc.outletId || "").substring(0, 8)}]`;
       } else {
-        key = "PETTYCASH_GROUP";
-        title = "PENGELUARAN PETTYCASH & KAS BON";
+        if (!localOutletId && doc.outletId) {
+          key = doc.outletId;
+          const targetOutlet = outlets.find((o) => o.id === doc.outletId);
+          title = targetOutlet
+            ? `KAS KECIL: ${targetOutlet.name.toUpperCase()}`
+            : `OUTLET [${doc.outletId}]`;
+        } else if (!localOutletId) {
+          key = "PETTYCASH_REGION";
+          title = "KAS KECIL: GUDANG WILAYAH";
+        } else {
+          key = "PETTYCASH_GROUP";
+          title = "PENGELUARAN PETTYCASH & KAS BON";
+        }
       }
 
       if (!groups[key])
@@ -296,19 +314,37 @@ export function ReceivingPageSM() {
     return groups;
   }, [filteredDocs, activeTab, vendors, outlets, regions]);
 
-  const filterOptions =
-    activeTab === "HUTANG"
-      ? [
-          ...regions
-            .filter((r) => r.status === "Aktif")
-            .map((r) => ({ value: r.id, label: `[INTERNAL] ${r.name}` })),
-          ...vendors
-            .filter((v) => v.status === "Aktif")
-            .map((v) => ({ value: v.id, label: v.name })),
-        ]
-      : outlets
-          .filter((o) => o.status === "Aktif")
-          .map((o) => ({ value: o.id, label: o.name }));
+  const filterOptions = useMemo(() => {
+    if (activeTab === "HUTANG") {
+      return [
+        ...regions
+          .filter((r) => r.status === "Aktif")
+          .map((r) => ({ value: r.id, label: `[INTERNAL] ${r.name}` })),
+        ...vendors
+          .filter((v) => v.status === "Aktif")
+          .map((v) => ({ value: v.id, label: v.name })),
+      ];
+    }
+    if (activeTab === "PETTYCASH") {
+      return [
+        { value: "REGION_ONLY", label: "[GUDANG REGION] KAS KECIL WILAYAH" },
+        ...outlets
+          .filter(
+            (o) =>
+              o.status === "Aktif" &&
+              (!localRegionId || o.regionId === localRegionId),
+          )
+          .map((o) => ({ value: o.id, label: `OUTLET: ${o.name}` })),
+      ];
+    }
+    return outlets
+      .filter(
+        (o) =>
+          o.status === "Aktif" &&
+          (!localRegionId || o.regionId === localRegionId),
+      )
+      .map((o) => ({ value: o.id, label: o.name }));
+  }, [activeTab, regions, vendors, outlets, localRegionId]);
 
   const getLocationReportName = () => {
     const outId = localStorage.getItem("__unv_outletId");
@@ -660,13 +696,19 @@ export function ReceivingPageSM() {
 
       {isFilterOpen && (
         <div className="p-3 bg-(--bg-card) border-b border-(--border-color) space-y-3">
-          {activeTab !== "PETTYCASH" && (
+          {(activeTab !== "PETTYCASH" || !localOutletId) && (
             <div>
               <UniversalCombobox
                 options={filterOptions}
                 value={filterEntityId}
                 onChange={setFilterEntityId}
-                placeholder={`Semua ${activeTab === "HUTANG" ? "Vendor/Gudang" : "Outlet"}...`}
+                placeholder={
+                  activeTab === "HUTANG"
+                    ? "Semua Vendor / Gudang..."
+                    : activeTab === "PETTYCASH"
+                      ? "Semua Kas Kecil (Region & Outlet)..."
+                      : "Semua Outlet Cabang..."
+                }
               />
             </div>
           )}

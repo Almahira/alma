@@ -440,37 +440,67 @@ export function VendorPage() {
   const localRegionId = localStorage.getItem("__unv_regionId") || "";
   const localOutletId = localStorage.getItem("__unv_outletId") || "";
 
+  const [filterOutletId, setFilterOutletId] = useState("");
+
+  const availableOutlets = useMemo(() => {
+    return outlets.filter((o) => {
+      if (o.status !== "Aktif") return false;
+      if (localCompanyId && o.companyId && o.companyId !== localCompanyId)
+        return false;
+      if (localRegionId && o.regionId && o.regionId !== localRegionId)
+        return false;
+      return true;
+    });
+  }, [outlets, localCompanyId, localRegionId]);
+
   // =========================================================================
   // PERBAIKAN SPASIAL MUTLAK: PENYEKATAN VENDOR CABANG & HOLDING
   // =========================================================================
   const filteredVendors = useMemo(() => {
-    return vendors.filter((v) => {
-      // 1. Filter Status Aktif vs Arsip
+    return vendors.filter((v: any) => {
+      // 1. Status Aktif vs Arsip (Normalisasi string 'status' & boolean 'is_active')
+      const isVendorActive =
+        v.status !== undefined
+          ? v.status === "Aktif"
+          : v.isActive !== undefined
+            ? Boolean(v.isActive)
+            : Boolean(v.is_active);
       const matchStatus =
-        viewStatus === "AKTIF" ? v.status === "Aktif" : v.status === "Arsip";
+        viewStatus === "AKTIF" ? isVendorActive : !isVendorActive;
       if (!matchStatus) return false;
 
-      // 2. Filter Perusahaan / Holding
+      // 2. Filter Perusahaan
       if (localCompanyId && v.companyId && v.companyId !== localCompanyId) {
         return false;
       }
 
       // 3. Filter Spasial:
-      // Mesin Cabang Outlet: Hanya lihat Vendor Pusat, Vendor Wilayahnya, atau Vendor Khusus Cabangnya
       if (localOutletId) {
+        // Cabang Outlet: Hanya lihat Vendor Pusat, Vendor Wilayahnya, atau Vendor Khusus Cabang Ini
         if (v.outletId && v.outletId !== localOutletId) return false;
         if (v.regionId && localRegionId && v.regionId !== localRegionId)
           return false;
-      }
-      // Mesin Gudang Regional: Hanya lihat Vendor Pusat atau Vendor Wilayahnya (Sembunyikan vendor lokal cabang lain)
-      else if (localRegionId) {
+      } else if (localRegionId) {
+        // Mesin Region: Vendor Pusat atau Vendor Wilayah Ini
         if (v.regionId && v.regionId !== localRegionId) return false;
-        if (v.outletId) return false;
+        // Dukung filter spesifik jika Region ingin memantau vendor cabang
+        if (filterOutletId === "REGION_ONLY") {
+          if (v.outletId) return false;
+        } else if (filterOutletId) {
+          if (v.outletId !== filterOutletId) return false;
+        }
       }
 
       return true;
     });
-  }, [vendors, viewStatus, localCompanyId, localRegionId, localOutletId]);
+  }, [
+    vendors,
+    viewStatus,
+    localCompanyId,
+    localRegionId,
+    localOutletId,
+    filterOutletId,
+  ]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -657,28 +687,47 @@ export function VendorPage() {
           </div>
         </div>
 
-        {/* TABS AKTIF / ARSIP */}
-        <div className="px-6 py-3 border-t border-(--border-color) flex items-center gap-4">
-          <button
-            onClick={() => setViewStatus("AKTIF")}
-            className={`text-[10px] font-bold px-3 py-1 rounded-full transition-colors cursor-pointer ${
-              viewStatus === "AKTIF"
-                ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 font-black"
-                : "text-(--text-secondary) hover:bg-(--surface-hover)"
-            }`}
-          >
-            DATA AKTIF ({filteredVendors.length})
-          </button>
-          <button
-            onClick={() => setViewStatus("ARSIP")}
-            className={`text-[10px] font-bold px-3 py-1 rounded-full transition-colors cursor-pointer ${
-              viewStatus === "ARSIP"
-                ? "bg-slate-800 text-white font-black"
-                : "text-(--text-secondary) hover:bg-(--surface-hover)"
-            }`}
-          >
-            DATA ARSIP
-          </button>
+        {/* TABS AKTIF / ARSIP & FILTER OUTLET REGION */}
+        <div className="px-6 py-3 border-t border-(--border-color) flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => setViewStatus("AKTIF")}
+              className={`text-[10px] font-bold px-3 py-1 rounded-full transition-colors cursor-pointer ${
+                viewStatus === "AKTIF"
+                  ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 font-black"
+                  : "text-(--text-secondary) hover:bg-(--surface-hover)"
+              }`}
+            >
+              DATA AKTIF ({filteredVendors.length})
+            </button>
+            <button
+              onClick={() => setViewStatus("ARSIP")}
+              className={`text-[10px] font-bold px-3 py-1 rounded-full transition-colors cursor-pointer ${
+                viewStatus === "ARSIP"
+                  ? "bg-slate-800 text-white font-black"
+                  : "text-(--text-secondary) hover:bg-(--surface-hover)"
+              }`}
+            >
+              DATA ARSIP
+            </button>
+          </div>
+
+          {/* Filter Pemantauan Outlet untuk Region */}
+          {!localOutletId && (
+            <select
+              value={filterOutletId}
+              onChange={(e) => setFilterOutletId(e.target.value)}
+              className="text-xs font-black p-2 bg-(--bg-input) text-orange-500 border border-orange-500/30 rounded-xl outline-none cursor-pointer"
+            >
+              <option value="">-- SEMUA VENDOR WILAYAH --</option>
+              <option value="REGION_ONLY">[PUSAT &amp; GUDANG REGION]</option>
+              {availableOutlets.map((o) => (
+                <option key={o.id} value={o.id}>
+                  VENDOR OUTLET: {o.name}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
       </div>
 

@@ -125,10 +125,17 @@ export function StockOpnamePage() {
   const localCompanyId = localStorage.getItem("__unv_companyId") || "";
   const localRegionId = localStorage.getItem("__unv_regionId") || "";
   const localOutletId = localStorage.getItem("__unv_outletId") || "";
-  const currentOutlet = outlets.find((o) => o.id === localOutletId);
+
+  // Jika di Region, sediakan state untuk memilih outlet mana yang dihitung stoknya
+  const [selectedOutletId, setSelectedOutletId] = useState<string>(
+    localOutletId || outlets[0]?.id || "",
+  );
+  const activeOutletId = localOutletId || selectedOutletId;
+
+  const currentOutlet = outlets.find((o) => o.id === activeOutletId);
   const outletName = currentOutlet
     ? currentOutlet.name.toUpperCase()
-    : "GUDANG OUTLET";
+    : "GUDANG REGION";
 
   // State Input Fisik & Catatan per Item
   const [physicalCounts, setPhysicalCounts] = useState<Record<string, number>>(
@@ -161,21 +168,23 @@ export function StockOpnamePage() {
       const catName =
         categories.find((c) => c.id === p.categoryId)?.name || "-";
 
-      // 1. Stok Awal (Baseline) per Outlet / Lokasi
-      const initialStockKey = `${localOutletId || localRegionId}_${p.id}`;
+      // 1. Stok Awal (Baseline) sesuai Outlet yang Aktif Dipilih
+      const initialStockKey = `${activeOutletId || localRegionId}_${p.id}`;
       const initialStock = initialStocks[initialStockKey] || 0;
 
-      // 2. Stok Masuk (Receiving) - Tersekat ketat per Cabang/Holding
+      // 2. Stok Masuk (Receiving) - Dukung is_active fallback
       const receivingItemsForProduct = receivingDocs
-        .filter((doc) => {
+        .filter((doc: any) => {
+          const isDocActive =
+            doc.isActive !== undefined ? doc.isActive : doc.is_active;
           const matchCompany =
             !localCompanyId || doc.companyId === localCompanyId;
-          const matchOutlet = localOutletId
-            ? doc.outletId === localOutletId
+          const matchOutlet = activeOutletId
+            ? doc.outletId === activeOutletId
             : !doc.outletId &&
               (!localRegionId || doc.regionId === localRegionId);
           const matchActive =
-            doc.status !== "CANCELLED" && doc.isActive !== false;
+            doc.status !== "CANCELLED" && isDocActive !== false;
           return matchCompany && matchOutlet && matchActive;
         })
         .flatMap((doc) => doc.items || [])
@@ -186,26 +195,32 @@ export function StockOpnamePage() {
         0,
       );
 
-      // 3. Stok Keluar (Distribusi Divisi) - Tersekat ketat per Cabang
+      // 3. Stok Keluar (Distribusi Divisi) - Tersekat ke Outlet Terpilih & Dukung is_active
       const stockOut = distributions
-        .filter(
-          (d) =>
+        .filter((d: any) => {
+          const isDistActive =
+            d.isActive !== undefined ? d.isActive : d.is_active;
+          return (
             d.itemId === p.id &&
-            (localOutletId ? d.outletId === localOutletId : !d.outletId) &&
+            (activeOutletId ? d.outletId === activeOutletId : !d.outletId) &&
             (!localCompanyId || d.companyId === localCompanyId) &&
-            d.isActive !== false,
-        )
+            isDistActive !== false
+          );
+        })
         .reduce((sum, d) => sum + Number(d.qty || 0), 0);
 
-      // 4. Stok Rusak / Basi / Terbuang (Spoil & Waste) - Tersekat ketat per Cabang
+      // 4. Stok Rusak (Spoil & Waste) - Tersekat ke Outlet Terpilih & Dukung is_active
       const spoilWasteQty = spoilWastes
-        .filter(
-          (sw) =>
+        .filter((sw: any) => {
+          const isSwActive =
+            sw.isActive !== undefined ? sw.isActive : sw.is_active;
+          return (
             sw.itemId === p.id &&
-            (localOutletId ? sw.outletId === localOutletId : !sw.outletId) &&
+            (activeOutletId ? sw.outletId === activeOutletId : !sw.outletId) &&
             (!localCompanyId || sw.companyId === localCompanyId) &&
-            sw.isActive !== false,
-        )
+            isSwActive !== false
+          );
+        })
         .reduce(
           (sum, sw) => sum + Number(sw.convertedBaseQty || sw.inputQty || 0),
           0,
@@ -217,7 +232,7 @@ export function StockOpnamePage() {
 
       // 6. Harga HPP Terbaru & Trend Harga
       const scopeKey =
-        localOutletId || localRegionId || localCompanyId || "DEFAULT";
+        activeOutletId || localRegionId || localCompanyId || "DEFAULT";
       const pricing =
         p.pricing?.[scopeKey] ||
         p.pricing?.[Object.keys(p.pricing || {})[0]] ||
@@ -355,7 +370,7 @@ export function StockOpnamePage() {
             payload: {
               companyId: localCompanyId,
               regionId: localRegionId,
-              outletId: localOutletId,
+              outletId: activeOutletId,
               date: opnameDate,
               totalVarianceCost,
               totalVarianceQty,
@@ -520,6 +535,26 @@ export function StockOpnamePage() {
                 className="bg-transparent text-xs font-bold text-(--text-primary) outline-none"
               />
             </div>
+          )}
+          {/* PILIH OUTLET (Hanya tampil jika user adalah Region / Holding) */}
+          {!localOutletId && (
+            <select
+              value={selectedOutletId}
+              onChange={(e) => setSelectedOutletId(e.target.value)}
+              className="text-xs font-black p-2 bg-(--bg-input) text-orange-500 border border-orange-500/30 rounded-xl outline-none cursor-pointer"
+            >
+              {outlets
+                .filter(
+                  (o) =>
+                    o.status === "Aktif" &&
+                    (!localRegionId || o.regionId === localRegionId),
+                )
+                .map((o) => (
+                  <option key={o.id} value={o.id}>
+                    PILIH OUTLET: {o.name}
+                  </option>
+                ))}
+            </select>
           )}
         </div>
 

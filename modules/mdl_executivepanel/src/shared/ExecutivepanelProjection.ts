@@ -212,8 +212,24 @@ export class ExecutivePanelProjection implements ProjectionHandler<ExecutivePane
           this.targets.set(k, v),
         );
       }
-      state.allocations?.forEach((a) => this.allocations.set(a.id, a));
-      state.ownerLedgers?.forEach((o) => this.ownerLedgers.set(o.id, o));
+      state.allocations?.forEach((a: any) => {
+        const isActive =
+          a.isActive !== undefined
+            ? Boolean(a.isActive)
+            : a.is_active !== undefined
+              ? Boolean(a.is_active)
+              : true;
+        this.allocations.set(a.id, { ...a, isActive });
+      });
+      state.ownerLedgers?.forEach((o: any) => {
+        const isActive =
+          o.isActive !== undefined
+            ? Boolean(o.isActive)
+            : o.is_active !== undefined
+              ? Boolean(o.is_active)
+              : true;
+        this.ownerLedgers.set(o.id, { ...o, isActive });
+      });
     }
   }
 }

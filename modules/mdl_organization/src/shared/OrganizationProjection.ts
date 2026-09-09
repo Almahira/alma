@@ -375,25 +375,39 @@ export class OrganizationProjection implements ProjectionHandler<OrgState> {
 
   public restoreState(state: OrgState): void {
     this.reset();
-    state.companies?.forEach((c) => this.companies.set(c.id, c));
-    state.regions?.forEach((r) => this.regions.set(r.id, r));
-    state.outlets?.forEach((o) => this.outlets.set(o.id, o));
-    state.documents?.forEach((d) =>
-      this.documents.set(d.documentId || d.id, d),
+    const normalize = (item: any) => {
+      const isAct =
+        item.isActive !== undefined
+          ? Boolean(item.isActive)
+          : item.is_active !== undefined
+            ? Boolean(item.is_active)
+            : item.status !== "Arsip";
+      return { ...item, status: isAct ? "Aktif" : "Arsip", isActive: isAct };
+    };
+
+    state.companies?.forEach((c) => this.companies.set(c.id, normalize(c)));
+    state.regions?.forEach((r) => this.regions.set(r.id, normalize(r)));
+    state.outlets?.forEach((o) => this.outlets.set(o.id, normalize(o)));
+    state.documents?.forEach((d: any) =>
+      this.documents.set(d.documentId || d.id, normalize(d)),
     );
-    state.bankAccounts?.forEach((b) =>
-      this.bankAccounts.set(b.bankAccountId || b.id, b),
+    state.bankAccounts?.forEach((b: any) =>
+      this.bankAccounts.set(b.bankAccountId || b.id, normalize(b)),
     );
-    state.divisions?.forEach((d) => this.divisions.set(d.id, d));
-    state.positions?.forEach((p) => this.positions.set(p.id, p));
-    state.documentTypes?.forEach((dt) => this.documentTypes.set(dt.id, dt));
-    state.employees?.forEach((e) => this.employees.set(e.id, e));
-    state.employmentAssignments?.forEach((ea) =>
-      this.employmentAssignments.set(ea.id || ea.assignmentId, ea),
+    state.divisions?.forEach((d) => this.divisions.set(d.id, normalize(d)));
+    state.positions?.forEach((p) => this.positions.set(p.id, normalize(p)));
+    state.documentTypes?.forEach((dt) =>
+      this.documentTypes.set(dt.id, normalize(dt)),
     );
-    state.employeeDocuments?.forEach((ed) =>
-      this.employeeDocuments.set(ed.id || ed.documentId, ed),
+    state.employees?.forEach((e) => this.employees.set(e.id, normalize(e)));
+    state.employmentAssignments?.forEach((ea: any) =>
+      this.employmentAssignments.set(ea.id || ea.assignmentId, normalize(ea)),
     );
-    state.userAccounts?.forEach((u) => this.userAccounts.set(u.id, u));
+    state.employeeDocuments?.forEach((ed: any) =>
+      this.employeeDocuments.set(ed.id || ed.documentId, normalize(ed)),
+    );
+    state.userAccounts?.forEach((u) =>
+      this.userAccounts.set(u.id, normalize(u)),
+    );
   }
 }

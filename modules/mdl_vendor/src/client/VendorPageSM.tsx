@@ -95,12 +95,18 @@ const VendorFormSM: React.FC<{
               {isEditMode ? "Edit Pemasok Vendor" : "Tambah Pemasok Baru"}
             </h3>
           </div>
-          <button onClick={onClose} className="p-1 rounded text-(--text-secondary) hover:text-rose-500">
+          <button
+            onClick={onClose}
+            className="p-1 rounded text-(--text-secondary) hover:text-rose-500"
+          >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <form onSubmit={handleSave} className="flex flex-col flex-1 overflow-hidden">
+        <form
+          onSubmit={handleSave}
+          className="flex flex-col flex-1 overflow-hidden"
+        >
           <div className="p-4 overflow-y-auto custom-scrollbar space-y-3.5 flex-1">
             {/* Scope Wilayah */}
             <div className="bg-(--surface-hover) p-3 rounded-xl border border-(--border-color) space-y-2">
@@ -162,7 +168,10 @@ const VendorFormSM: React.FC<{
                 type="text"
                 value={formData.name}
                 onChange={(e) =>
-                  setFormData({ ...formData, name: e.target.value.toUpperCase() })
+                  setFormData({
+                    ...formData,
+                    name: e.target.value.toUpperCase(),
+                  })
                 }
                 required
                 autoFocus
@@ -283,7 +292,8 @@ const DocumentUploadFormSM: React.FC<{
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!file) return sysToast.error("Error", "Pilih file dokumen terlebih dahulu!");
+    if (!file)
+      return sysToast.error("Error", "Pilih file dokumen terlebih dahulu!");
     try {
       await globalCommandBus.execute({
         type: "ATTACH_VENDOR_DOCUMENT",
@@ -436,6 +446,18 @@ export function VendorPageSM() {
   const localCompanyId = localStorage.getItem("__unv_companyId") || "";
   const localRegionId = localStorage.getItem("__unv_regionId") || "";
   const localOutletId = localStorage.getItem("__unv_outletId") || "";
+  const [filterOutletId, setFilterOutletId] = useState("");
+
+  const availableOutlets = useMemo(() => {
+    return outlets.filter((o) => {
+      if (o.status !== "Aktif") return false;
+      if (localCompanyId && o.companyId && o.companyId !== localCompanyId)
+        return false;
+      if (localRegionId && o.regionId && o.regionId !== localRegionId)
+        return false;
+      return true;
+    });
+  }, [outlets, localCompanyId, localRegionId]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -451,24 +473,43 @@ export function VendorPageSM() {
   }, []);
 
   const filteredVendors = useMemo(() => {
-    return vendors.filter((v) => {
+    return vendors.filter((v: any) => {
+      const isVendorActive =
+        v.status !== undefined
+          ? v.status === "Aktif"
+          : v.isActive !== undefined
+            ? Boolean(v.isActive)
+            : Boolean(v.is_active);
       const matchStatus =
-        viewStatus === "AKTIF" ? v.status === "Aktif" : v.status === "Arsip";
+        viewStatus === "AKTIF" ? isVendorActive : !isVendorActive;
       if (!matchStatus) return false;
+
       if (localCompanyId && v.companyId && v.companyId !== localCompanyId) {
         return false;
       }
+
       if (localOutletId) {
         if (v.outletId && v.outletId !== localOutletId) return false;
         if (v.regionId && localRegionId && v.regionId !== localRegionId)
           return false;
       } else if (localRegionId) {
         if (v.regionId && v.regionId !== localRegionId) return false;
-        if (v.outletId) return false;
+        if (filterOutletId === "REGION_ONLY") {
+          if (v.outletId) return false;
+        } else if (filterOutletId) {
+          if (v.outletId !== filterOutletId) return false;
+        }
       }
       return true;
     });
-  }, [vendors, viewStatus, localCompanyId, localRegionId, localOutletId]);
+  }, [
+    vendors,
+    viewStatus,
+    localCompanyId,
+    localRegionId,
+    localOutletId,
+    filterOutletId,
+  ]);
 
   const handleAction = async (type: string, id: string) => {
     try {
@@ -585,7 +626,8 @@ export function VendorPageSM() {
                       }}
                       className="w-full text-left px-3.5 py-2 text-xs font-bold hover:bg-(--surface-hover) flex items-center gap-2"
                     >
-                      <Download className="w-4 h-4 text-(--text-secondary)" /> Unduh Template
+                      <Download className="w-4 h-4 text-(--text-secondary)" />{" "}
+                      Unduh Template
                     </button>
                     <button
                       onClick={() => fileInputRef.current?.click()}
@@ -601,7 +643,8 @@ export function VendorPageSM() {
                       }}
                       className="w-full text-left px-3.5 py-2 text-xs font-bold hover:bg-(--surface-hover) flex items-center gap-2"
                     >
-                      <Upload className="w-4 h-4 text-(--text-secondary)" /> Export Excel
+                      <Upload className="w-4 h-4 text-(--text-secondary)" />{" "}
+                      Export Excel
                     </button>
                     <button
                       onClick={() => {
@@ -638,29 +681,22 @@ export function VendorPageSM() {
           </div>
         </div>
 
-        {/* TOGGLE AKTIF / ARSIP */}
-        <div className="flex bg-(--bg-input) rounded-lg border border-(--border-color) p-0.5">
-          <button
-            onClick={() => setViewStatus("AKTIF")}
-            className={`flex-1 py-1 text-[10px] font-black rounded text-center ${
-              viewStatus === "AKTIF"
-                ? "bg-emerald-500 text-white shadow-xs"
-                : "text-(--text-secondary)"
-            }`}
+        {/* SELECTOR OUTLET VENDOR UNTUK REGION */}
+        {!localOutletId && (
+          <select
+            value={filterOutletId}
+            onChange={(e) => setFilterOutletId(e.target.value)}
+            className="w-full text-xs font-black p-1.5 bg-(--bg-input) text-orange-500 border border-orange-500/30 rounded-lg outline-none"
           >
-            DATA AKTIF ({filteredVendors.length})
-          </button>
-          <button
-            onClick={() => setViewStatus("ARSIP")}
-            className={`flex-1 py-1 text-[10px] font-black rounded text-center ${
-              viewStatus === "ARSIP"
-                ? "bg-slate-700 text-white shadow-xs"
-                : "text-(--text-secondary)"
-            }`}
-          >
-            DATA ARSIP
-          </button>
-        </div>
+            <option value="">-- SEMUA VENDOR WILAYAH --</option>
+            <option value="REGION_ONLY">[PUSAT &amp; GUDANG REGION]</option>
+            {availableOutlets.map((o) => (
+              <option key={o.id} value={o.id}>
+                VENDOR OUTLET: {o.name}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       {/* DAFTAR VENDOR (KARTU MOBILE) */}
@@ -690,7 +726,9 @@ export function VendorPageSM() {
                       <Phone className="w-3 h-3" /> {v.contactNumber}
                     </a>
                   ) : (
-                    <span className="text-[10px] text-(--text-secondary)">-</span>
+                    <span className="text-[10px] text-(--text-secondary)">
+                      -
+                    </span>
                   )}
                 </div>
 
@@ -713,8 +751,12 @@ export function VendorPageSM() {
               {/* Rekening Pembayaran Info */}
               <div className="p-2 bg-(--surface-hover) rounded-lg border border-(--border-color) text-xs">
                 <div className="flex justify-between items-center">
-                  <span className="font-bold text-orange-500">{v.bankName || "-"}</span>
-                  <span className="font-mono text-(--text-primary) font-bold">{v.bankAccount || "-"}</span>
+                  <span className="font-bold text-orange-500">
+                    {v.bankName || "-"}
+                  </span>
+                  <span className="font-mono text-(--text-primary) font-bold">
+                    {v.bankAccount || "-"}
+                  </span>
                 </div>
                 {v.bankAccountName && (
                   <div className="text-[9px] text-(--text-secondary) mt-0.5 uppercase">

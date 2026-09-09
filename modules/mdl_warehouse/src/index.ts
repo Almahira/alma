@@ -14,6 +14,7 @@ import { WarehousePage } from "./client/WarehousePage";
 import { StockOpnamePage } from "./client/StockOpnamePage";
 import { SpoilWastePage } from "./client/SpoilWastePage";
 import { RecipePage } from "./client/RecipePage";
+import { StockOpnameRegionPage } from "./client/StockOpnameRegionPage";
 
 export const WarehousePlugin: ClientPlugin & ServerPlugin = {
   name: "mdl_warehouse",
@@ -48,6 +49,14 @@ export const WarehousePlugin: ClientPlugin & ServerPlugin = {
           icon: React.createElement(Scale, { className: "w-4 h-4" }),
         },
         {
+          id: "warehouse_opname_region",
+          label: "Stok Opname Region",
+          path: "/gudang/opname-region",
+          icon: React.createElement(Scale, {
+            className: "w-4 h-4 text-emerald-500",
+          }),
+        },
+        {
           id: "warehouse_spoil_waste",
           label: "Spoil & Waste",
           path: "/gudang/spoil-waste",
@@ -71,6 +80,11 @@ export const WarehousePlugin: ClientPlugin & ServerPlugin = {
     {
       path: "/gudang/opname",
       element: React.createElement(StockOpnamePage),
+      contextId: "mdl_warehouse",
+    },
+    {
+      path: "/gudang/opname-region",
+      element: React.createElement(StockOpnameRegionPage),
       contextId: "mdl_warehouse",
     },
     {

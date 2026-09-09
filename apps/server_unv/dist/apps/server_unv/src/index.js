@@ -247,12 +247,22 @@ app.get("/api/events/pull/tx", async (req, res) => {
             }
             // 3. JIKA PERANGKAT ADALAH GUDANG PUSAT / REGION (Tanpa Outlet)
             else if (filterRegionId) {
-                // Gudang Region hanya berhak menarik event regionnya atau transaksi internalnya
-                if (evt.regionId !== filterRegionId) {
+                // Ekstrak payload untuk membaca referensi vendor tujuan
+                const p = typeof evt.payload === "string"
+                    ? JSON.parse(evt.payload)
+                    : evt.payload;
+                const targetVendorId = p.reference?.supplierId || p.vendorId || p.data?.vendorId;
+                // Loloskan jika Region adalah PEMBUAT dokumen ATAU Region adalah TUJUAN distribusi (B2B)
+                const isCreator = evt.regionId === filterRegionId;
+                const isTarget = targetVendorId === filterRegionId;
+                if (!isCreator && !isTarget) {
                     return;
                 }
-                // Jika event milik cabang spesifik, gudang pusat regional tidak perlu menarik transaksi kasir cabang
-                if (evt.outletId) {
+                // HANYA tolak jika ini transaksi kasir lokal cabang (seperti rekap penjualan POS)
+                // Transaksi RECEIVING / PIUTANG dan DISTRIBUSI dari region ini HARUS tetap dikirim ke Region!
+                const isBranchOnlyLocal = evt.type.startsWith("TX_PLUSALES") ||
+                    evt.aggregateType === "PLUSALES_DOCUMENT";
+                if (evt.outletId && isBranchOnlyLocal) {
                     return;
                 }
             }

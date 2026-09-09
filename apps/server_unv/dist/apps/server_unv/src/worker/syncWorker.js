@@ -85,6 +85,10 @@ export async function startSyncWorker(io) {
                 const payloadCompanyId = payload.organization?.companyId || payload.companyId;
                 const payloadRegionId = payload.location?.regionId || payload.regionId;
                 const payloadOutletId = payload.location?.outletId || payload.outletId;
+                // EKSTRAK TARGET B2B (Vendor / Gudang Pusat)
+                const targetVendorId = payload.reference?.supplierId ||
+                    payload.vendorId ||
+                    payload.data?.vendorId;
                 const syncPayload = {
                     eventId,
                     type,
@@ -93,22 +97,26 @@ export async function startSyncWorker(io) {
                     companyId: payloadCompanyId,
                     regionId: payloadRegionId,
                     outletId: payloadOutletId,
+                    targetVendorId: targetVendorId, // Lampirkan untuk referensi klien
                 };
                 // 1. Jika ini event master data tingkat holding (Company), tembakkan ke seluruh company
                 if (payloadCompanyId && !payloadRegionId && !payloadOutletId) {
                     io.to(`company:${payloadCompanyId}`).emit("SYNC_NEEDED", syncPayload);
                 }
-                // 2. Jika event tingkat Regional (Gudang Pusat), tembakkan ke room region & holding
-                else if (payloadRegionId && !payloadOutletId) {
-                    io.to(`region:${payloadRegionId}`).emit("SYNC_NEEDED", syncPayload);
-                }
-                // 3. Jika event transaksi Cabang Outlet, tembakkan spesifik ke outlet & holding
-                else if (payloadOutletId) {
-                    io.to(`outlet:${payloadOutletId}`).emit("SYNC_NEEDED", syncPayload);
-                }
-                // 4. Fallback global
                 else {
-                    io.emit("SYNC_NEEDED", syncPayload);
+                    if (payloadRegionId) {
+                        io.to(`region:${payloadRegionId}`).emit("SYNC_NEEDED", syncPayload);
+                    }
+                    // --> TAMBAHAN: BROADCAST KE GUDANG TARGET JIKA TRANSAKSI B2B
+                    if (targetVendorId && targetVendorId !== payloadRegionId) {
+                        io.to(`region:${targetVendorId}`).emit("SYNC_NEEDED", syncPayload);
+                    }
+                    if (payloadOutletId) {
+                        io.to(`outlet:${payloadOutletId}`).emit("SYNC_NEEDED", syncPayload);
+                    }
+                    if (payloadCompanyId) {
+                        io.to(`company:${payloadCompanyId}`).emit("SYNC_NEEDED", syncPayload);
+                    }
                 }
                 // Tetap broadcast dashboard refresh secara global
                 io.emit("EXECUTIVE_DASHBOARD_REFRESH", {

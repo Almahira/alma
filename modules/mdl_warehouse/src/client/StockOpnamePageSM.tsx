@@ -122,10 +122,17 @@ export function StockOpnamePageSM() {
   const localCompanyId = localStorage.getItem("__unv_companyId") || "";
   const localRegionId = localStorage.getItem("__unv_regionId") || "";
   const localOutletId = localStorage.getItem("__unv_outletId") || "";
-  const currentOutlet = outlets.find((o) => o.id === localOutletId);
+
+  // State untuk pilihan outlet jika user adalah Region/Holding
+  const [selectedOutletId, setSelectedOutletId] = useState<string>(
+    localOutletId || outlets[0]?.id || "",
+  );
+  const activeOutletId = localOutletId || selectedOutletId;
+
+  const currentOutlet = outlets.find((o) => o.id === activeOutletId);
   const outletName = currentOutlet
     ? currentOutlet.name.toUpperCase()
-    : "GUDANG OUTLET";
+    : "GUDANG REGION";
 
   // State Input Fisik & Catatan
   const [physicalCounts, setPhysicalCounts] = useState<Record<string, number>>(
@@ -133,16 +140,16 @@ export function StockOpnamePageSM() {
   );
   const [itemNotes, setItemNotes] = useState<Record<string, string>>({});
 
-  // Cek apakah hari ini sudah pernah dilakukan closing opname
+  // Cek apakah hari ini sudah pernah dilakukan closing opname di unit ini
   const isAlreadyAdjustedToday = useMemo(() => {
     return opnames.some(
       (o) =>
-        (!localOutletId || o.outletId === localOutletId) &&
+        (!activeOutletId || o.outletId === activeOutletId) &&
         (!localCompanyId || o.companyId === localCompanyId) &&
         o.date.startsWith(opnameDate) &&
         o.isActive !== false,
     );
-  }, [opnames, localOutletId, localCompanyId, opnameDate]);
+  }, [opnames, activeOutletId, localCompanyId, opnameDate]);
 
   // =========================================================================
   // KALKULASI OTOMATIS MATRIKS INVENTORI PER ITEM (TERISOLASI CABANG)
@@ -156,19 +163,23 @@ export function StockOpnamePageSM() {
       const catName =
         categories.find((c) => c.id === p.categoryId)?.name || "-";
 
-      const initialStockKey = `${localOutletId || localRegionId}_${p.id}`;
+      // 1. Stok Awal (Baseline) sesuai Outlet yang Aktif Dipilih
+      const initialStockKey = `${activeOutletId || localRegionId}_${p.id}`;
       const initialStock = initialStocks[initialStockKey] || 0;
 
+      // 2. Stok Masuk (Receiving) - Dukung is_active fallback
       const receivingItemsForProduct = receivingDocs
-        .filter((doc) => {
+        .filter((doc: any) => {
+          const isDocActive =
+            doc.isActive !== undefined ? doc.isActive : doc.is_active;
           const matchCompany =
             !localCompanyId || doc.companyId === localCompanyId;
-          const matchOutlet = localOutletId
-            ? doc.outletId === localOutletId
+          const matchOutlet = activeOutletId
+            ? doc.outletId === activeOutletId
             : !doc.outletId &&
               (!localRegionId || doc.regionId === localRegionId);
           const matchActive =
-            doc.status !== "CANCELLED" && doc.isActive !== false;
+            doc.status !== "CANCELLED" && isDocActive !== false;
           return matchCompany && matchOutlet && matchActive;
         })
         .flatMap((doc) => doc.items || [])
@@ -179,39 +190,50 @@ export function StockOpnamePageSM() {
         0,
       );
 
+      // 3. Stok Keluar (Distribusi Divisi) - Tersekat ke Outlet Terpilih
       const stockOut = distributions
-        .filter(
-          (d) =>
+        .filter((d: any) => {
+          const isDistActive =
+            d.isActive !== undefined ? d.isActive : d.is_active;
+          return (
             d.itemId === p.id &&
-            (localOutletId ? d.outletId === localOutletId : !d.outletId) &&
+            (activeOutletId ? d.outletId === activeOutletId : !d.outletId) &&
             (!localCompanyId || d.companyId === localCompanyId) &&
-            d.isActive !== false,
-        )
+            isDistActive !== false
+          );
+        })
         .reduce((sum, d) => sum + Number(d.qty || 0), 0);
 
+      // 4. Stok Rusak (Spoil & Waste) - Tersekat ke Outlet Terpilih
       const spoilWasteQty = spoilWastes
-        .filter(
-          (sw) =>
+        .filter((sw: any) => {
+          const isSwActive =
+            sw.isActive !== undefined ? sw.isActive : sw.is_active;
+          return (
             sw.itemId === p.id &&
-            (localOutletId ? sw.outletId === localOutletId : !sw.outletId) &&
+            (activeOutletId ? sw.outletId === activeOutletId : !sw.outletId) &&
             (!localCompanyId || sw.companyId === localCompanyId) &&
-            sw.isActive !== false,
-        )
+            isSwActive !== false
+          );
+        })
         .reduce(
           (sum, sw) => sum + Number(sw.convertedBaseQty || sw.inputQty || 0),
           0,
         );
 
+      // 5. Sisa Stok Sistem Riil
       const rawSystemStock = initialStock + stockIn - stockOut - spoilWasteQty;
       const systemStock = parseFloat(rawSystemStock.toFixed(4));
 
+      // 6. Harga HPP Terbaru & Trend Harga
       const scopeKey =
-        localOutletId || localRegionId || localCompanyId || "DEFAULT";
+        activeOutletId || localRegionId || localCompanyId || "DEFAULT";
       const pricing =
         p.pricing?.[scopeKey] ||
         p.pricing?.[Object.keys(p.pricing || {})[0]] ||
         {};
       const currentPrice = Math.round(Number(pricing.basePrice || 0));
+
       let previousPrice = currentPrice;
       if (receivingItemsForProduct.length > 1) {
         previousPrice = Math.round(
@@ -222,6 +244,7 @@ export function StockOpnamePageSM() {
         );
       }
 
+      // 7. Hitungan Fisik & Selisih
       const physicalStock =
         physicalCounts[p.id] !== undefined ? physicalCounts[p.id] : systemStock;
       const varianceQty = parseFloat((physicalStock - systemStock).toFixed(4));
@@ -256,7 +279,7 @@ export function StockOpnamePageSM() {
     receivingDocs,
     distributions,
     spoilWastes,
-    localOutletId,
+    activeOutletId,
     localRegionId,
     localCompanyId,
     physicalCounts,
@@ -303,7 +326,11 @@ export function StockOpnamePageSM() {
     setPhysicalCounts((prev) => ({ ...prev, [itemId]: num }));
   };
 
-  const handleStepCount = (itemId: string, currentVal: number, delta: number) => {
+  const handleStepCount = (
+    itemId: string,
+    currentVal: number,
+    delta: number,
+  ) => {
     const nextVal = Math.max(0, parseFloat((currentVal + delta).toFixed(2)));
     setPhysicalCounts((prev) => ({ ...prev, [itemId]: nextVal }));
   };
@@ -340,7 +367,7 @@ export function StockOpnamePageSM() {
             payload: {
               companyId: localCompanyId,
               regionId: localRegionId,
-              outletId: localOutletId,
+              outletId: activeOutletId,
               date: opnameDate,
               totalVarianceCost,
               totalVarianceQty,
@@ -398,6 +425,53 @@ export function StockOpnamePageSM() {
               <FileSpreadsheet className="w-4 h-4" />
             </button>
           </div>
+        </div>
+
+        {/* Dropdown Pilih Outlet untuk Region/Holding */}
+        {!localOutletId && (
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] font-black uppercase text-(--text-secondary) shrink-0">
+              Outlet:
+            </span>
+            <select
+              value={selectedOutletId}
+              onChange={(e) => setSelectedOutletId(e.target.value)}
+              className="w-full text-xs font-bold p-2 bg-(--bg-input) text-orange-500 border border-orange-500/30 rounded-lg outline-none cursor-pointer"
+            >
+              {outlets
+                .filter(
+                  (o) =>
+                    o.status === "Aktif" &&
+                    (!localRegionId || o.regionId === localRegionId),
+                )
+                .map((o) => (
+                  <option key={o.id} value={o.id}>
+                    OUTLET: {o.name}
+                  </option>
+                ))}
+            </select>
+          </div>
+        )}
+
+        {/* Status Hari Ini & Total Item */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5">
+            {isAlreadyAdjustedToday && (
+              <Lock className="w-3.5 h-3.5 text-emerald-500" />
+            )}
+            <span
+              className={`text-[9px] font-black uppercase ${
+                isAlreadyAdjustedToday ? "text-emerald-500" : "text-amber-500"
+              }`}
+            >
+              {isAlreadyAdjustedToday
+                ? "Ter-Adjusted (Locked)"
+                : "Belum Closing"}
+            </span>
+          </div>
+          <span className="text-[9px] font-black text-(--text-secondary)">
+            {filteredMatrix.length} Produk
+          </span>
         </div>
 
         {/* STATISTIK RINGKAS (KARTU STATS MOBILE) */}
@@ -499,6 +573,8 @@ export function StockOpnamePageSM() {
             {filteredMatrix.map((item) => {
               const currentPhysical = item.physicalStock;
               const hasDiff = item.varianceQty !== 0;
+              const isPriceUp = item.currentPrice > item.previousPrice;
+              const isPriceDown = item.currentPrice < item.previousPrice;
 
               return (
                 <div
@@ -513,15 +589,44 @@ export function StockOpnamePageSM() {
                       </div>
                       <div className="text-[9px] text-(--text-secondary) mt-0.5">
                         {item.categoryName} •{" "}
-                        <span className="text-orange-500 font-bold">{item.uomName}</span>
+                        <span className="text-orange-500 font-bold">
+                          {item.uomName}
+                        </span>
                       </div>
                     </div>
 
                     <div className="text-right">
-                      <span className="text-[9px] text-(--text-secondary) block">Sistem:</span>
+                      <span className="text-[9px] text-(--text-secondary) block">
+                        Sistem:
+                      </span>
                       <span className="font-mono font-black text-xs text-(--text-primary) bg-(--bg-input) px-2 py-0.5 rounded">
                         {item.systemStock} {item.uomName}
                       </span>
+                    </div>
+                  </div>
+
+                  {/* Info HPP & Trend */}
+                  <div className="flex items-center justify-between text-[10px] bg-(--surface-hover) rounded-lg px-2 py-1">
+                    <span className="text-(--text-secondary) font-bold">
+                      HPP:{" "}
+                      <span className="font-mono font-black text-(--text-primary)">
+                        Rp {item.currentPrice.toLocaleString()}
+                      </span>
+                    </span>
+                    <div className="flex items-center gap-1">
+                      {isPriceUp ? (
+                        <span className="text-[8px] font-black text-emerald-500 bg-emerald-500/10 px-1 py-0.5 rounded inline-flex items-center gap-0.5">
+                          <TrendingUp className="w-2.5 h-2.5" /> NAIK
+                        </span>
+                      ) : isPriceDown ? (
+                        <span className="text-[8px] font-black text-rose-500 bg-rose-500/10 px-1 py-0.5 rounded inline-flex items-center gap-0.5">
+                          <TrendingDown className="w-2.5 h-2.5" /> TURUN
+                        </span>
+                      ) : (
+                        <span className="text-[8px] font-bold text-slate-400 inline-flex items-center gap-0.5">
+                          <Minus className="w-2.5 h-2.5" /> STABIL
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -529,19 +634,46 @@ export function StockOpnamePageSM() {
                   <div className="grid grid-cols-4 gap-1 p-1.5 bg-(--surface-hover) rounded-lg text-[9px] text-center font-mono">
                     <div>
                       <span className="text-slate-400 block">Awal</span>
-                      <span className="font-bold">{item.initialStock}</span>
+                      {item.initialStock > 0 ? (
+                        <span className="font-bold">{item.initialStock}</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            openCenterModal({
+                              title: "SET STOK AWAL",
+                              content: (
+                                <InitialStockModalSM
+                                  item={item}
+                                  currentInitial={item.initialStock}
+                                  onClose={closeCenterModal}
+                                />
+                              ),
+                            })
+                          }
+                          className="text-[8px] font-black bg-slate-800 text-white px-1.5 py-0.5 rounded hover:bg-slate-700"
+                        >
+                          + SET
+                        </button>
+                      )}
                     </div>
                     <div>
                       <span className="text-emerald-500 block">+Masuk</span>
-                      <span className="font-bold text-emerald-500">{item.stockIn}</span>
+                      <span className="font-bold text-emerald-500">
+                        {item.stockIn}
+                      </span>
                     </div>
                     <div>
                       <span className="text-rose-500 block">-Keluar</span>
-                      <span className="font-bold text-rose-500">{item.stockOut}</span>
+                      <span className="font-bold text-rose-500">
+                        {item.stockOut}
+                      </span>
                     </div>
                     <div>
                       <span className="text-amber-500 block">-Spoil</span>
-                      <span className="font-bold text-amber-500">{item.spoilWasteQty}</span>
+                      <span className="font-bold text-amber-500">
+                        {item.spoilWasteQty}
+                      </span>
                     </div>
                   </div>
 
@@ -549,7 +681,9 @@ export function StockOpnamePageSM() {
                   <div className="flex items-center gap-2 pt-1">
                     <button
                       type="button"
-                      onClick={() => handleStepCount(item.id, currentPhysical, -1)}
+                      onClick={() =>
+                        handleStepCount(item.id, currentPhysical, -1)
+                      }
                       className="w-8 h-8 rounded-lg bg-(--bg-input) border border-(--border-color) text-rose-500 font-black flex items-center justify-center active:scale-95"
                     >
                       -1
@@ -569,7 +703,9 @@ export function StockOpnamePageSM() {
 
                     <button
                       type="button"
-                      onClick={() => handleStepCount(item.id, currentPhysical, 1)}
+                      onClick={() =>
+                        handleStepCount(item.id, currentPhysical, 1)
+                      }
                       className="w-8 h-8 rounded-lg bg-(--bg-input) border border-(--border-color) text-emerald-500 font-black flex items-center justify-center active:scale-95"
                     >
                       +1
@@ -578,7 +714,10 @@ export function StockOpnamePageSM() {
                     <button
                       type="button"
                       onClick={() =>
-                        handlePhysicalCountChange(item.id, String(item.systemStock))
+                        handlePhysicalCountChange(
+                          item.id,
+                          String(item.systemStock),
+                        )
                       }
                       className="px-2 py-1.5 bg-(--surface-hover) border border-(--border-color) text-[9px] font-bold text-(--text-secondary) rounded-lg active:scale-95 shrink-0"
                       title="Sesuai Sistem"
@@ -613,7 +752,9 @@ export function StockOpnamePageSM() {
                       <input
                         type="text"
                         value={item.note}
-                        onChange={(e) => handleNoteChange(item.id, e.target.value)}
+                        onChange={(e) =>
+                          handleNoteChange(item.id, e.target.value)
+                        }
                         placeholder="Catatan..."
                         className="w-full text-[10px] p-1 bg-transparent border-b border-(--border-color) focus:border-orange-500 outline-none text-(--text-primary) placeholder:text-[9px]"
                       />
@@ -663,13 +804,17 @@ export function StockOpnamePageSM() {
 
                 <div className="grid grid-cols-2 gap-2 pt-1 border-t border-(--border-color) text-xs">
                   <div>
-                    <span className="text-[9px] text-(--text-secondary) block">Item Dihitung:</span>
+                    <span className="text-[9px] text-(--text-secondary) block">
+                      Item Dihitung:
+                    </span>
                     <span className="font-mono font-bold text-(--text-primary) text-xs">
                       {doc.totalItemsCounted} Produk
                     </span>
                   </div>
                   <div className="text-right">
-                    <span className="text-[9px] text-(--text-secondary) block">Nilai Selisih:</span>
+                    <span className="text-[9px] text-(--text-secondary) block">
+                      Nilai Selisih:
+                    </span>
                     <span className="font-mono font-black text-rose-500 text-xs">
                       Rp {(doc.totalVarianceCost || 0).toLocaleString()}
                     </span>
@@ -694,7 +839,8 @@ export function StockOpnamePageSM() {
             onClick={handleCompleteOpname}
             className="w-full py-3 bg-linear-to-r from-orange-500 to-orange-600 hover:from-orange-600 text-white rounded-xl text-xs font-black uppercase tracking-wider transition shadow-lg shadow-orange-500/25 flex items-center justify-center gap-1.5"
           >
-            <CheckCircle2 className="w-4 h-4 text-emerald-300" /> Simpan &amp; Adjust Stok
+            <CheckCircle2 className="w-4 h-4 text-emerald-300" /> Simpan &amp;
+            Adjust Stok
           </button>
         </div>
       )}

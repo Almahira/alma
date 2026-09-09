@@ -30,12 +30,16 @@ export class VendorProjection implements ProjectionHandler<VendorState> {
         }
         break;
       case "VENDOR_ARCHIVED":
-        if (this.vendors.has(aggregateId))
+        if (this.vendors.has(aggregateId)) {
           this.vendors.get(aggregateId).status = "Arsip";
+          this.vendors.get(aggregateId).isActive = false;
+        }
         break;
       case "VENDOR_RESTORED":
-        if (this.vendors.has(aggregateId))
+        if (this.vendors.has(aggregateId)) {
           this.vendors.get(aggregateId).status = "Aktif";
+          this.vendors.get(aggregateId).isActive = true;
+        }
         break;
       case "VENDOR_DOCUMENT_ATTACHED":
         this.documents.set(payload.documentId, {
@@ -68,8 +72,32 @@ export class VendorProjection implements ProjectionHandler<VendorState> {
     this.vendors.clear();
     this.documents.clear();
     if (state) {
-      state.vendors?.forEach((v) => this.vendors.set(v.id, v));
-      state.documents?.forEach((d) => this.documents.set(d.documentId, d));
+      state.vendors?.forEach((v: any) => {
+        const isAct =
+          v.isActive !== undefined
+            ? Boolean(v.isActive)
+            : v.is_active !== undefined
+              ? Boolean(v.is_active)
+              : v.status !== "Arsip";
+        this.vendors.set(v.id, {
+          ...v,
+          status: isAct ? "Aktif" : "Arsip",
+          isActive: isAct,
+        });
+      });
+      state.documents?.forEach((d: any) => {
+        const isAct =
+          d.isActive !== undefined
+            ? Boolean(d.isActive)
+            : d.is_active !== undefined
+              ? Boolean(d.is_active)
+              : d.status !== "Arsip";
+        this.documents.set(d.documentId, {
+          ...d,
+          status: isAct ? "Aktif" : "Arsip",
+          isActive: isAct,
+        });
+      });
     }
   }
 }

@@ -20,26 +20,58 @@ export function OwnerLedgerPage() {
   const { outlets } = useOrgStore();
   const { documents: plusalesDocs } = usePlusalesStore();
 
+  const localCompanyId = localStorage.getItem("__unv_companyId") || "";
+  const localRegionId = localStorage.getItem("__unv_regionId") || "";
+
+  const availableOutlets = useMemo(() => {
+    return outlets.filter((o) => {
+      if (o.status !== "Aktif") return false;
+      if (localCompanyId && o.companyId && o.companyId !== localCompanyId)
+        return false;
+      if (localRegionId && o.regionId && o.regionId !== localRegionId)
+        return false;
+      return true;
+    });
+  }, [outlets, localCompanyId, localRegionId]);
+
   const currentMonthStr = new Date().toISOString().slice(0, 7);
   const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthStr);
   const [selectedOutletId, setSelectedOutletId] = useState<string>(
-    outlets[0]?.id || "",
+    availableOutlets[0]?.id || "",
   );
 
   // =========================================================================
-  // HITUNG TOTAL NET SALES BULAN TERPILIH (BASIS REAL-TIME PERSENTASE)
+  // HITUNG TOTAL NET SALES BULAN TERPILIH (AMAN DARI LEAK MULTI-COMPANY & ARSIP)
   // =========================================================================
   const totalNetSalesMonth = useMemo(() => {
     return plusalesDocs
-      .filter((d) => {
-        const matchMonth = d.date && d.date.startsWith(selectedMonth);
+      .filter((d: any) => {
+        // 1. Penyekatan Company & Region
+        if (localCompanyId && d.companyId && d.companyId !== localCompanyId)
+          return false;
+        if (localRegionId && d.regionId && d.regionId !== localRegionId)
+          return false;
+
+        // 2. Filter Outlet
         const matchOutlet =
           !selectedOutletId || d.outletId === selectedOutletId;
-        const matchActive = d.isActive !== false;
+
+        // 3. Status Aktif vs Arsip
+        const isItemActive =
+          d.isActive !== undefined ? d.isActive : d.is_active;
+        const matchActive = isItemActive !== false;
+        const matchMonth = d.date && d.date.startsWith(selectedMonth);
+
         return matchMonth && matchOutlet && matchActive;
       })
       .reduce((sum, d) => sum + (d.netSales || 0), 0);
-  }, [plusalesDocs, selectedMonth, selectedOutletId]);
+  }, [
+    plusalesDocs,
+    selectedMonth,
+    selectedOutletId,
+    localCompanyId,
+    localRegionId,
+  ]);
 
   // =========================================================================
   // 1. PANEL KIRI: FORM ALOKASI CADANGAN OPSIONAL
@@ -203,12 +235,18 @@ export function OwnerLedgerPage() {
   // DAFTAR ALOKASI (REAL-TIME REAKTIF TERHADAP NET SALES)
   // =========================================================================
   const filteredAllocations = useMemo(() => {
-    return allocations.filter(
-      (a) =>
-        a.month === selectedMonth &&
-        (!selectedOutletId || !a.outletId || a.outletId === selectedOutletId),
-    );
-  }, [allocations, selectedMonth, selectedOutletId]);
+    return allocations.filter((a: any) => {
+      if (localCompanyId && a.companyId && a.companyId !== localCompanyId)
+        return false;
+      const isAct = a.isActive !== undefined ? a.isActive : a.is_active;
+      if (isAct === false) return false;
+
+      const matchMonth = a.month === selectedMonth;
+      const matchOutlet =
+        !selectedOutletId || !a.outletId || a.outletId === selectedOutletId;
+      return matchMonth && matchOutlet;
+    });
+  }, [allocations, selectedMonth, selectedOutletId, localCompanyId]);
 
   const totalAllocNominal = useMemo(() => {
     return filteredAllocations.reduce((sum, a) => {
@@ -228,14 +266,27 @@ export function OwnerLedgerPage() {
   // DAFTAR PENARIKAN (REAL-TIME REAKTIF TERHADAP NET SALES)
   // =========================================================================
   const filteredWithdrawals = useMemo(() => {
-    return ownerLedgers.filter((o) => {
+    return ownerLedgers.filter((o: any) => {
+      if (localCompanyId && o.companyId && o.companyId !== localCompanyId)
+        return false;
+      if (localRegionId && o.regionId && o.regionId !== localRegionId)
+        return false;
+
+      const isAct = o.isActive !== undefined ? o.isActive : o.is_active;
+      if (isAct === false) return false;
+
       const matchMonth = o.date && o.date.startsWith(selectedMonth);
-      const matchActive = o.isActive !== false;
       const matchOutlet =
         !selectedOutletId || !o.outletId || o.outletId === selectedOutletId;
-      return matchMonth && matchActive && matchOutlet;
+      return matchMonth && matchOutlet;
     });
-  }, [ownerLedgers, selectedMonth, selectedOutletId]);
+  }, [
+    ownerLedgers,
+    selectedMonth,
+    selectedOutletId,
+    localCompanyId,
+    localRegionId,
+  ]);
 
   const totalWithdrawalPeriod = useMemo(() => {
     return filteredWithdrawals.reduce((sum, o) => {
@@ -268,9 +319,9 @@ export function OwnerLedgerPage() {
               className="bg-transparent text-xs font-bold text-(--text-primary) outline-none cursor-pointer"
             >
               <option value="" className="bg-slate-900 text-white">
-                -- SEMUA OUTLET (HOLDING) --
+                -- SEMUA OUTLET WILAYAH --
               </option>
-              {outlets.map((o) => (
+              {availableOutlets.map((o) => (
                 <option
                   key={o.id}
                   value={o.id}

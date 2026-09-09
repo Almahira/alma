@@ -340,13 +340,10 @@ app.get("/api/events/pull/tx", async (req, res) => {
           return;
         }
 
-        // HANYA tolak jika ini transaksi kasir lokal cabang (seperti rekap penjualan POS)
-        // Transaksi RECEIVING / PIUTANG dan DISTRIBUSI dari region ini HARUS tetap dikirim ke Region!
-        const isBranchOnlyLocal =
-          evt.type.startsWith("TX_PLUSALES") ||
-          evt.aggregateType === "PLUSALES_DOCUMENT";
-
-        if (evt.outletId && isBranchOnlyLocal) {
+        // Transaksi cabang di bawah region ini (termasuk PLUSALES untuk audit omset)
+        // diizinkan ditarik oleh Region selama berada dalam regionId yang sama.
+        // Penolakan hanya berlaku jika event tersebut tidak terkait dengan region ini.
+        if (evt.regionId && evt.regionId !== filterRegionId) {
           return;
         }
       }

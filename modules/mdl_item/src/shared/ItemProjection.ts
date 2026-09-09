@@ -103,11 +103,13 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
       case "PRODUCT_ARCHIVED":
         if (this.products.has(aggregateId)) {
           this.products.get(aggregateId).status = "Arsip";
+          this.products.get(aggregateId).isActive = false;
         }
         break;
       case "PRODUCT_RESTORED":
         if (this.products.has(aggregateId)) {
           this.products.get(aggregateId).status = "Aktif";
+          this.products.get(aggregateId).isActive = true;
         }
         break;
 
@@ -209,11 +211,43 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
     this.uoms.clear();
     this.products.clear();
     if (state) {
-      state.categories?.forEach((c) => this.categories.set(c.id, c));
-      state.uoms?.forEach((u) => this.uoms.set(u.id, u));
-      state.products?.forEach((p) => {
+      state.categories?.forEach((c: any) => {
+        const isAct =
+          c.isActive !== undefined
+            ? Boolean(c.isActive)
+            : c.is_active !== undefined
+              ? Boolean(c.is_active)
+              : c.status !== "Arsip";
+        this.categories.set(c.id, {
+          ...c,
+          status: isAct ? "Aktif" : "Arsip",
+          isActive: isAct,
+        });
+      });
+      state.uoms?.forEach((u: any) => {
+        const isAct =
+          u.isActive !== undefined
+            ? Boolean(u.isActive)
+            : u.is_active !== undefined
+              ? Boolean(u.is_active)
+              : u.status !== "Arsip";
+        this.uoms.set(u.id, {
+          ...u,
+          status: isAct ? "Aktif" : "Arsip",
+          isActive: isAct,
+        });
+      });
+      state.products?.forEach((p: any) => {
+        const isAct =
+          p.isActive !== undefined
+            ? Boolean(p.isActive)
+            : p.is_active !== undefined
+              ? Boolean(p.is_active)
+              : p.status !== "Arsip";
         this.products.set(p.id, {
           ...p,
+          status: isAct ? "Aktif" : "Arsip",
+          isActive: isAct,
           isExpense: Boolean(p.isExpense ?? p.is_expense),
           uomConversions: Array.isArray(p.uomConversions)
             ? p.uomConversions

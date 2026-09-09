@@ -81,10 +81,21 @@ export const receivingCommandHandlers: CommandHandler[] = [
 
       const companyId =
         cmd.payload.companyId || localStorage.getItem("__unv_companyId") || "";
-      const regionId =
-        cmd.payload.regionId || localStorage.getItem("__unv_regionId") || null;
       const outletId =
         cmd.payload.outletId || localStorage.getItem("__unv_outletId") || null;
+      let regionId =
+        cmd.payload.regionId || localStorage.getItem("__unv_regionId") || null;
+
+      // Auto-resolve regionId jika belum terisi di perangkat kasir
+      if (!regionId && outletId) {
+        const foundOutlet = useOrgStore
+          .getState()
+          .outlets.find((o) => o.id === outletId);
+        if (foundOutlet?.regionId) {
+          regionId = foundOutlet.regionId;
+        }
+      }
+
       const isTempo = Boolean(cmd.payload.isTempo);
 
       // BUNGKUS KE DALAM ALMA CANONICAL ENVELOPE DENGAN TANGGAL NOTA ASLI & RUPIAH BULAT

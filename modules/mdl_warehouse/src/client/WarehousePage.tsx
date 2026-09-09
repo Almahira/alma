@@ -47,6 +47,20 @@ export function WarehousePage() {
   const [dateEnd, setDateEnd] = useState("");
   const [filterDivisionId, setFilterDivisionId] = useState("");
 
+  const [filterOutletId, setFilterOutletId] = useState("");
+
+  // Daftar outlet di bawah wilayah ini (khusus view Region/Holding)
+  const availableOutlets = useMemo(() => {
+    return outlets.filter((o) => {
+      if (o.status !== "Aktif") return false;
+      if (localCompanyId && o.companyId && o.companyId !== localCompanyId)
+        return false;
+      if (localRegionId && o.regionId && o.regionId !== localRegionId)
+        return false;
+      return true;
+    });
+  }, [outlets, localCompanyId, localRegionId]);
+
   // =========================================================================
   // STICKY MEMORY FORM STATE (TIDAK PERNAH RESET TANGGAL & DIVISI)
   // =========================================================================
@@ -169,30 +183,45 @@ export function WarehousePage() {
     }
   };
 
-  // Filter Ledger Distribusi
+  // Filter Ledger Distribusi (Aman dari kebocoran antar-cabang & antar-wilayah)
   const filteredDistributions = useMemo(() => {
-    return distributions.filter((d) => {
-      // ---> PENYEKATAN CABANG <---
-      if (localOutletId && d.outletId && d.outletId !== localOutletId)
-        return false;
+    return distributions.filter((d: any) => {
+      // 1. Penyekatan Company & Region
       if (localCompanyId && d.companyId && d.companyId !== localCompanyId)
         return false;
+      if (localRegionId && d.regionId && d.regionId !== localRegionId)
+        return false;
 
+      // 2. Penyekatan Outlet (Jika di Outlet, hanya lihat outlet sendiri. Jika di Region, dukung filter outlet)
+      if (localOutletId) {
+        if (d.outletId && d.outletId !== localOutletId) return false;
+      } else if (filterOutletId) {
+        if (d.outletId !== filterOutletId) return false;
+      }
+
+      // 3. Status Aktif vs Arsip (Mendukung camelCase 'isActive' dan snake_case 'is_active')
+      const isItemActive = d.isActive !== undefined ? d.isActive : d.is_active;
       const matchStatus =
-        viewStatus === "AKTIF" ? d.isActive !== false : d.isActive === false;
+        viewStatus === "AKTIF"
+          ? isItemActive !== false
+          : isItemActive === false;
+
       const matchDivision =
         !filterDivisionId || d.divisionId === filterDivisionId;
       const matchStart = !dateStart || new Date(d.date) >= new Date(dateStart);
       const matchEnd = !dateEnd || new Date(d.date) <= new Date(dateEnd);
+
       return matchStatus && matchDivision && matchStart && matchEnd;
     });
   }, [
     distributions,
     viewStatus,
     filterDivisionId,
+    filterOutletId,
     dateStart,
     dateEnd,
     localOutletId,
+    localRegionId,
     localCompanyId,
   ]);
 
@@ -242,100 +271,110 @@ export function WarehousePage() {
           </span>
         </div>
 
-        {/* FORM QUICK-ADD BERBARIS CEPAT */}
-        <form
-          onSubmit={handleQuickSubmit}
-          className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end"
-        >
-          {/* TANGGAL (STICKY) */}
-          <div className="sm:col-span-2">
-            <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-1">
-              Tanggal (Sticky)
-            </label>
-            <input
-              type="date"
-              required
-              value={stickyDate}
-              onChange={(e) => setStickyDate(e.target.value)}
-              className="w-full text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none"
-            />
-          </div>
-
-          {/* DIVISI PENERIMA (STICKY) */}
-          <div className="sm:col-span-2">
-            <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-1">
-              Divisi (Sticky)
-            </label>
-            <select
-              value={stickyDivisionId}
-              onChange={(e) => setStickyDivisionId(e.target.value)}
-              required
-              className="w-full text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none focus:border-orange-500"
-            >
-              {divisionOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* DROPDOWN BARANG */}
-          <div className="sm:col-span-4">
-            <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-1">
-              Pilih Barang (Stok Fisik)
-            </label>
-            <UniversalCombobox
-              ref={itemInputRef}
-              options={productOptions}
-              value={selectedItemId}
-              onChange={(v) => setSelectedItemId(v)}
-              placeholder="Ketik lalu pilih barang..."
-            />
-          </div>
-
-          {/* QTY & UOM OTOMATIS */}
-          <div className="sm:col-span-2 flex gap-1">
-            <div className="w-16">
+        {/* FORM QUICK-ADD: HANYA TAMPIL DI LEVEL OUTLET */}
+        {localOutletId ? (
+          <form
+            onSubmit={handleQuickSubmit}
+            className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end"
+          >
+            {/* TANGGAL (STICKY) */}
+            <div className="sm:col-span-2">
               <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-1">
-                Qty
+                Tanggal (Sticky)
               </label>
               <input
-                type="number"
+                type="date"
                 required
-                min={1}
-                value={inputQty}
-                onChange={(e) =>
-                  setInputQty(
-                    e.target.value === "" ? "" : Number(e.target.value),
-                  )
-                }
-                className="w-full text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none text-center font-mono"
+                value={stickyDate}
+                onChange={(e) => setStickyDate(e.target.value)}
+                className="w-full text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none"
               />
             </div>
-            <div className="flex-1">
-              <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-1">
-                UOM
-              </label>
-              <input
-                type="text"
-                disabled
-                value={autoUomName}
-                className="w-full text-xs font-bold p-2 bg-(--surface-hover) text-(--text-secondary) border border-(--border-color) rounded-lg outline-none text-center font-mono"
-              />
-            </div>
-          </div>
 
-          {/* TOMBOL SIMPAN CEPAT */}
-          <div className="sm:col-span-2">
-            <button
-              type="submit"
-              className="w-full py-2 bg-orange-500 hover:bg-orange-600 text-white font-black text-xs rounded-lg transition shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <Plus className="w-4 h-4" /> CATAT MUTASI
-            </button>
+            {/* DIVISI PENERIMA (STICKY) */}
+            <div className="sm:col-span-2">
+              <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-1">
+                Divisi (Sticky)
+              </label>
+              <select
+                value={stickyDivisionId}
+                onChange={(e) => setStickyDivisionId(e.target.value)}
+                required
+                className="w-full text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none focus:border-orange-500"
+              >
+                {divisionOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* DROPDOWN BARANG */}
+            <div className="sm:col-span-4">
+              <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-1">
+                Pilih Barang (Stok Fisik)
+              </label>
+              <UniversalCombobox
+                ref={itemInputRef}
+                options={productOptions}
+                value={selectedItemId}
+                onChange={(v) => setSelectedItemId(v)}
+                placeholder="Ketik lalu pilih barang..."
+              />
+            </div>
+
+            {/* QTY & UOM OTOMATIS */}
+            <div className="sm:col-span-2 flex gap-1">
+              <div className="w-16">
+                <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-1">
+                  Qty
+                </label>
+                <input
+                  type="number"
+                  required
+                  min={1}
+                  value={inputQty}
+                  onChange={(e) =>
+                    setInputQty(
+                      e.target.value === "" ? "" : Number(e.target.value),
+                    )
+                  }
+                  className="w-full text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none text-center font-mono"
+                />
+              </div>
+              <div className="flex-1">
+                <label className="block text-[9px] font-black text-(--text-secondary) uppercase mb-1">
+                  UOM
+                </label>
+                <input
+                  type="text"
+                  disabled
+                  value={autoUomName}
+                  className="w-full text-xs font-bold p-2 bg-(--surface-hover) text-(--text-secondary) border border-(--border-color) rounded-lg outline-none text-center font-mono"
+                />
+              </div>
+            </div>
+
+            {/* TOMBOL SIMPAN CEPAT */}
+            <div className="sm:col-span-2">
+              <button
+                type="submit"
+                className="w-full py-2 bg-orange-500 hover:bg-orange-600 text-white font-black text-xs rounded-lg transition shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="w-4 h-4" /> CATAT MUTASI
+              </button>
+            </div>
+          </form>
+        ) : (
+          <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-xl flex items-center justify-between text-xs font-bold text-blue-600">
+            <span>
+              Mode Monitoring Wilayah: Menampilkan data mutasi divisi dari
+              seluruh cabang di bawah region ini. Distribusi barang keluar dari
+              Region dicatat otomatis melalui menu Piutang (Surat Jalan Cabang).
+            </span>
           </div>
-        </form>
+        )}
       </div>
 
       {/* ========================================================================= */}
@@ -378,6 +417,22 @@ export function WarehousePage() {
               </option>
             ))}
           </select>
+
+          {/* FILTER OUTLET (Hanya tampil jika login sebagai Region / Holding) */}
+          {!localOutletId && (
+            <select
+              value={filterOutletId}
+              onChange={(e) => setFilterOutletId(e.target.value)}
+              className="text-xs font-bold p-2 bg-(--bg-input) text-orange-500 border border-orange-500/30 rounded-xl outline-none cursor-pointer"
+            >
+              <option value="">-- SEMUA OUTLET CABANG --</option>
+              {availableOutlets.map((o) => (
+                <option key={o.id} value={o.id}>
+                  OUTLET: {o.name}
+                </option>
+              ))}
+            </select>
+          )}
 
           {/* TAB AKTIF / ARSIP */}
           <div className="flex items-center bg-(--bg-input) p-1 rounded-xl border border-(--border-color)">
@@ -439,6 +494,9 @@ export function WarehousePage() {
             <thead>
               <tr className="bg-(--surface-hover) border-b border-(--border-color) text-[10px] uppercase font-black text-(--text-secondary) tracking-wider">
                 <th className="px-4 py-3">Tanggal</th>
+                {!localOutletId && (
+                  <th className="px-4 py-3 text-orange-500">Outlet Asal</th>
+                )}
                 <th className="px-4 py-3">Divisi Tujuan</th>
                 <th className="px-4 py-3">Nama Barang</th>
                 <th className="px-4 py-3 text-center">Jumlah (Qty)</th>
@@ -463,12 +521,20 @@ export function WarehousePage() {
                     })}
                   </td>
 
+                  {!localOutletId && (
+                    <td className="px-4 py-3">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                        {outlets.find((o) => o.id === doc.outletId)?.name ||
+                          "GUDANG"}
+                      </span>
+                    </td>
+                  )}
+
                   <td className="px-4 py-3">
                     <span className="px-2.5 py-1 rounded-md text-[10px] font-black uppercase bg-blue-500/10 text-blue-500 border border-blue-500/20">
                       {doc.divisionName}
                     </span>
                   </td>
-
                   <td className="px-4 py-3">
                     <div className="font-bold text-(--text-primary)">
                       {doc.itemName}
@@ -521,7 +587,7 @@ export function WarehousePage() {
               {filteredDistributions.length === 0 && (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={!localOutletId ? 8 : 7}
                     className="p-12 text-center text-(--text-secondary) font-bold text-xs italic"
                   >
                     Belum ada riwayat distribusi barang ke divisi pada filter

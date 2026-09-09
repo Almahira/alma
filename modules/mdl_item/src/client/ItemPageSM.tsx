@@ -1382,16 +1382,68 @@ export function ItemPageSM() {
         {(activeTab === "PRODUK" || activeTab === "EXPENSE") && (
           <div className="space-y-3">
             {products
-              .filter((p) => {
+              .filter((p: any) => {
                 const matchExpense =
                   activeTab === "EXPENSE" ? p.isExpense === true : !p.isExpense;
-                const matchStatus =
-                  viewStatus === "AKTIF"
+
+                const isProdActive =
+                  p.status !== undefined
                     ? p.status === "Aktif"
-                    : p.status === "Arsip";
-                return (
-                  matchExpense && matchStatus && p.approvalStatus !== "MERGED"
-                );
+                    : p.isActive !== undefined
+                      ? Boolean(p.isActive)
+                      : Boolean(p.is_active);
+                const matchStatus =
+                  viewStatus === "AKTIF" ? isProdActive : !isProdActive;
+
+                if (
+                  !matchExpense ||
+                  !matchStatus ||
+                  p.approvalStatus === "MERGED"
+                ) {
+                  return false;
+                }
+
+                const localCompanyId =
+                  localStorage.getItem("__unv_companyId") || "";
+                const localRegionId =
+                  localStorage.getItem("__unv_regionId") || "";
+                const localOutletId =
+                  localStorage.getItem("__unv_outletId") || "";
+
+                if (
+                  localCompanyId &&
+                  p.companyId &&
+                  p.companyId !== localCompanyId
+                ) {
+                  return false;
+                }
+
+                if (p.approvalStatus === "APPROVED") {
+                  if (
+                    p.regionId &&
+                    localRegionId &&
+                    p.regionId !== localRegionId
+                  ) {
+                    return false;
+                  }
+                  if (
+                    localOutletId &&
+                    p.outletId &&
+                    p.outletId !== localOutletId
+                  ) {
+                    return false;
+                  }
+                } else if (p.approvalStatus === "PENDING") {
+                  if (localOutletId) {
+                    if (p.outletId && p.outletId !== localOutletId)
+                      return false;
+                  } else if (localRegionId) {
+                    if (p.regionId && p.regionId !== localRegionId)
+                      return false;
+                  }
+                }
+
+                return true;
               })
               .map((p) => {
                 const uomName =

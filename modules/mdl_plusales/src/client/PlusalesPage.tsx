@@ -13,6 +13,7 @@ import {
   Calendar,
   Percent,
   Receipt,
+  Building2,
 } from "lucide-react";
 import { usePlusalesStore } from "./store";
 import { useOrgStore } from "../../../mdl_organization/src/client/store";
@@ -165,7 +166,7 @@ const PlusalesDetailModal: React.FC<{
 export function PlusalesPage() {
   const { documents } = usePlusalesStore();
   const { allocations } = useExecutivePanelStore();
-  const { outlets } = useOrgStore();
+  const { outlets, regions } = useOrgStore();
   const { openCenterModal, closeCenterModal, openAlert } = useUniversalModal();
 
   const [viewStatus, setViewStatus] = useState<"AKTIF" | "ARSIP">("AKTIF");
@@ -176,27 +177,66 @@ export function PlusalesPage() {
   const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthStr);
 
   const localCompanyId = localStorage.getItem("__unv_companyId") || "";
+  const localRegionId = localStorage.getItem("__unv_regionId") || "";
   const localOutletId = localStorage.getItem("__unv_outletId") || "";
-  const currentOutlet = outlets.find((o) => o.id === localOutletId);
+  const [filterOutletId, setFilterOutletId] = useState("");
+
+  const currentOutlet = outlets.find(
+    (o) => o.id === (localOutletId || filterOutletId),
+  );
+  const currentRegion = regions.find((r) => r.id === localRegionId);
   const outletName = currentOutlet
     ? currentOutlet.name.toUpperCase()
-    : "SEMUA OUTLET";
+    : currentRegion
+      ? `WILAYAH ${currentRegion.name.toUpperCase()}`
+      : "SEMUA OUTLET";
+
+  // Daftar outlet aktif di bawah wilayah ini (khusus Region / Holding)
+  const availableOutlets = useMemo(() => {
+    return outlets.filter((o) => {
+      if (o.status !== "Aktif") return false;
+      if (localCompanyId && o.companyId && o.companyId !== localCompanyId)
+        return false;
+      if (localRegionId && o.regionId && o.regionId !== localRegionId)
+        return false;
+      return true;
+    });
+  }, [outlets, localCompanyId, localRegionId]);
 
   const filteredDocs = useMemo(() => {
-    return documents.filter((d) => {
-      if (localOutletId && d.outletId && d.outletId !== localOutletId) {
+    return documents.filter((d: any) => {
+      // 1. Penyekatan Company & Region (Cegah kebocoran antar-wilayah)
+      if (localCompanyId && d.companyId && d.companyId !== localCompanyId)
         return false;
-      }
-      if (localCompanyId && d.companyId && d.companyId !== localCompanyId) {
+      if (localRegionId && d.regionId && d.regionId !== localRegionId)
         return false;
+
+      // 2. Penyekatan Outlet (Cabang hanya lihat dirinya sendiri, Region bisa filter outlet)
+      if (localOutletId) {
+        if (d.outletId && d.outletId !== localOutletId) return false;
+      } else if (filterOutletId) {
+        if (d.outletId !== filterOutletId) return false;
       }
 
-      const matchMonth = d.date && d.date.startsWith(selectedMonth);
+      // 3. Status Aktif vs Arsip (Mendukung isActive & is_active)
+      const isItemActive = d.isActive !== undefined ? d.isActive : d.is_active;
       const matchStatus =
-        viewStatus === "AKTIF" ? d.isActive !== false : d.isActive === false;
+        viewStatus === "AKTIF"
+          ? isItemActive !== false
+          : isItemActive === false;
+      const matchMonth = d.date && d.date.startsWith(selectedMonth);
+
       return matchMonth && matchStatus;
     });
-  }, [documents, selectedMonth, viewStatus, localOutletId, localCompanyId]);
+  }, [
+    documents,
+    selectedMonth,
+    viewStatus,
+    localOutletId,
+    localRegionId,
+    localCompanyId,
+    filterOutletId,
+  ]);
 
   const {
     sortedItems: sortedDocs,
@@ -481,6 +521,25 @@ export function PlusalesPage() {
             </select>
           </div>
 
+          {/* FILTER OUTLET CABANG (Hanya tampil jika diakses oleh Region / Holding) */}
+          {!localOutletId && (
+            <div className="flex items-center gap-2 bg-(--bg-input) border border-orange-500/30 rounded-xl px-3 py-1.5 shadow-xs">
+              <Building2 className="w-4 h-4 text-orange-500" />
+              <select
+                value={filterOutletId}
+                onChange={(e) => setFilterOutletId(e.target.value)}
+                className="bg-transparent text-xs font-black text-orange-500 outline-none cursor-pointer"
+              >
+                <option value="">-- SEMUA OUTLET WILAYAH --</option>
+                {availableOutlets.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    OUTLET: {o.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <div className="flex items-center bg-(--bg-input) p-1 rounded-xl border border-(--border-color)">
             <button
               onClick={() => setViewStatus("AKTIF")}
@@ -513,7 +572,8 @@ export function PlusalesPage() {
             <FileSpreadsheet className="w-4 h-4" /> EXPORT EXCEL
           </button>
 
-          {viewStatus === "AKTIF" && (
+          {/* Tombol Input hanya muncul di level Outlet (karena Region tidak ada kasir POS) */}
+          {viewStatus === "AKTIF" && localOutletId && (
             <button
               onClick={() =>
                 openCenterModal({
@@ -547,6 +607,9 @@ export function PlusalesPage() {
                   onSort={requestSort}
                   className="px-4 py-3"
                 />
+                {!localOutletId && (
+                  <th className="px-4 py-3 text-orange-500">Outlet Asal</th>
+                )}
                 <SortHeader
                   label="Gross Sales"
                   sortKey="grossSales"
@@ -627,6 +690,15 @@ export function PlusalesPage() {
                         {doc.documentNumber}
                       </div>
                     </td>
+
+                    {!localOutletId && (
+                      <td className="px-4 py-3">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                          {outlets.find((o) => o.id === doc.outletId)?.name ||
+                            "OUTLET"}
+                        </span>
+                      </td>
+                    )}
 
                     <td className="px-4 py-3 text-right font-mono font-black text-orange-500">
                       Rp {(doc.grossSales || 0).toLocaleString()}
@@ -742,7 +814,7 @@ export function PlusalesPage() {
               {sortedDocs.length === 0 && (
                 <tr>
                   <td
-                    colSpan={9}
+                    colSpan={!localOutletId ? 10 : 9}
                     className="p-12 text-center text-(--text-secondary) font-bold text-xs italic"
                   >
                     Belum ada rekapitulasi penjualan pada bulan{" "}

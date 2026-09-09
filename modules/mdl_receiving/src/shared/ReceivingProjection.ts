@@ -256,7 +256,15 @@ export class ReceivingProjection implements ProjectionHandler<ReceivingState> {
   public restoreState(state: ReceivingState): void {
     this.documents.clear();
     if (state && state.documents) {
-      state.documents.forEach((d) => this.documents.set(d.id, d));
+      state.documents.forEach((d: any) => {
+        const isActive =
+          d.isActive !== undefined
+            ? Boolean(d.isActive)
+            : d.is_active !== undefined
+              ? Boolean(d.is_active)
+              : d.status !== "ARCHIVED" && d.status !== "Arsip";
+        this.documents.set(d.id, { ...d, isActive });
+      });
     }
   }
 }
