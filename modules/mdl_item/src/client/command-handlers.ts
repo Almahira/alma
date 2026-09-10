@@ -229,12 +229,27 @@ export const itemCommandHandlers: CommandHandler[] = [
   {
     commandType: "VALIDATE_PRODUCT",
     execute: async (cmd: Command) => {
-      const nextVer =
-        (await globalLedger.getAggregateVersion(cmd.payload.id)) + 1;
+      // 1. Ambil versi dari ledger lokal
+      const localLedgerVer = await globalLedger.getAggregateVersion(
+        cmd.payload.id,
+      );
+
+      // 2. Ambil versi dari proyeksi store produk di memori (jika ada event sync masuk)
+      const { useItemStore } = await import("./store.js");
+      const storeItem = useItemStore
+        .getState()
+        .products.find((p: any) => p.id === cmd.payload.id);
+      const storeVer = Number(storeItem?.aggregateVersion || 1);
+
+      // 3. Gunakan versi tertinggi yang terdeteksi agar tidak menembakkan versi usang
+      const currentVer = Math.max(localLedgerVer, storeVer);
+      const nextVer = currentVer + 1;
+
       const payload = {
         approvalStatus: cmd.payload.approvalStatus,
         validateId: cmd.payload.validateId || null,
       };
+
       await globalLedger.appendEvent(
         "PRODUCT_VALIDATED",
         cmd.payload.id,

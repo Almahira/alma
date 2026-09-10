@@ -123,15 +123,20 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
         const documentType = p.reference?.documentType || p.documentType;
         const supplierId = p.reference?.supplierId || p.vendorId;
         const regionId = p.location?.regionId || p.regionId;
-        const vendorSource = p.data?.vendorSource;
+        const outletId = p.location?.outletId || p.outletId;
+        const vendorSource = p.data?.vendorSource || p.reference?.vendorSource;
 
         // =====================================================================
-        // ATURAN MUTLAK HARGA FLUKTUATIF (ANTI-COMPOUNDING RUNAWAY)
+        // ATURAN MUTLAK HARGA FLUKTUATIF REGION (ANTI-COMPOUNDING)
         // =====================================================================
-        // 1. Jika ini transaksi PIUTANG (distribusi gudang), JANGAN ubah harga beli master!
+        // 1. Lewati jika transaksi PIUTANG (Distribusi Region ke Cabang)
         if (documentType === "PIUTANG") break;
 
-        // 2. Jika supplier adalah GUDANG INTERNAL (regionId === supplierId), JANGAN ubah harga beli master!
+        // 2. Lewati jika transaksi dilakukan oleh CABANG OUTLET (outletId terisi)
+        //    Cabang belanja dari gudang/pasar lokal TIDAK BOLEH merusak HPP induk Region!
+        if (outletId) break;
+
+        // 3. Lewati jika supplier adalah GUDANG INTERNAL / REGIONAL
         if (
           vendorSource === "INTERNAL" ||
           (supplierId && regionId && supplierId === regionId)
@@ -139,16 +144,10 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
           break;
         }
 
-        // HANYA VENDOR EKSTERNAL (Pasar/Pabrik) yang berhak memperbarui HPP Master Item:
+        // HANYA VENDOR EKSTERNAL DI TINGKAT REGION YANG BERHAK MENGUBAH HPP INDUK:
         const items = p.data?.items || p.items || [];
         const scopeKey =
-          p.location?.outletId ||
-          p.outletId ||
-          p.location?.regionId ||
-          p.regionId ||
-          p.organization?.companyId ||
-          p.companyId ||
-          "DEFAULT";
+          regionId || p.organization?.companyId || p.companyId || "DEFAULT";
 
         items.forEach((item: any) => {
           if (item.isExpense) return;

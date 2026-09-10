@@ -851,31 +851,36 @@ export const ReceivingForm: React.FC<{
 
   useEffect(() => {
     if (selectedItemId) {
-      const scopeKey =
-        header.outletId || header.regionId || header.companyId || "DEFAULT";
-
       const item = products.find((p) => p.id === selectedItemId);
       if (item && item.pricing) {
-        const pricing =
-          item.pricing[scopeKey] ||
-          item.pricing[Object.keys(item.pricing)[0]] ||
-          {};
+        // Ambil pricing milik Region tempat barang bernaung, fallback ke DEFAULT
+        const targetRegionKey = header.regionId || localRegionId;
+        const scopePricing = (targetRegionKey &&
+          item.pricing[targetRegionKey]) ||
+          item.pricing["DEFAULT"] ||
+          item.pricing[Object.keys(item.pricing)[0]] || {
+            basePrice: 0,
+            marginPercentage: 0,
+            sellingPrice: 0,
+          };
+
         let price = 0;
-
+        // JIKA PIUTANG ATAU HUTANG KE GUDANG INTERNAL:
+        // Gunakan HARGA JUAL RESMI REGION (misal: Rp 31.500)
         if (tabType === "PIUTANG" || vendorSource === "INTERNAL") {
-          price = pricing.sellingPrice || 0;
+          price = scopePricing.sellingPrice || scopePricing.basePrice || 0;
         } else {
-          price = pricing.basePrice || 0;
+          // JIKA HUTANG KE VENDOR EKSTERNAL (Pasar):
+          // Gunakan HARGA BELI HPP (misal: Rp 30.000)
+          price = scopePricing.basePrice || 0;
         }
-
         setInputPriceText(String(price));
       }
     }
   }, [
     selectedItemId,
-    header.outletId,
     header.regionId,
-    header.companyId,
+    localRegionId,
     vendorSource,
     tabType,
     products,
@@ -1031,6 +1036,7 @@ export const ReceivingForm: React.FC<{
           type: "CREATE_RECEIVING",
           payload: {
             ...header,
+            vendorSource, // <--- TAMBAHKAN INI AGAR SISTEM TAHU INI INTERNAL
             vendorId: finalVendorId,
             documentType: tabType,
             items: cart,

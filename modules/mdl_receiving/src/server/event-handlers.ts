@@ -24,12 +24,16 @@ async function updateProductPricingFromReceiving(
   const documentType = p.reference?.documentType || p.documentType;
   const supplierId = p.reference?.supplierId || p.vendorId;
   const regionId = p.location?.regionId || p.regionId;
-  const vendorSource = p.data?.vendorSource;
+  const outletId = p.location?.outletId || p.outletId;
+  const vendorSource = p.data?.vendorSource || p.reference?.vendorSource;
 
   // 1. Lewati jika transaksi PIUTANG
   if (documentType === "PIUTANG") return;
 
-  // 2. Lewati jika suplai dari GUDANG INTERNAL
+  // 2. Lewati jika transaksi milik OUTLET (Jangan ubah harga induk Region!)
+  if (outletId) return;
+
+  // 3. Lewati jika suplai dari GUDANG INTERNAL
   if (
     vendorSource === "INTERNAL" ||
     (supplierId && regionId && supplierId === regionId)
@@ -342,17 +346,28 @@ export const receivingHandlers: Record<
       })
       .where(eq(schema.receivingDocuments.id, event.aggregateId));
 
-    const p = event.payload;
-    const documentType = p.reference?.documentType || p.documentType;
+    // Validasi langsung ke dokumen induk di database:
+    const existingDocs = await tx
+      .select()
+      .from(schema.receivingDocuments)
+      .where(eq(schema.receivingDocuments.id, event.aggregateId))
+      .limit(1);
 
-    if (documentType !== "PIUTANG") {
-      const docItems = await tx
-        .select()
-        .from(schema.receivingItems)
-        .where(eq(schema.receivingItems.documentId, event.aggregateId));
-
-      if (docItems.length > 0) {
-        await updateProductPricingFromReceiving(tx, p, docItems);
+    if (existingDocs.length > 0) {
+      const doc = existingDocs[0];
+      // HANYA update HPP jika ini transaksi HUTANG, level REGION murni (tanpa outletId), dan bukan internal
+      if (
+        doc.documentType === "HUTANG" &&
+        !doc.outletId &&
+        doc.vendorId !== doc.regionId
+      ) {
+        const docItems = await tx
+          .select()
+          .from(schema.receivingItems)
+          .where(eq(schema.receivingItems.documentId, event.aggregateId));
+        if (docItems.length > 0) {
+          await updateProductPricingFromReceiving(tx, doc, docItems);
+        }
       }
     }
   },
