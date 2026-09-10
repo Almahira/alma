@@ -495,13 +495,35 @@ export function ReceivingPage() {
 
   const filterOptions = useMemo(() => {
     if (activeTab === "HUTANG") {
+      const filteredVendors = vendors.filter((v: any) => {
+        const isAct =
+          v.status !== undefined
+            ? v.status === "Aktif"
+            : v.isActive !== undefined
+              ? Boolean(v.isActive)
+              : Boolean(v.is_active);
+        if (!isAct) return false;
+        if (localCompanyId && v.companyId && v.companyId !== localCompanyId)
+          return false;
+        if (localRegionId && v.regionId && v.regionId !== localRegionId)
+          return false;
+
+        if (localOutletId) {
+          return !v.outletId || v.outletId === localOutletId;
+        } else {
+          return !v.outletId;
+        }
+      });
+
       return [
         ...regions
-          .filter((r) => r.status === "Aktif")
+          .filter(
+            (r) =>
+              r.status === "Aktif" &&
+              (!localRegionId || r.id === localRegionId),
+          )
           .map((r) => ({ value: r.id, label: `[INTERNAL] ${r.name}` })),
-        ...vendors
-          .filter((v) => v.status === "Aktif")
-          .map((v) => ({ value: v.id, label: v.name })),
+        ...filteredVendors.map((v) => ({ value: v.id, label: v.name })),
       ];
     }
     if (activeTab === "PETTYCASH") {
@@ -523,7 +545,15 @@ export function ReceivingPage() {
           (!localRegionId || o.regionId === localRegionId),
       )
       .map((o) => ({ value: o.id, label: o.name }));
-  }, [activeTab, regions, vendors, outlets, localRegionId]);
+  }, [
+    activeTab,
+    regions,
+    vendors,
+    outlets,
+    localRegionId,
+    localCompanyId,
+    localOutletId,
+  ]);
 
   const getLocationReportName = () => {
     const outId = localStorage.getItem("__unv_outletId");

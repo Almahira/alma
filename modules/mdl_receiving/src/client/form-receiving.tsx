@@ -1003,6 +1003,7 @@ export const ReceivingForm: React.FC<{
               id: generatedId,
               companyId: header.companyId,
               regionId: header.regionId,
+              outletId: header.outletId || null, // <--- Kunci vendor baru ke outlet bersangkutan
               name: customVendorName.toUpperCase().trim(),
             },
           });
@@ -1085,8 +1086,35 @@ export const ReceivingForm: React.FC<{
     })
     .map((p) => ({ value: p.id, label: p.name }));
 
+  // Penyekatan Spasial Vendor: Mengikuti standar emas mdl_warehouse
   const externalVendorOptions = vendors
-    .filter((v) => v.status === "Aktif")
+    .filter((v: any) => {
+      const isAct =
+        v.status !== undefined
+          ? v.status === "Aktif"
+          : v.isActive !== undefined
+            ? Boolean(v.isActive)
+            : Boolean(v.is_active);
+      if (!isAct) return false;
+
+      // 1. Filter Perusahaan
+      if (localCompanyId && v.companyId && v.companyId !== localCompanyId)
+        return false;
+
+      // 2. Filter Wilayah Region (jika vendor terikat ke region tertentu)
+      if (localRegionId && v.regionId && v.regionId !== localRegionId)
+        return false;
+
+      // 3. Penyekatan Spasial Outlet vs Region:
+      if (localOutletId) {
+        // Outlet: Hanya vendor umum (!v.outletId) ATAU vendor milik outlet ini saja
+        // Otomatis menolak vendor milik outlet B
+        return !v.outletId || v.outletId === localOutletId;
+      } else {
+        // Region: HANYA vendor level Region/Pusat. Region TIDAK melihat vendor outlet
+        return !v.outletId;
+      }
+    })
     .map((v) => ({ value: v.id, label: v.name }));
 
   const currentRegion = regions.find((r) => r.id === localRegionId);
