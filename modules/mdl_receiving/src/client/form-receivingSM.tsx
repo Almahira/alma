@@ -1049,12 +1049,35 @@ export const ReceivingForm: React.FC<{
     .map((o) => ({ value: o.id, label: o.name }));
 
   const filteredProductsByExpense = products
-    .filter(
-      (p) =>
-        p.status === "Aktif" &&
-        p.approvalStatus !== "REJECTED" &&
-        (isExpense ? p.isExpense === true : !p.isExpense),
-    )
+    .filter((p: any) => {
+      const isAct =
+        p.status !== undefined
+          ? p.status === "Aktif"
+          : p.isActive !== undefined
+            ? Boolean(p.isActive)
+            : Boolean(p.is_active);
+      if (
+        !isAct ||
+        p.approvalStatus === "REJECTED" ||
+        p.approvalStatus === "MERGED"
+      )
+        return false;
+
+      // Filter jenis Barang vs Jasa
+      const matchExpense = isExpense ? p.isExpense === true : !p.isExpense;
+      if (!matchExpense) return false;
+
+      if (localCompanyId && p.companyId && p.companyId !== localCompanyId)
+        return false;
+      if (localRegionId && p.regionId && p.regionId !== localRegionId)
+        return false;
+
+      // Penyekatan Spasial: Region/Pusat dipakai bersama, outlet spesifik hanya di outlet bersangkutan
+      if (localOutletId) {
+        return !p.outletId || p.outletId === localOutletId;
+      }
+      return true;
+    })
     .map((p) => ({ value: p.id, label: p.name }));
 
   const externalVendorOptions = vendors

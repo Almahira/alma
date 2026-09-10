@@ -75,25 +75,34 @@ export function WarehousePage() {
   const itemInputRef = useRef<HTMLInputElement>(null);
 
   // Filter Divisi Aktif untuk Perusahaan Ini
+  // Filter Divisi Terisolasi: Milik Region (semua cabang pakai) | Milik Outlet (hanya outlet itu)
   const divisionOptions = useMemo(() => {
     return divisions
-      .filter((d) => {
-        if (d.status !== "Aktif") return false;
+      .filter((d: any) => {
+        const isAct =
+          d.status !== undefined
+            ? d.status === "Aktif"
+            : d.isActive !== undefined
+              ? Boolean(d.isActive)
+              : Boolean(d.is_active);
+        if (!isAct) return false;
+
         if (localCompanyId && d.companyId && d.companyId !== localCompanyId)
           return false;
+        if (localRegionId && d.regionId && d.regionId !== localRegionId)
+          return false;
 
-        // Cabang Outlet HANYA melihat divisi yang dibuat untuk cabang ini:
         if (localOutletId) {
-          return d.outletId === localOutletId || !d.outletId;
-        }
-        // Region melihat divisi region atau divisi cabang wilayahnya:
-        if (localRegionId) {
-          return d.regionId === localRegionId || !d.regionId;
+          // Outlet: hanya lihat divisi Region (tanpa outletId) ATAU divisi miliknya sendiri
+          return !d.outletId || d.outletId === localOutletId;
+        } else if (filterOutletId) {
+          // Region sedang filter outlet tertentu
+          return !d.outletId || d.outletId === filterOutletId;
         }
         return true;
       })
       .map((d) => ({ value: d.id, label: d.name }));
-  }, [divisions, localCompanyId, localOutletId, localRegionId]);
+  }, [divisions, localCompanyId, localOutletId, localRegionId, filterOutletId]);
 
   // Set default divisi jika belum terpilih
   useEffect(() => {
@@ -102,12 +111,34 @@ export function WarehousePage() {
     }
   }, [divisionOptions, stickyDivisionId]);
 
-  // Filter Hanya Produk Barang Fisik (Bukan Jasa/Biaya)
+  // Filter Produk Terisolasi: Produk Region (semua pakai) | Produk Outlet (hanya outlet itu)
   const productOptions = useMemo(() => {
     return products
-      .filter((p) => p.status === "Aktif" && !p.isExpense)
+      .filter((p: any) => {
+        const isAct =
+          p.status !== undefined
+            ? p.status === "Aktif"
+            : p.isActive !== undefined
+              ? Boolean(p.isActive)
+              : Boolean(p.is_active);
+        if (!isAct || p.isExpense || p.approvalStatus === "MERGED")
+          return false;
+
+        if (localCompanyId && p.companyId && p.companyId !== localCompanyId)
+          return false;
+        if (localRegionId && p.regionId && p.regionId !== localRegionId)
+          return false;
+
+        if (localOutletId) {
+          // Outlet: hanya lihat barang Region/Pusat (!p.outletId) ATAU barang khusus outlet ini
+          return !p.outletId || p.outletId === localOutletId;
+        } else if (filterOutletId) {
+          return !p.outletId || p.outletId === filterOutletId;
+        }
+        return true;
+      })
       .map((p) => ({ value: p.id, label: p.name }));
-  }, [products]);
+  }, [products, localCompanyId, localRegionId, localOutletId, filterOutletId]);
 
   // Otomasi UOM & HPP saat Item Dipilih
   const selectedProduct = useMemo(() => {

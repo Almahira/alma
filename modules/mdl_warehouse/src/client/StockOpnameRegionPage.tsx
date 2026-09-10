@@ -74,93 +74,100 @@ export function StockOpnameRegionPage() {
   // =========================================================================
   const regionOpnameMatrix = useMemo(() => {
     const validProducts = products.filter(
-      (p) => p.status === "Aktif" && !p.isExpense,
+      (p: any) => p.status === "Aktif" && !p.isExpense,
     );
 
-    return validProducts.map((p) => {
-      const uomName = uoms.find((u) => u.id === p.uomId)?.name || "PCS";
-      const catName =
-        categories.find((c) => c.id === p.categoryId)?.name || "-";
+    // 1. Indexing O(1)
+    const uomMap = new Map<string, string>();
+    uoms.forEach((u: any) => uomMap.set(u.id, u.name));
 
-      // 1. Stok Awal Gudang Region
+    const catMap = new Map<string, string>();
+    categories.forEach((c: any) => catMap.set(c.id, c.name));
+
+    // 2. Pre-aggregate Masuk (Vendor) & Keluar (Kirim Cabang) dalam 1x putaran O(N)
+    const vendorInMap = new Map<string, number>();
+    const piutangOutMap = new Map<string, number>();
+
+    receivingDocs.forEach((doc: any) => {
+      const isDocActive =
+        doc.isActive !== undefined ? doc.isActive : doc.is_active;
+      const matchActive = doc.status !== "CANCELLED" && isDocActive !== false;
+      const matchCompany = !localCompanyId || doc.companyId === localCompanyId;
+      const matchRegion = !localRegionId || doc.regionId === localRegionId;
+
+      if (
+        matchActive &&
+        matchCompany &&
+        matchRegion &&
+        Array.isArray(doc.items)
+      ) {
+        // Belanja Masuk dari Vendor Luar ke Region
+        if (doc.documentType === "HUTANG" && !doc.outletId) {
+          doc.items.forEach((it: any) => {
+            if (!it.itemId || it.isExpense) return;
+            const cur = vendorInMap.get(it.itemId) || 0;
+            vendorInMap.set(
+              it.itemId,
+              cur + Number(it.receivedQty || it.qty || 0),
+            );
+          });
+        }
+        // Kirim Keluar ke Cabang Outlet
+        else if (
+          doc.documentType === "PIUTANG" ||
+          (doc.documentType === "HUTANG" &&
+            doc.outletId &&
+            doc.vendorId === localRegionId)
+        ) {
+          doc.items.forEach((it: any) => {
+            if (!it.itemId || it.isExpense) return;
+            const cur = piutangOutMap.get(it.itemId) || 0;
+            piutangOutMap.set(
+              it.itemId,
+              cur + Number(it.receivedQty || it.qty || 0),
+            );
+          });
+        }
+      }
+    });
+
+    // 3. Pre-aggregate Spoil Region dalam 1x putaran O(N)
+    const spoilWasteMap = new Map<string, number>();
+    spoilWastes.forEach((sw: any) => {
+      const isSwActive = sw.isActive !== undefined ? sw.isActive : sw.is_active;
+      const matchRegion = !localRegionId || sw.regionId === localRegionId;
+      const matchCompany = !localCompanyId || sw.companyId === localCompanyId;
+
+      if (
+        !sw.outletId &&
+        matchRegion &&
+        matchCompany &&
+        isSwActive !== false &&
+        sw.itemId
+      ) {
+        const cur = spoilWasteMap.get(sw.itemId) || 0;
+        spoilWasteMap.set(
+          sw.itemId,
+          cur + Number(sw.convertedBaseQty || sw.inputQty || 0),
+        );
+      }
+    });
+
+    // 4. Mapping O(1) Instan
+    return validProducts.map((p: any) => {
+      const uomName = uomMap.get(p.uomId) || "PCS";
+      const catName = catMap.get(p.categoryId) || "-";
+
       const initialStockKey = `${localRegionId}_${p.id}`;
       const initialStock = initialStocks[initialStockKey] || 0;
 
-      // 2. STOK MASUK: Belanja Vendor Eksternal ke Gudang Region (HUTANG Region)
-      const receivingVendorItems = receivingDocs
-        .filter((doc: any) => {
-          const isDocActive =
-            doc.isActive !== undefined ? doc.isActive : doc.is_active;
-          const matchActive =
-            doc.status !== "CANCELLED" && isDocActive !== false;
-          const matchCompany =
-            !localCompanyId || doc.companyId === localCompanyId;
-          const matchRegion = !localRegionId || doc.regionId === localRegionId;
-          // Hutang Region adalah belanja masuk ke gudang region (bukan milik cabang)
-          const isHutangRegion = doc.documentType === "HUTANG" && !doc.outletId;
+      const stockIn = vendorInMap.get(p.id) || 0;
+      const stockOut = piutangOutMap.get(p.id) || 0;
+      const spoilWasteQty = spoilWasteMap.get(p.id) || 0;
 
-          return matchActive && matchCompany && matchRegion && isHutangRegion;
-        })
-        .flatMap((doc) => doc.items || [])
-        .filter((it) => it.itemId === p.id && !it.isExpense);
-
-      const stockIn = receivingVendorItems.reduce(
-        (sum, it) => sum + Number(it.receivedQty || it.qty || 0),
-        0,
-      );
-
-      // 3. STOK KELUAR: Pengiriman ke Cabang (PIUTANG / Surat Jalan Cabang)
-      const piutangOutletItems = receivingDocs
-        .filter((doc: any) => {
-          const isDocActive =
-            doc.isActive !== undefined ? doc.isActive : doc.is_active;
-          const matchActive =
-            doc.status !== "CANCELLED" && isDocActive !== false;
-          const matchCompany =
-            !localCompanyId || doc.companyId === localCompanyId;
-          const matchRegion = !localRegionId || doc.regionId === localRegionId;
-          // Piutang adalah barang keluar dari Region menuju Outlet cabang
-          const isPiutangDistribusi =
-            doc.documentType === "PIUTANG" ||
-            (doc.documentType === "HUTANG" &&
-              doc.outletId &&
-              doc.vendorId === localRegionId);
-
-          return (
-            matchActive && matchCompany && matchRegion && isPiutangDistribusi
-          );
-        })
-        .flatMap((doc) => doc.items || [])
-        .filter((it) => it.itemId === p.id && !it.isExpense);
-
-      const stockOut = piutangOutletItems.reduce(
-        (sum, it) => sum + Number(it.receivedQty || it.qty || 0),
-        0,
-      );
-
-      // 4. Stok Rusak / Basi di Gudang Region
-      const spoilWasteQty = spoilWastes
-        .filter((sw: any) => {
-          const isSwActive =
-            sw.isActive !== undefined ? sw.isActive : sw.is_active;
-          return (
-            sw.itemId === p.id &&
-            !sw.outletId &&
-            (!localRegionId || sw.regionId === localRegionId) &&
-            (!localCompanyId || sw.companyId === localCompanyId) &&
-            isSwActive !== false
-          );
-        })
-        .reduce(
-          (sum, sw) => sum + Number(sw.convertedBaseQty || sw.inputQty || 0),
-          0,
-        );
-
-      // 5. Sisa Stok Sistem Riil Region
       const rawSystemStock = initialStock + stockIn - stockOut - spoilWasteQty;
       const systemStock = parseFloat(rawSystemStock.toFixed(4));
 
-      // 6. Harga Beli HPP Region
       const scopeKey = localRegionId || localCompanyId || "DEFAULT";
       const pricing =
         p.pricing?.[scopeKey] ||
@@ -168,7 +175,6 @@ export function StockOpnameRegionPage() {
         {};
       const currentPrice = Math.round(Number(pricing.basePrice || 0));
 
-      // 7. Hitungan Fisik & Selisih
       const physicalStock =
         physicalCounts[p.id] !== undefined ? physicalCounts[p.id] : systemStock;
       const varianceQty = parseFloat((physicalStock - systemStock).toFixed(4));

@@ -1,5 +1,5 @@
 // File: apps/client_unv/src/shared-ui/UniversalCombobox.tsx
-import React, { useState, useRef, useEffect, forwardRef } from "react";
+import React, { useState, useRef, useEffect, forwardRef, useMemo } from "react";
 import { ChevronDown, Check, Search } from "lucide-react";
 
 export interface ComboboxOption {
@@ -41,10 +41,15 @@ export const UniversalCombobox = forwardRef<
     const listboxRef = useRef<HTMLUListElement>(null);
 
     const selectedOption = options.find((opt) => opt.value === value);
-
     const filteredOptions = options.filter((opt) =>
       opt.label.toLowerCase().includes(searchTerm.toLowerCase()),
     );
+
+    // Batasi render maksimal 30 item teratas agar thread keyboard instan (0ms delay)
+    const MAX_DISPLAY = 30;
+    const displayedOptions = useMemo(() => {
+      return filteredOptions.slice(0, MAX_DISPLAY);
+    }, [filteredOptions]);
 
     useEffect(() => {
       if (!isOpen) {
@@ -98,15 +103,18 @@ export const UniversalCombobox = forwardRef<
         e.preventDefault();
         if (!isOpen) setIsOpen(true);
         setHighlightedIndex((prev) =>
-          prev < filteredOptions.length - 1 ? prev + 1 : prev,
+          prev < displayedOptions.length - 1 ? prev + 1 : prev,
         );
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
         setHighlightedIndex((prev) => (prev > 0 ? prev - 1 : 0));
       } else if (e.key === "Enter") {
         e.preventDefault();
-        if (isOpen && filteredOptions.length > 0) {
-          onChange(filteredOptions[highlightedIndex].value);
+        if (isOpen && displayedOptions.length > 0) {
+          onChange(
+            displayedOptions[highlightedIndex]?.value ||
+              displayedOptions[0].value,
+          );
           setIsOpen(false);
           if (onEnterPressed) setTimeout(() => onEnterPressed(), 50);
         } else if (!isOpen) {
@@ -182,10 +190,9 @@ export const UniversalCombobox = forwardRef<
                 className="max-h-50 overflow-y-auto custom-scrollbar py-1"
                 role="listbox"
               >
-                {filteredOptions.map((opt, index) => {
+                {displayedOptions.map((opt, index) => {
                   const isHighlighted = index === highlightedIndex;
                   const isSelected = opt.value === value;
-
                   return (
                     <li
                       key={opt.value}
@@ -209,6 +216,12 @@ export const UniversalCombobox = forwardRef<
                     </li>
                   );
                 })}
+                {filteredOptions.length > MAX_DISPLAY && (
+                  <li className="px-3 py-1.5 text-[10px] text-center text-(--text-secondary) font-bold bg-(--surface-hover) border-t border-(--border-color)">
+                    Menampilkan 30 dari {filteredOptions.length} opsi. Ketik
+                    untuk mempersempit.
+                  </li>
+                )}
               </ul>
             )}
           </div>

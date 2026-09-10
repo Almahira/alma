@@ -26,6 +26,7 @@ import { globalRegistry } from "../../../packages/core_unv/src/cqrs/UniversalReg
 import { IntegrityChecker } from "../../../packages/core_unv/src/ledger/IntegrityChecker";
 import { InitialLoadingScreen } from "./shared-ui/InitialLoadingScreen";
 import { getApiUrl } from "../../../packages/core_unv/src/config/env";
+import { RuntimeSession } from "../../../packages/core_unv/src/config/session";
 
 // =========================================================================
 // AUTO-PURGE DATABASE LOKAL (JIKA SERVER DI-RESET / VIRGIN STATE)
@@ -173,6 +174,7 @@ function SystemBootstrapper() {
   useEffect(() => {
     const bootEngine = async () => {
       try {
+        RuntimeSession.init();
         // ============================================================
         // 1. GUARD PEMBERSIH MODE DEMO (JIKA TAB PERNAH DITUTUP)
         // ============================================================

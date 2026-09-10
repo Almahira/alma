@@ -1217,17 +1217,6 @@ export function UniversalLayout({
         className="flex flex-col h-screen w-screen overflow-hidden font-['Space_Grotesk',sans-serif] relative transition-colors duration-300"
         style={themeVars}
       >
-        {/* Noise Texture Background */}
-        <div
-          className="absolute inset-0 pointer-events-none opacity-[0.04] z-0"
-          style={{
-            backgroundImage:
-              "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E\")",
-            backgroundRepeat: "repeat",
-            mixBlendMode: "overlay",
-          }}
-        />
-
         {/* MODAL KONFIGURASI MODUL KONTROL */}
         {isModuleManagerOpen && (
           <ModuleManagerModal onClose={() => setIsModuleManagerOpen(false)} />
@@ -1235,22 +1224,14 @@ export function UniversalLayout({
 
         <header className="h-16 bg-(--bg-header)/80 backdrop-blur-xl border-b border-(--border-color) flex items-center justify-between px-5 shrink-0 z-40 relative">
           <div
-            className={`flex items-center gap-3 w-44 shrink-0 cursor-pointer px-3 py-1 rounded-2xl ${glassInputStyle} hover:border-orange-500/30`}
-            onClick={() => setLogoAnim((prev) => !prev)}
+            className={`flex items-center gap-2.5 w-40 shrink-0 px-3 py-1.5 rounded-2xl ${glassInputStyle}`}
           >
-            <div className="relative w-8 h-8 flex items-center justify-center perspective-200">
-              <div
-                className={`w-full h-full flex items-center justify-center transform-style-3d ${logoAnim ? "animate-[logo-pop_0.8s_ease-out]" : "animate-[spin_18s_linear_infinite]"}`}
-              >
-                <span className="absolute font-['Syne',sans-serif] font-extrabold text-3xl text-orange-500/30 -translate-z-2 blur-sm">
-                  Z
-                </span>
-                <span className="absolute font-['Syne',sans-serif] font-extrabold text-3lg bg-linear-to-br from-orange-400 via-orange-500 to-yellow-400 bg-clip-text text-transparent drop-shadow-[0_0_10px_rgba(244,121,62,0.6)]">
-                  Z
-                </span>
-              </div>
+            <div className="w-8 h-8 rounded-xl bg-linear-to-br from-orange-500 to-amber-500 flex items-center justify-center shadow-md">
+              <span className="font-['Syne',sans-serif] font-black text-xl text-white">
+                Z
+              </span>
             </div>
-            <span className="font-['Syne',sans-serif] font-extrabold text-xl tracking-tighter bg-linear-to-r from-orange-400 via-orange-500 to-yellow-400 bg-clip-text text-transparent animate-[title-shimmer_5s_linear_infinite] bg-size-[200%_auto]">
+            <span className="font-['Syne',sans-serif] font-black text-xl tracking-tight text-orange-500">
               AlmaAPP
             </span>
           </div>
@@ -1600,14 +1581,9 @@ export function UniversalLayout({
         </footer>
 
         <style>{`
-          @keyframes title-shimmer { to { background-position: 200% center; } }
-          @keyframes signal-bounce { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(0.3); } }
-          @keyframes logo-pop { 0% { transform: perspective(600px) rotateY(-15deg) rotateX(10deg) scale(0.9); } 40% { transform: perspective(600px) rotateY(5deg) rotateX(-3deg) scale(1.08); } 100% { transform: perspective(600px) rotateY(0deg) rotateX(0deg) scale(1); } }
           .custom-scrollbar::-webkit-scrollbar { width: 5px; }
           .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 10px; }
           .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-          .perspective-200 { perspective: 200px; }
-          .transform-style-3d { transform-style: preserve-3d; }
         `}</style>
 
         <CommandPalette menus={menus} />

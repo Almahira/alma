@@ -96,9 +96,11 @@ export class WarehouseProjection implements ProjectionHandler<WarehouseState> {
   private opnames = new Map<string, StockOpnameDoc>();
   private spoilWastes = new Map<string, SpoilWasteDoc>();
   private recipes = new Map<string, RecipeDoc>();
+  private cachedState: WarehouseState | null = null;
 
   public applyEvent(event: LedgerEventDoc): void {
     const { type, payload, aggregateId } = event;
+    this.cachedState = null;
 
     switch (type) {
       // DISTRIBUSI
@@ -320,12 +322,17 @@ export class WarehouseProjection implements ProjectionHandler<WarehouseState> {
   }
 
   public getState(): WarehouseState {
+    // Kembalikan objek cache instan jika data tidak berubah (Zero sorting cost)
+    if (this.cachedState) {
+      return this.cachedState;
+    }
+
     const initialStocksObj: Record<string, number> = {};
     this.initialStocks.forEach((val, key) => {
       initialStocksObj[key] = val;
     });
 
-    return {
+    this.cachedState = {
       distributions: Array.from(this.distributions.values()).sort(
         (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
       ),
@@ -338,9 +345,12 @@ export class WarehouseProjection implements ProjectionHandler<WarehouseState> {
       ),
       recipes: Array.from(this.recipes.values()),
     };
+
+    return this.cachedState;
   }
 
   public reset(): void {
+    this.cachedState = null;
     this.distributions.clear();
     this.initialStocks.clear();
     this.opnames.clear();

@@ -459,6 +459,35 @@ export function VendorPageSM() {
     });
   }, [outlets, localCompanyId, localRegionId]);
 
+  const regionMap = useMemo(() => {
+    const map = new Map<string, any>();
+    regions.forEach((r: any) => map.set(r.id, r));
+    return map;
+  }, [regions]);
+
+  const outletMap = useMemo(() => {
+    const map = new Map<string, any>();
+    outlets.forEach((o: any) => map.set(o.id, o));
+    return map;
+  }, [outlets]);
+
+  const vendorDocsMap = useMemo(() => {
+    const map = new Map<string, any[]>();
+    documents.forEach((d: any) => {
+      const isDocActive =
+        d.isActive !== undefined
+          ? d.isActive
+          : d.is_active !== undefined
+            ? d.is_active
+            : d.status === "Aktif";
+      if (isDocActive && d.vendorId) {
+        if (!map.has(d.vendorId)) map.set(d.vendorId, []);
+        map.get(d.vendorId)!.push(d);
+      }
+    });
+    return map;
+  }, [documents]);
+
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (
@@ -701,12 +730,10 @@ export function VendorPageSM() {
 
       {/* DAFTAR VENDOR (KARTU MOBILE) */}
       <div className="flex-1 overflow-y-auto p-3 space-y-2.5 custom-scrollbar">
-        {filteredVendors.map((v) => {
-          const reg = regions.find((r) => r.id === v.regionId);
-          const out = outlets.find((o) => o.id === v.outletId);
-          const vendorDocs = documents.filter(
-            (d) => d.vendorId === v.id && d.status === "Aktif",
-          );
+        {filteredVendors.map((v: any) => {
+          const reg = v.regionId ? regionMap.get(v.regionId) : null;
+          const out = v.outletId ? outletMap.get(v.outletId) : null;
+          const vendorDocs = vendorDocsMap.get(v.id) || [];
 
           return (
             <div

@@ -453,6 +453,36 @@ export function VendorPage() {
     });
   }, [outlets, localCompanyId, localRegionId]);
 
+  const regionMap = useMemo(() => {
+    const map = new Map<string, any>();
+    regions.forEach((r: any) => map.set(r.id, r));
+    return map;
+  }, [regions]);
+
+  const outletMap = useMemo(() => {
+    const map = new Map<string, any>();
+    outlets.forEach((o: any) => map.set(o.id, o));
+    return map;
+  }, [outlets]);
+
+  // Pre-aggregate dokumen per vendor dalam 1x putaran O(D) (Menghilangkan 50.000 loop di render)
+  const vendorDocsMap = useMemo(() => {
+    const map = new Map<string, any[]>();
+    documents.forEach((d: any) => {
+      const isDocActive =
+        d.isActive !== undefined
+          ? d.isActive
+          : d.is_active !== undefined
+            ? d.is_active
+            : d.status === "Aktif";
+      if (isDocActive && d.vendorId) {
+        if (!map.has(d.vendorId)) map.set(d.vendorId, []);
+        map.get(d.vendorId)!.push(d);
+      }
+    });
+    return map;
+  }, [documents]);
+
   // =========================================================================
   // PERBAIKAN SPASIAL MUTLAK: PENYEKATAN VENDOR CABANG & HOLDING
   // =========================================================================
@@ -744,12 +774,11 @@ export function VendorPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-(--border-color) text-xs font-semibold text-(--text-primary)">
-              {filteredVendors.map((v) => {
-                const reg = regions.find((r) => r.id === v.regionId);
-                const out = outlets.find((o) => o.id === v.outletId);
-                const vendorDocs = documents.filter(
-                  (d) => d.vendorId === v.id && d.status === "Aktif",
-                );
+              {filteredVendors.map((v: any) => {
+                // Akses instan O(1) tanpa memindai seluruh array berkali-kali
+                const reg = v.regionId ? regionMap.get(v.regionId) : null;
+                const out = v.outletId ? outletMap.get(v.outletId) : null;
+                const vendorDocs = vendorDocsMap.get(v.id) || [];
 
                 return (
                   <tr

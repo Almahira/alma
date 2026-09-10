@@ -30,6 +30,14 @@ export function calculateExecutiveFinancials(
       ? localStorage.getItem("__unv_companyId")
       : "") ||
     "";
+
+  // 1. Indexing O(1) Produk & Kategori (Menghilangkan 1 juta iterasi di dalam loop belanja)
+  const productMap = new Map<string, any>();
+  (products || []).forEach((p: any) => productMap.set(p.id, p));
+
+  const categoryMap = new Map<string, any>();
+  (itemCategories || []).forEach((c: any) => categoryMap.set(c.id, c));
+
   // 1. REVENUE DARI PLUSALES
   const filteredSales = (plusalesDocs || []).filter((d) => {
     const matchCompany =
@@ -162,11 +170,9 @@ export function calculateExecutiveFinancials(
       const subtotal =
         Number(item.subtotal) ||
         Number(item.qty || 1) * Number(item.price || 0);
-      const productObj = (products || []).find((p) => p.id === item.itemId);
+      const productObj = productMap.get(item.itemId);
       const categoryId = item.categoryId || productObj?.categoryId || "";
-      const categoryObj = (itemCategories || []).find(
-        (c) => c.id === categoryId,
-      );
+      const categoryObj = categoryMap.get(categoryId);
       const rawCatName = (
         categoryObj?.name ||
         item.categoryName ||
@@ -426,24 +432,30 @@ export function calculateExecutiveFinancials(
   const isNomplok = finalProfitOwner < 0;
 
   // 8. PERFORMA OUTLET
+  // 8. PERFORMA OUTLET (Agregasi O(N) satu putaran)
+  const outletSalesMap = new Map<string, number>();
+  (plusalesDocs || []).forEach((d: any) => {
+    const isAct = d.isActive !== undefined ? d.isActive : d.is_active;
+    if (
+      d.outletId &&
+      d.date &&
+      d.date.startsWith(filters.month) &&
+      isAct !== false
+    ) {
+      outletSalesMap.set(
+        d.outletId,
+        (outletSalesMap.get(d.outletId) || 0) + (d.netSales || 0),
+      );
+    }
+  });
+
   const outletPerformance = (outlets || [])
-    .filter((out) => !activeCompanyId || out.companyId === activeCompanyId)
-    .map((out) => {
-      const salesOfOutlet = (plusalesDocs || [])
-        .filter(
-          (d) =>
-            d.outletId === out.id &&
-            d.date &&
-            d.date.startsWith(filters.month) &&
-            d.isActive !== false,
-        )
-        .reduce((sum, d) => sum + (d.netSales || 0), 0);
-      return {
-        outletId: out.id,
-        outletName: out.name,
-        netSales: salesOfOutlet,
-      };
-    })
+    .filter((out: any) => !activeCompanyId || out.companyId === activeCompanyId)
+    .map((out: any) => ({
+      outletId: out.id,
+      outletName: out.name,
+      netSales: outletSalesMap.get(out.id) || 0,
+    }))
     .sort((a, b) => b.netSales - a.netSales);
 
   const totalRestoExpenses = totalUsageAll + realisasiGaji + bankFee;

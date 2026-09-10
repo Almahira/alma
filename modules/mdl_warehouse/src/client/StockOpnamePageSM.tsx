@@ -156,95 +156,114 @@ export function StockOpnamePageSM() {
   // =========================================================================
   const opnameMatrix = useMemo(() => {
     const validProducts = products.filter(
-      (p) => p.status === "Aktif" && !p.isExpense,
+      (p: any) => p.status === "Aktif" && !p.isExpense,
     );
-    return validProducts.map((p) => {
-      const uomName = uoms.find((u) => u.id === p.uomId)?.name || "PCS";
-      const catName =
-        categories.find((c) => c.id === p.categoryId)?.name || "-";
 
-      // 1. Stok Awal (Baseline) sesuai Outlet yang Aktif Dipilih
+    // 1. Indexing O(1) Kategori & UOM
+    const uomMap = new Map<string, string>();
+    uoms.forEach((u: any) => uomMap.set(u.id, u.name));
+
+    const catMap = new Map<string, string>();
+    categories.forEach((c: any) => catMap.set(c.id, c.name));
+
+    // 2. Pre-aggregate Stok Masuk dari Receiving dalam 1x putaran O(N)
+    const stockInMap = new Map<
+      string,
+      { qty: number; currentPrice: number; previousPrice: number }
+    >();
+    receivingDocs.forEach((doc: any) => {
+      const isDocActive =
+        doc.isActive !== undefined ? doc.isActive : doc.is_active;
+      const matchCompany = !localCompanyId || doc.companyId === localCompanyId;
+      const matchOutlet = activeOutletId
+        ? doc.outletId === activeOutletId
+        : !doc.outletId && (!localRegionId || doc.regionId === localRegionId);
+      const matchActive = doc.status !== "CANCELLED" && isDocActive !== false;
+
+      if (
+        matchCompany &&
+        matchOutlet &&
+        matchActive &&
+        Array.isArray(doc.items)
+      ) {
+        doc.items.forEach((it: any) => {
+          if (!it.itemId || it.isExpense) return;
+          const prev = stockInMap.get(it.itemId) || {
+            qty: 0,
+            currentPrice: 0,
+            previousPrice: 0,
+          };
+          const itemQty = Number(it.receivedQty || it.qty || 0);
+          const itemPrice = Math.round(Number(it.price || 0));
+
+          stockInMap.set(it.itemId, {
+            qty: prev.qty + itemQty,
+            previousPrice: prev.currentPrice || itemPrice,
+            currentPrice: itemPrice,
+          });
+        });
+      }
+    });
+
+    // 3. Pre-aggregate Stok Keluar Distribusi dalam 1x putaran O(N)
+    const stockOutMap = new Map<string, number>();
+    distributions.forEach((d: any) => {
+      const isDistActive = d.isActive !== undefined ? d.isActive : d.is_active;
+      const matchOutlet = activeOutletId
+        ? d.outletId === activeOutletId
+        : !d.outletId;
+      const matchCompany = !localCompanyId || d.companyId === localCompanyId;
+
+      if (matchOutlet && matchCompany && isDistActive !== false && d.itemId) {
+        const cur = stockOutMap.get(d.itemId) || 0;
+        stockOutMap.set(d.itemId, cur + Number(d.qty || 0));
+      }
+    });
+
+    // 4. Pre-aggregate Spoil & Waste dalam 1x putaran O(N)
+    const spoilWasteMap = new Map<string, number>();
+    spoilWastes.forEach((sw: any) => {
+      const isSwActive = sw.isActive !== undefined ? sw.isActive : sw.is_active;
+      const matchOutlet = activeOutletId
+        ? sw.outletId === activeOutletId
+        : !sw.outletId;
+      const matchCompany = !localCompanyId || sw.companyId === localCompanyId;
+
+      if (matchOutlet && matchCompany && isSwActive !== false && sw.itemId) {
+        const cur = spoilWasteMap.get(sw.itemId) || 0;
+        spoilWasteMap.set(
+          sw.itemId,
+          cur + Number(sw.convertedBaseQty || sw.inputQty || 0),
+        );
+      }
+    });
+
+    // 5. Mapping Produk O(1) Instan
+    return validProducts.map((p: any) => {
+      const uomName = uomMap.get(p.uomId) || "PCS";
+      const catName = catMap.get(p.categoryId) || "-";
+
       const initialStockKey = `${activeOutletId || localRegionId}_${p.id}`;
       const initialStock = initialStocks[initialStockKey] || 0;
 
-      // 2. Stok Masuk (Receiving) - Dukung is_active fallback
-      const receivingItemsForProduct = receivingDocs
-        .filter((doc: any) => {
-          const isDocActive =
-            doc.isActive !== undefined ? doc.isActive : doc.is_active;
-          const matchCompany =
-            !localCompanyId || doc.companyId === localCompanyId;
-          const matchOutlet = activeOutletId
-            ? doc.outletId === activeOutletId
-            : !doc.outletId &&
-              (!localRegionId || doc.regionId === localRegionId);
-          const matchActive =
-            doc.status !== "CANCELLED" && isDocActive !== false;
-          return matchCompany && matchOutlet && matchActive;
-        })
-        .flatMap((doc) => doc.items || [])
-        .filter((it) => it.itemId === p.id && !it.isExpense);
+      const rcvData = stockInMap.get(p.id);
+      const stockIn = rcvData?.qty || 0;
+      const stockOut = stockOutMap.get(p.id) || 0;
+      const spoilWasteQty = spoilWasteMap.get(p.id) || 0;
 
-      const stockIn = receivingItemsForProduct.reduce(
-        (sum, it) => sum + Number(it.receivedQty || it.qty || 0),
-        0,
-      );
-
-      // 3. Stok Keluar (Distribusi Divisi) - Tersekat ke Outlet Terpilih
-      const stockOut = distributions
-        .filter((d: any) => {
-          const isDistActive =
-            d.isActive !== undefined ? d.isActive : d.is_active;
-          return (
-            d.itemId === p.id &&
-            (activeOutletId ? d.outletId === activeOutletId : !d.outletId) &&
-            (!localCompanyId || d.companyId === localCompanyId) &&
-            isDistActive !== false
-          );
-        })
-        .reduce((sum, d) => sum + Number(d.qty || 0), 0);
-
-      // 4. Stok Rusak (Spoil & Waste) - Tersekat ke Outlet Terpilih
-      const spoilWasteQty = spoilWastes
-        .filter((sw: any) => {
-          const isSwActive =
-            sw.isActive !== undefined ? sw.isActive : sw.is_active;
-          return (
-            sw.itemId === p.id &&
-            (activeOutletId ? sw.outletId === activeOutletId : !sw.outletId) &&
-            (!localCompanyId || sw.companyId === localCompanyId) &&
-            isSwActive !== false
-          );
-        })
-        .reduce(
-          (sum, sw) => sum + Number(sw.convertedBaseQty || sw.inputQty || 0),
-          0,
-        );
-
-      // 5. Sisa Stok Sistem Riil
       const rawSystemStock = initialStock + stockIn - stockOut - spoilWasteQty;
       const systemStock = parseFloat(rawSystemStock.toFixed(4));
 
-      // 6. Harga HPP Terbaru & Trend Harga
       const scopeKey =
         activeOutletId || localRegionId || localCompanyId || "DEFAULT";
       const pricing =
         p.pricing?.[scopeKey] ||
         p.pricing?.[Object.keys(p.pricing || {})[0]] ||
         {};
-      const currentPrice = Math.round(Number(pricing.basePrice || 0));
+      const currentPrice =
+        rcvData?.currentPrice || Math.round(Number(pricing.basePrice || 0));
+      const previousPrice = rcvData?.previousPrice || currentPrice;
 
-      let previousPrice = currentPrice;
-      if (receivingItemsForProduct.length > 1) {
-        previousPrice = Math.round(
-          Number(
-            receivingItemsForProduct[receivingItemsForProduct.length - 2]
-              .price || currentPrice,
-          ),
-        );
-      }
-
-      // 7. Hitungan Fisik & Selisih
       const physicalStock =
         physicalCounts[p.id] !== undefined ? physicalCounts[p.id] : systemStock;
       const varianceQty = parseFloat((physicalStock - systemStock).toFixed(4));
@@ -285,7 +304,6 @@ export function StockOpnamePageSM() {
     physicalCounts,
     itemNotes,
   ]);
-
   const filteredMatrix = useMemo(() => {
     return opnameMatrix.filter(
       (item) =>

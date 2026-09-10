@@ -198,7 +198,30 @@ const RecipeFormModal: React.FC<{
 
   const rawProductOptions = useMemo(() => {
     return products
-      .filter((p) => p.status === "Aktif" && !p.isExpense)
+      .filter((p: any) => {
+        const isAct =
+          p.status !== undefined
+            ? p.status === "Aktif"
+            : p.isActive !== undefined
+              ? Boolean(p.isActive)
+              : Boolean(p.is_active);
+        if (!isAct || p.isExpense || p.approvalStatus === "MERGED")
+          return false;
+
+        const localCompanyId = localStorage.getItem("__unv_companyId") || "";
+        const localRegionId = localStorage.getItem("__unv_regionId") || "";
+        const localOutletId = localStorage.getItem("__unv_outletId") || "";
+
+        if (localCompanyId && p.companyId && p.companyId !== localCompanyId)
+          return false;
+        if (localRegionId && p.regionId && p.regionId !== localRegionId)
+          return false;
+
+        if (localOutletId) {
+          return !p.outletId || p.outletId === localOutletId;
+        }
+        return true;
+      })
       .map((p) => ({
         id: p.id,
         name: p.name,

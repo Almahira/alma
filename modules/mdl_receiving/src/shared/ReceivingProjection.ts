@@ -9,9 +9,11 @@ export interface ReceivingState {
 export class ReceivingProjection implements ProjectionHandler<ReceivingState> {
   aggregateType = "RECEIVING_DOCUMENT";
   private documents = new Map<string, any>();
+  private cachedState: ReceivingState | null = null;
 
   public applyEvent(event: LedgerEventDoc): void {
     const { type, payload, aggregateId } = event;
+    this.cachedState = null;
 
     switch (type) {
       case "RECEIVING_CREATED": {
@@ -242,14 +244,19 @@ export class ReceivingProjection implements ProjectionHandler<ReceivingState> {
   }
 
   public getState(): ReceivingState {
-    return {
+    if (this.cachedState) {
+      return this.cachedState;
+    }
+    this.cachedState = {
       documents: Array.from(this.documents.values()).sort(
         (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
       ),
     };
+    return this.cachedState;
   }
 
   public reset(): void {
+    this.cachedState = null;
     this.documents.clear();
   }
 

@@ -231,6 +231,24 @@ export function ReceivingPageSM() {
     filterStatus,
   ]);
 
+  const vendorMap = useMemo(() => {
+    const map = new Map<string, any>();
+    vendors.forEach((v: any) => map.set(v.id, v));
+    return map;
+  }, [vendors]);
+
+  const regionMap = useMemo(() => {
+    const map = new Map<string, any>();
+    regions.forEach((r: any) => map.set(r.id, r));
+    return map;
+  }, [regions]);
+
+  const outletMap = useMemo(() => {
+    const map = new Map<string, any>();
+    outlets.forEach((o: any) => map.set(o.id, o));
+    return map;
+  }, [outlets]);
+
   const groupedData = useMemo(() => {
     const groups: Record<
       string,
@@ -249,25 +267,14 @@ export function ReceivingPageSM() {
       let bankInfo: any = null;
 
       if (activeTab === "HUTANG") {
-        // 1. Cek apakah ini Vendor Eksternal Asli
-        const extVendor = doc.vendorId
-          ? vendors.find((v) => v.id === doc.vendorId)
-          : null;
-
-        // 2. Cek apakah vendorId merujuk ke Regional
-        const regVendor = doc.vendorId
-          ? regions.find((r) => r.id === doc.vendorId)
-          : null;
-
-        // 3. Fallback jika kiriman internal tanpa vendorId (ambil dari regionId)
+        const extVendor = doc.vendorId ? vendorMap.get(doc.vendorId) : null;
+        const regVendor = doc.vendorId ? regionMap.get(doc.vendorId) : null;
         const fallbackReg =
-          !doc.vendorId && doc.regionId
-            ? regions.find((r) => r.id === doc.regionId)
-            : null;
+          !doc.vendorId && doc.regionId ? regionMap.get(doc.regionId) : null;
 
         if (extVendor) {
           key = extVendor.id;
-          title = extVendor.name; // Contoh: "PT MAJU KASIH"
+          title = extVendor.name;
           bankInfo = {
             bankName: extVendor.bankName,
             bankAccount: extVendor.bankAccount,
@@ -275,24 +282,24 @@ export function ReceivingPageSM() {
           };
         } else if (regVendor) {
           key = regVendor.id;
-          title = regVendor.name; // Contoh: "BANDUNG BARAT"
+          title = regVendor.name;
         } else if (fallbackReg) {
           key = fallbackReg.id;
-          title = fallbackReg.name; // Contoh: "BANDUNG BARAT"
+          title = fallbackReg.name;
         } else {
           key = doc.vendorId || doc.regionId || "unknown";
           title = "Vendor Umum";
         }
       } else if (activeTab === "PIUTANG") {
         key = doc.outletId || "unknown";
-        const targetOutlet = outlets.find((o) => o.id === doc.outletId);
+        const targetOutlet = doc.outletId ? outletMap.get(doc.outletId) : null;
         title = targetOutlet
           ? targetOutlet.name
           : `Outlet [${(doc.outletId || "").substring(0, 8)}]`;
       } else {
         if (!localOutletId && doc.outletId) {
           key = doc.outletId;
-          const targetOutlet = outlets.find((o) => o.id === doc.outletId);
+          const targetOutlet = outletMap.get(doc.outletId);
           title = targetOutlet
             ? `KAS KECIL: ${targetOutlet.name.toUpperCase()}`
             : `OUTLET [${doc.outletId}]`;

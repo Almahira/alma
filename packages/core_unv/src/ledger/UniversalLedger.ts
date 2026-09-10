@@ -25,6 +25,7 @@ import { globalInboxDaemon } from "./InboxDaemon";
 import { globalCircuitBreaker } from "../io/CircuitBreaker";
 import { getServerUrl, getApiUrl } from "../config/env";
 import { LicenseManager } from "./licenseManager";
+import { notifyStateUpdated } from "../cqrs/EventBus";
 
 if (typeof window !== "undefined" && (import.meta as any).env?.DEV) {
   disableWarnings();
@@ -181,9 +182,7 @@ export class UniversalLedger {
             `[SOCKET PUSH] Menerima sinyal transaksi baru dari ${data?.originDeviceId || "Server"}. Mengambil delta...`,
           );
           await this.syncInitial();
-          if (typeof window !== "undefined") {
-            window.dispatchEvent(new Event("UNV_STATE_UPDATED"));
-          }
+          notifyStateUpdated();
         }
       });
 
@@ -303,9 +302,7 @@ export class UniversalLedger {
         await this.db.collections.inbox.bulkUpsert(inboxDocsToInsert);
         await globalInboxDaemon.processQueue();
 
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(new Event("UNV_STATE_UPDATED"));
-        }
+        notifyStateUpdated();
       }
     } catch (error) {
       console.warn("[UNIVERSAL LEDGER] Gagal sinkronisasi awal:", error);
@@ -376,9 +373,7 @@ export class UniversalLedger {
 
     await this.db.collections.events.insert(eventDoc);
 
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(new Event("UNV_STATE_UPDATED"));
-    }
+    notifyStateUpdated();
   }
 
   public async appendEvent(

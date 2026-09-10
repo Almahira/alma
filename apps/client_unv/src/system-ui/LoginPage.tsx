@@ -178,34 +178,10 @@ export const LoginPage: React.FC<{ onLoginSuccess?: () => void }> = ({
 
   return (
     <div className="relative min-h-screen w-full flex items-center justify-center bg-slate-950 p-4 font-sans selection:bg-orange-500 selection:text-white overflow-hidden">
-      {/* Background Ornamen Glow dengan Animasi */}
+      {/* Background Ornamen Statis (0% CPU Usage) */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
-        <motion.div
-          className="absolute top-1/4 left-1/2 -translate-x-1/2 w-120 h-120 rounded-full bg-orange-500/10 blur-3xl"
-          animate={{
-            scale: [1, 1.2, 1],
-            opacity: [0.1, 0.2, 0.1],
-            x: ["-50%", "-45%", "-50%"],
-          }}
-          transition={{
-            duration: 8,
-            repeat: Infinity,
-            ease: "easeInOut",
-          }}
-        />
-        <motion.div
-          className="absolute bottom-1/4 right-1/4 w-96 h-96 rounded-full bg-teal-500/10 blur-3xl"
-          animate={{
-            scale: [1, 1.3, 1],
-            opacity: [0.1, 0.25, 0.1],
-            y: [0, -20, 0],
-          }}
-          transition={{
-            duration: 10,
-            repeat: Infinity,
-            ease: "easeInOut",
-          }}
-        />
+        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 rounded-full bg-orange-500/10 blur-3xl" />
+        <div className="absolute bottom-1/4 right-1/4 w-80 h-80 rounded-full bg-teal-500/10 blur-3xl" />
       </div>
 
       {/* Kartu Sentral Liquid Glass */}

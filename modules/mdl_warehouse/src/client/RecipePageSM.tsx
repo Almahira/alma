@@ -68,7 +68,9 @@ const RecipeDetailModalSM: React.FC<{ recipe: any; onClose: () => void }> = ({
               className="p-2 bg-(--surface-hover) rounded-lg border border-(--border-color) flex justify-between items-center text-xs"
             >
               <div>
-                <span className="font-bold block text-(--text-primary)">{it.itemName}</span>
+                <span className="font-bold block text-(--text-primary)">
+                  {it.itemName}
+                </span>
                 {it.variantInfo && (
                   <span className="text-[9px] text-slate-400 font-mono">
                     Kemasan: {it.variantInfo}
@@ -178,7 +180,30 @@ const RecipeFormModalSM: React.FC<{
 
   const rawProductOptions = useMemo(() => {
     return products
-      .filter((p) => p.status === "Aktif" && !p.isExpense)
+      .filter((p: any) => {
+        const isAct =
+          p.status !== undefined
+            ? p.status === "Aktif"
+            : p.isActive !== undefined
+              ? Boolean(p.isActive)
+              : Boolean(p.is_active);
+        if (!isAct || p.isExpense || p.approvalStatus === "MERGED")
+          return false;
+
+        const localCompanyId = localStorage.getItem("__unv_companyId") || "";
+        const localRegionId = localStorage.getItem("__unv_regionId") || "";
+        const localOutletId = localStorage.getItem("__unv_outletId") || "";
+
+        if (localCompanyId && p.companyId && p.companyId !== localCompanyId)
+          return false;
+        if (localRegionId && p.regionId && p.regionId !== localRegionId)
+          return false;
+
+        if (localOutletId) {
+          return !p.outletId || p.outletId === localOutletId;
+        }
+        return true;
+      })
       .map((p) => ({
         id: p.id,
         name: p.name,
@@ -235,7 +260,9 @@ const RecipeFormModalSM: React.FC<{
       uoms.find((u) => u.id === selectedItemObj.uomId)?.name || "KG";
     const pricing =
       selectedItemObj.pricing?.[localOutletId || "DEFAULT"] ||
-      selectedItemObj.pricing?.[Object.keys(selectedItemObj.pricing || {})[0]] ||
+      selectedItemObj.pricing?.[
+        Object.keys(selectedItemObj.pricing || {})[0]
+      ] ||
       {};
     const basePrice = pricing.basePrice || 0;
     const calcResult = calculatePackagingLossCost(
@@ -269,7 +296,9 @@ const RecipeFormModalSM: React.FC<{
     if (!selectedSubRecipeId || Number(subRecipeQty) <= 0) {
       return sysToast.error("Error", "Pilih sub-menu dan isi jumlah porsi!");
     }
-    const rcpObj = availableSubRecipes.find((r) => r.id === selectedSubRecipeId);
+    const rcpObj = availableSubRecipes.find(
+      (r) => r.id === selectedSubRecipeId,
+    );
     if (!rcpObj) return;
     const subtotalCost = Math.round(
       (rcpObj.totalHppCost || 0) * Number(subRecipeQty),
@@ -350,15 +379,23 @@ const RecipeFormModalSM: React.FC<{
           <div className="flex items-center gap-2">
             <CookingPot className="w-5 h-5 text-orange-500" />
             <h3 className="font-black text-xs uppercase tracking-wide">
-              {isEditMode ? "Edit Formula Resep (BOM)" : "Buat Formula Resep Baru"}
+              {isEditMode
+                ? "Edit Formula Resep (BOM)"
+                : "Buat Formula Resep Baru"}
             </h3>
           </div>
-          <button onClick={onClose} className="p-1 rounded text-(--text-secondary) hover:text-rose-500">
+          <button
+            onClick={onClose}
+            className="p-1 rounded text-(--text-secondary) hover:text-rose-500"
+          >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <form onSubmit={handleSave} className="flex flex-col flex-1 overflow-hidden">
+        <form
+          onSubmit={handleSave}
+          className="flex flex-col flex-1 overflow-hidden"
+        >
           <div className="p-3.5 overflow-y-auto custom-scrollbar space-y-3 flex-1">
             {/* 1. IDENTITAS RESEP */}
             <div className="grid grid-cols-3 gap-2 bg-(--surface-hover) p-3 rounded-xl border border-(--border-color)">
@@ -437,7 +474,9 @@ const RecipeFormModalSM: React.FC<{
                     min={0.001}
                     value={rawQty}
                     onChange={(e) =>
-                      setRawQty(e.target.value === "" ? "" : Number(e.target.value))
+                      setRawQty(
+                        e.target.value === "" ? "" : Number(e.target.value),
+                      )
                     }
                     placeholder="Takaran"
                     className="w-full text-xs font-bold p-2 bg-(--bg-card) border border-(--border-color) rounded-lg outline-none text-center font-mono text-(--text-primary)"
@@ -475,7 +514,9 @@ const RecipeFormModalSM: React.FC<{
                       className="flex items-center justify-between p-2 bg-(--bg-card) rounded-lg border border-(--border-color) text-xs"
                     >
                       <div className="truncate flex-1">
-                        <span className="font-bold text-(--text-primary) truncate block">{it.itemName}</span>
+                        <span className="font-bold text-(--text-primary) truncate block">
+                          {it.itemName}
+                        </span>
                         {it.variantInfo && (
                           <span className="text-[9px] text-slate-400 font-mono">
                             {it.variantInfo}
@@ -492,7 +533,9 @@ const RecipeFormModalSM: React.FC<{
                         <button
                           type="button"
                           onClick={() =>
-                            setRawMaterials((p) => p.filter((_, i) => i !== idx))
+                            setRawMaterials((p) =>
+                              p.filter((_, i) => i !== idx),
+                            )
                           }
                           className="text-(--text-secondary) hover:text-rose-500 p-0.5"
                         >
@@ -532,7 +575,9 @@ const RecipeFormModalSM: React.FC<{
                     step="any"
                     value={subRecipeQty}
                     onChange={(e) =>
-                      setSubRecipeQty(e.target.value === "" ? "" : Number(e.target.value))
+                      setSubRecipeQty(
+                        e.target.value === "" ? "" : Number(e.target.value),
+                      )
                     }
                     placeholder="Jumlah Porsi Sub-Menu"
                     className="w-full text-xs font-bold p-2 bg-(--bg-card) border border-(--border-color) rounded-lg outline-none text-center font-mono text-(--text-primary)"
@@ -556,7 +601,9 @@ const RecipeFormModalSM: React.FC<{
                       key={idx}
                       className="flex items-center justify-between p-2 bg-(--bg-card) rounded-lg border border-(--border-color) text-xs"
                     >
-                      <span className="font-bold text-blue-500 truncate flex-1">{it.recipeName}</span>
+                      <span className="font-bold text-blue-500 truncate flex-1">
+                        {it.recipeName}
+                      </span>
                       <div className="flex items-center gap-2 shrink-0">
                         <span className="font-mono text-orange-500 font-bold text-xs">
                           {it.qty} {it.uomName}
@@ -604,7 +651,9 @@ const RecipeFormModalSM: React.FC<{
                     onChange={(e) => setFoodCostPct(Number(e.target.value))}
                     className="w-14 text-xs font-black p-1 bg-(--bg-card) border border-(--border-color) rounded-lg text-center font-mono text-emerald-500 outline-none"
                   />
-                  <span className="text-xs font-bold text-(--text-secondary)">%</span>
+                  <span className="text-xs font-bold text-(--text-secondary)">
+                    %
+                  </span>
                 </div>
               </div>
 
@@ -779,21 +828,27 @@ export function RecipePageSM() {
               {/* Rincian Finansial Resep */}
               <div className="grid grid-cols-3 gap-2 py-1 border-t border-(--border-color) text-xs">
                 <div>
-                  <span className="text-[9px] text-(--text-secondary) block">Total HPP</span>
+                  <span className="text-[9px] text-(--text-secondary) block">
+                    Total HPP
+                  </span>
                   <span className="font-mono font-bold text-(--text-primary) text-xs">
                     Rp {(rcp.totalHppCost || 0).toLocaleString()}
                   </span>
                 </div>
 
                 <div>
-                  <span className="text-[9px] text-(--text-secondary) block">Food Cost</span>
+                  <span className="text-[9px] text-(--text-secondary) block">
+                    Food Cost
+                  </span>
                   <span className="font-mono font-black text-orange-500 text-xs">
                     {rcp.foodCostPercentage || 30}%
                   </span>
                 </div>
 
                 <div className="text-right">
-                  <span className="text-[9px] text-(--text-secondary) block">Jual Ideal</span>
+                  <span className="text-[9px] text-(--text-secondary) block">
+                    Jual Ideal
+                  </span>
                   <span className="font-mono font-black text-emerald-500 text-xs">
                     Rp {(rcp.idealSellingPrice || 0).toLocaleString()}
                   </span>

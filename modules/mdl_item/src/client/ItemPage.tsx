@@ -1,5 +1,12 @@
 // File: modules/mdl_item/src/client/ItemPage.tsx
-import React, { useState, useRef, useEffect } from "react";
+import React, {
+  useState,
+  useRef,
+  useEffect,
+  useMemo,
+  useCallback,
+  useDeferredValue,
+} from "react";
 import {
   Package,
   FileDown,
@@ -17,10 +24,15 @@ import {
   FileSpreadsheet,
   Layers,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Wrench,
   Star,
+  Search,
+  ArrowUpDown,
 } from "lucide-react";
 import { useItemStore } from "./store";
+import { RuntimeSession } from "../../../../packages/core_unv/src/config/session";
 import { useOrgStore } from "../../../mdl_organization/src/client/store";
 import { globalCommandBus } from "../../../../packages/core_unv/src/cqrs/CommandBus";
 import { useUniversalModal } from "../../../../apps/client_unv/src/shared-ui/UniversalLayout";
@@ -35,6 +47,13 @@ import {
   productExcelSchema,
 } from "./features/excel-item";
 import { exportPdfItem } from "./features/pdf-item";
+
+// =========================================================================
+// KONSTANTA GLOBAL
+// =========================================================================
+const PAGE_SIZE = 30;
+
+type SortKey = "NAME_ASC" | "NAME_DESC" | "PRICE_ASC" | "PRICE_DESC" | "NEWEST";
 
 function parseSmartNumber(val: any): number {
   if (typeof val === "number") return isNaN(val) ? 0 : val;
@@ -53,7 +72,6 @@ function parseSmartNumber(val: any): number {
   return isNaN(parsed) ? 0 : parsed;
 }
 
-// Daftar pilihan satuan standar untuk konversi isi kemasan
 const CONVERSION_UOM_OPTIONS = [
   { value: "KG", label: "Kilogram (KG)" },
   { value: "GRAM", label: "Gram (GRAM)" },
@@ -73,7 +91,116 @@ interface ConversionRow {
 }
 
 // =========================================================================
-// 1. MODAL FORM: PRODUK BARANG & JASA (OTOMASI LOKASI DARI DEVICE ID)
+// KOMPONEN PAGINASI REUSABLE
+// =========================================================================
+const Pagination: React.FC<{
+  page: number;
+  totalPages: number;
+  totalItems: number;
+  pageSize: number;
+  onPageChange: (p: number) => void;
+}> = ({ page, totalPages, totalItems, pageSize, onPageChange }) => {
+  const start = totalItems === 0 ? 0 : (page - 1) * pageSize + 1;
+  const end = Math.min(page * pageSize, totalItems);
+
+  const pageNumbers = useMemo(() => {
+    const arr: number[] = [];
+    const maxVisible = 5;
+    let startPage = Math.max(1, page - Math.floor(maxVisible / 2));
+    const endPage = Math.min(totalPages, startPage + maxVisible - 1);
+    if (endPage - startPage + 1 < maxVisible) {
+      startPage = Math.max(1, endPage - maxVisible + 1);
+    }
+    for (let i = startPage; i <= endPage; i++) arr.push(i);
+    return arr;
+  }, [page, totalPages]);
+
+  if (totalItems === 0) return null;
+
+  return (
+    <div className="flex items-center justify-between px-4 py-3 border-t border-(--border-color) bg-(--surface-hover) flex-wrap gap-2">
+      <div className="text-[11px] font-bold text-(--text-secondary)">
+        Menampilkan <span className="text-(--text-primary)">{start}</span>–
+        <span className="text-(--text-primary)">{end}</span> dari{" "}
+        <span className="text-(--text-primary)">{totalItems}</span> data
+      </div>
+
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => onPageChange(Math.max(1, page - 1))}
+          disabled={page === 1}
+          className="p-1.5 rounded-md border border-(--border-color) bg-(--bg-card) text-(--text-primary) disabled:opacity-40 disabled:cursor-not-allowed hover:bg-(--surface-hover) cursor-pointer"
+          aria-label="Halaman sebelumnya"
+        >
+          <ChevronLeft className="w-3.5 h-3.5" />
+        </button>
+
+        {pageNumbers[0] > 1 && (
+          <>
+            <button
+              type="button"
+              onClick={() => onPageChange(1)}
+              className="min-w-7 h-7 px-2 rounded-md text-[11px] font-bold border border-(--border-color) bg-(--bg-card) text-(--text-primary) hover:bg-(--surface-hover) cursor-pointer"
+            >
+              1
+            </button>
+            {pageNumbers[0] > 2 && (
+              <span className="px-1 text-(--text-secondary) text-[11px]">
+                …
+              </span>
+            )}
+          </>
+        )}
+
+        {pageNumbers.map((n) => (
+          <button
+            key={n}
+            type="button"
+            onClick={() => onPageChange(n)}
+            className={`min-w-7 h-7 px-2 rounded-md text-[11px] font-black border transition cursor-pointer ${
+              n === page
+                ? "bg-orange-500 text-white border-orange-500"
+                : "border-(--border-color) bg-(--bg-card) text-(--text-primary) hover:bg-(--surface-hover)"
+            }`}
+          >
+            {n}
+          </button>
+        ))}
+
+        {pageNumbers[pageNumbers.length - 1] < totalPages && (
+          <>
+            {pageNumbers[pageNumbers.length - 1] < totalPages - 1 && (
+              <span className="px-1 text-(--text-secondary) text-[11px]">
+                …
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => onPageChange(totalPages)}
+              className="min-w-7 h-7 px-2 rounded-md text-[11px] font-bold border border-(--border-color) bg-(--bg-card) text-(--text-primary) hover:bg-(--surface-hover) cursor-pointer"
+            >
+              {totalPages}
+            </button>
+          </>
+        )}
+
+        <button
+          type="button"
+          onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+          disabled={page === totalPages}
+          className="p-1.5 rounded-md border border-(--border-color) bg-(--bg-card) text-(--text-primary) disabled:opacity-40 disabled:cursor-not-allowed hover:bg-(--surface-hover) cursor-pointer"
+          aria-label="Halaman berikutnya"
+        >
+          <ChevronRight className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// =========================================================================
+// 1. MODAL FORM: PRODUK BARANG & JASA
 // =========================================================================
 const ProductForm: React.FC<{
   isEditMode: boolean;
@@ -84,7 +211,6 @@ const ProductForm: React.FC<{
   const { categories, uoms, products } = useItemStore();
   const { companies } = useOrgStore();
 
-  // ---> DETEKSI IDENTITAS PERANGKAT OTOMATIS <---
   const localCompanyId =
     localStorage.getItem("__unv_companyId") || companies[0]?.id || "";
   const localRegionId = localStorage.getItem("__unv_regionId") || null;
@@ -107,7 +233,6 @@ const ProductForm: React.FC<{
     isExpense: isExpenseMode,
   });
 
-  // State Varian Konversi Isi Kemasan (Multi-UOM)
   const [uomConversions, setUomConversions] = useState<ConversionRow[]>(() => {
     if (
       Array.isArray(initialData?.uomConversions) &&
@@ -164,7 +289,6 @@ const ProductForm: React.FC<{
   const [isCustomUom, setIsCustomUom] = useState(false);
   const [customUomName, setCustomUomName] = useState("");
 
-  // Kunci Pricing otomatis mewarisi cabang/wilayah mesin
   const activePricingKey =
     formData.outletId || formData.regionId || formData.companyId || "DEFAULT";
 
@@ -236,7 +360,6 @@ const ProductForm: React.FC<{
       let finalCategoryId = formData.categoryId;
       let finalUomId = formData.uomId;
 
-      // 1. Buat Kategori Baru jika inline (cek apakah sudah ada terlebih dahulu)
       if (isCustomCategory && customCategoryName.trim()) {
         const cleanCat = customCategoryName.toUpperCase().trim();
         const existingCat = categories.find(
@@ -248,10 +371,7 @@ const ProductForm: React.FC<{
           finalCategoryId = `CAT_${ulid()}`;
           await globalCommandBus.execute({
             type: "CREATE_CATEGORY",
-            payload: {
-              id: finalCategoryId,
-              name: cleanCat,
-            },
+            payload: { id: finalCategoryId, name: cleanCat },
           });
         }
       } else if (!finalCategoryId) {
@@ -267,7 +387,6 @@ const ProductForm: React.FC<{
         }
       }
 
-      // 2. Buat / Ambil UOM
       if (isExpenseMode) {
         const uomX = uoms.find((u) => u.name.toUpperCase() === "X");
         if (uomX) {
@@ -300,7 +419,6 @@ const ProductForm: React.FC<{
         }
       }
 
-      // Bersihkan dan format array varian konversi sebelum dikirim
       const cleanConversions = uomConversions
         .filter((c) => Number(c.value) > 0 && c.uom)
         .map((c, i) => ({
@@ -325,7 +443,7 @@ const ProductForm: React.FC<{
         uomId: finalUomId,
         isExpense: isExpenseMode,
         pricing: pricingMap,
-        uomConversions: cleanConversions, // <--- TERIKUT KE COMMAND PAYLOAD
+        uomConversions: cleanConversions,
         nameChanged: isNameChanged,
       };
 
@@ -347,7 +465,6 @@ const ProductForm: React.FC<{
   return (
     <form onSubmit={handleSave} className="flex flex-col h-full space-y-4">
       <div className="flex-1 space-y-4">
-        {/* NAMA ITEM / JASA */}
         <div>
           <label className="block text-[11px] font-black text-(--text-secondary) mb-1">
             NAMA {isExpenseMode ? "JASA / BIAYA OPERASIONAL" : "PRODUK BARANG"}
@@ -369,7 +486,6 @@ const ProductForm: React.FC<{
           />
         </div>
 
-        {/* KATEGORI & UOM */}
         <div
           className={`grid ${!isExpenseMode ? "grid-cols-2" : "grid-cols-1"} gap-3`}
         >
@@ -470,12 +586,10 @@ const ProductForm: React.FC<{
           )}
         </div>
 
-        {/* PANEL VARIAN KONVERSI ISI KEMASAN (MULTI-UOM) */}
         {!isExpenseMode && (
           <div className="bg-(--surface-hover) p-3.5 rounded-xl border border-(--border-color) space-y-2.5">
             <div className="flex items-center justify-between">
               <div>
-                {/* Ukuran teks judul diubah di sini: text-[11px] → text-[10px] */}
                 <span className="text-[10px] font-black text-orange-500 uppercase tracking-wider block">
                   VARIAN KONVERSI ISI (MULTI-UOM)
                 </span>
@@ -502,7 +616,6 @@ const ProductForm: React.FC<{
                   key={conv.id || idx}
                   className="p-2 bg-(--bg-card) border border-(--border-color) rounded-lg space-y-1.5"
                 >
-                  {/* Baris pertama: label dan tombol hapus */}
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-bold text-(--text-secondary) whitespace-nowrap">
                       1 {currentUomName}
@@ -517,9 +630,7 @@ const ProductForm: React.FC<{
                     </button>
                   </div>
 
-                  {/* Baris kedua: input, select, tombol default */}
                   <div className="flex items-center gap-1.5">
-                    {/* Input angka: lebar tetap w-14 (56px) – bisa diubah ke w-16 jika butuh sedikit lebih lebar */}
                     <input
                       type="number"
                       step="any"
@@ -536,7 +647,6 @@ const ProductForm: React.FC<{
                       placeholder="Nilai"
                       className="w-14 shrink-0 text-xs font-mono font-black text-center p-1.5 bg-(--bg-input) border border-(--border-color) rounded-md text-(--text-primary) outline-none focus:border-orange-500"
                     />
-                    {/* Dropdown UOM: flex-1 agar mengambil sisa ruang dan teks tidak terpotong */}
                     <select
                       value={conv.uom}
                       onChange={(e) =>
@@ -580,7 +690,6 @@ const ProductForm: React.FC<{
           </div>
         )}
 
-        {/* STRUKTUR HARGA & BIAYA */}
         <div className="bg-orange-500/5 p-3.5 rounded-xl border border-orange-500/20 mt-4">
           <label className="block text-[11px] font-black text-orange-500 mb-3 uppercase tracking-wider">
             {isExpenseMode ? "NOMINAL BIAYA / HPP" : "STRUKTUR HARGA PRODUK"}
@@ -951,6 +1060,17 @@ export function ItemPage() {
   const actionMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // === [BARU] TOOLKIT STATE: SEARCH + SORT + PAGINATION ===
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortBy, setSortBy] = useState<SortKey>("NAME_ASC");
+  const [page, setPage] = useState(1);
+  const deferredSearch = useDeferredValue(searchQuery);
+
+  // === [STATE BATCH VALIDASI] ===
+  const [selectedValidateIds, setSelectedValidateIds] = useState<string[]>([]);
+  const [isBatchProcessing, setIsBatchProcessing] = useState(false);
+  const MAX_BATCH_LIMIT = 30; // Batas aman event ledger per eksekusi
+
   const deviceScope =
     localStorage.getItem("__unv_deviceScope") ||
     (localStorage.getItem("__unv_outletId") ? "OUTLET" : "COMPANY");
@@ -969,8 +1089,56 @@ export function ItemPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const toggleAlias = (id: string) =>
-    setExpandedAliases((prev) => ({ ...prev, [id]: !prev[id] }));
+  // =====================================================================
+  // [BARU] PRE-COMPUTED HASH MAPS O(1) — Menggantikan .find() / .filter()
+  // =====================================================================
+  const categoryMap = useMemo(() => {
+    const m = new Map<string, string>();
+    categories.forEach((c: any) => m.set(c.id, c.name));
+    return m;
+  }, [categories]);
+
+  const uomMap = useMemo(() => {
+    const m = new Map<string, string>();
+    uoms.forEach((u: any) => m.set(u.id, u.name));
+    return m;
+  }, [uoms]);
+
+  const companyMap = useMemo(() => {
+    const m = new Map<string, any>();
+    companies.forEach((c: any) => m.set(c.id, c));
+    return m;
+  }, [companies]);
+
+  const regionMap = useMemo(() => {
+    const m = new Map<string, any>();
+    regions.forEach((r: any) => m.set(r.id, r));
+    return m;
+  }, [regions]);
+
+  const outletMap = useMemo(() => {
+    const m = new Map<string, any>();
+    outlets.forEach((o: any) => m.set(o.id, o));
+    return m;
+  }, [outlets]);
+
+  // Kumpulkan alias MERGED dikelompokkan by validateId (satu putaran O(M))
+  const aliasMap = useMemo(() => {
+    const m = new Map<string, any[]>();
+    products.forEach((a: any) => {
+      if (a.approvalStatus === "MERGED" && a.validateId) {
+        if (!m.has(a.validateId)) m.set(a.validateId, []);
+        m.get(a.validateId)!.push(a);
+      }
+    });
+    return m;
+  }, [products]);
+
+  const toggleAlias = useCallback(
+    (id: string) =>
+      setExpandedAliases((prev) => ({ ...prev, [id]: !prev[id] })),
+    [],
+  );
 
   const handleAction = async (type: string, id: string, payload: any = {}) => {
     try {
@@ -989,32 +1157,307 @@ export function ItemPage() {
     });
   };
 
-  const getPriceDisplay = (
-    item: any,
-    type: "basePrice" | "marginPercentage" | "sellingPrice",
-  ) => {
-    if (!item.pricing) return 0;
-    const localOutletId = localStorage.getItem("__unv_outletId");
-    const localRegionId = localStorage.getItem("__unv_regionId");
-    const localCompanyId = localStorage.getItem("__unv_companyId");
+  const getPriceDisplay = useCallback(
+    (item: any, type: "basePrice" | "marginPercentage" | "sellingPrice") => {
+      if (!item.pricing) return 0;
+      const fallbackKeys = [
+        RuntimeSession.outletId,
+        RuntimeSession.regionId,
+        RuntimeSession.companyId,
+        item.outletId,
+        item.regionId,
+        item.companyId,
+        "DEFAULT",
+      ].filter(Boolean) as string[];
 
-    const fallbackKeys = [
-      localOutletId,
-      localRegionId,
-      localCompanyId,
-      item.outletId,
-      item.regionId,
-      item.companyId,
-      "DEFAULT",
-    ].filter(Boolean);
+      for (const key of fallbackKeys) {
+        if (item.pricing[key]) return item.pricing[key][type] || 0;
+      }
+      const firstKey = Object.keys(item.pricing)[0];
+      return firstKey ? item.pricing[firstKey][type] || 0 : 0;
+    },
+    [],
+  );
 
-    for (const key of fallbackKeys) {
-      if (item.pricing[key]) return item.pricing[key][type] || 0;
-    }
-    const firstKey = Object.keys(item.pricing)[0];
-    return firstKey ? item.pricing[firstKey][type] || 0 : 0;
+  // =====================================================================
+  // [BARU] FILTER + SEARCH + SORT — single pass, tanpa nested .find()
+  // =====================================================================
+  const filteredCatalog = useMemo(() => {
+    const localCompanyId = localStorage.getItem("__unv_companyId") || "";
+    const localRegionId = localStorage.getItem("__unv_regionId") || "";
+    const localOutletId = localStorage.getItem("__unv_outletId") || "";
+    const q = deferredSearch.trim().toLowerCase();
+
+    const list = products.filter((p: any) => {
+      const matchExpense =
+        activeTab === "EXPENSE" ? p.isExpense === true : !p.isExpense;
+
+      const isProdActive =
+        p.status !== undefined
+          ? p.status === "Aktif"
+          : p.isActive !== undefined
+            ? Boolean(p.isActive)
+            : Boolean(p.is_active);
+      const matchStatus = viewStatus === "AKTIF" ? isProdActive : !isProdActive;
+
+      if (!matchExpense || !matchStatus || p.approvalStatus === "MERGED") {
+        return false;
+      }
+
+      if (localCompanyId && p.companyId && p.companyId !== localCompanyId) {
+        return false;
+      }
+
+      if (p.approvalStatus === "APPROVED") {
+        if (p.regionId && localRegionId && p.regionId !== localRegionId)
+          return false;
+        if (localOutletId && p.outletId && p.outletId !== localOutletId)
+          return false;
+      } else if (p.approvalStatus === "PENDING") {
+        if (localOutletId) {
+          if (p.outletId && p.outletId !== localOutletId) return false;
+        } else if (localRegionId) {
+          if (p.regionId && p.regionId !== localRegionId) return false;
+        }
+      }
+
+      if (q) {
+        const catName = categoryMap.get(p.categoryId) || "";
+        const uomName = uomMap.get(p.uomId) || "";
+        const hay =
+          `${p.name || ""} ${p.sku || ""} ${p.validateId || ""} ${catName} ${uomName}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+
+      return true;
+    });
+
+    // SORT
+    const sorted = [...list].sort((a: any, b: any) => {
+      switch (sortBy) {
+        case "NAME_ASC":
+          return (a.name || "").localeCompare(b.name || "");
+        case "NAME_DESC":
+          return (b.name || "").localeCompare(a.name || "");
+        case "PRICE_ASC":
+          return (
+            getPriceDisplay(a, "basePrice") - getPriceDisplay(b, "basePrice")
+          );
+        case "PRICE_DESC":
+          return (
+            getPriceDisplay(b, "basePrice") - getPriceDisplay(a, "basePrice")
+          );
+        case "NEWEST": {
+          const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return tb - ta;
+        }
+        default:
+          return 0;
+      }
+    });
+
+    return sorted;
+  }, [
+    products,
+    activeTab,
+    viewStatus,
+    deferredSearch,
+    sortBy,
+    categoryMap,
+    uomMap,
+    getPriceDisplay,
+  ]);
+
+  const filteredValidator = useMemo(() => {
+    if (activeTab !== "VALIDATOR") return [];
+    const localCompanyId = localStorage.getItem("__unv_companyId") || "";
+    const localRegionId = localStorage.getItem("__unv_regionId") || "";
+    const q = deferredSearch.trim().toLowerCase();
+
+    const list = products.filter((p: any) => {
+      const isProdActive =
+        p.status !== undefined
+          ? p.status === "Aktif"
+          : p.isActive !== undefined
+            ? Boolean(p.isActive)
+            : Boolean(p.is_active);
+      if (p.approvalStatus !== "PENDING" || !isProdActive) return false;
+
+      if (localCompanyId && p.companyId && p.companyId !== localCompanyId)
+        return false;
+      if (localRegionId && p.regionId && p.regionId !== localRegionId)
+        return false;
+
+      if (q) {
+        const catName = categoryMap.get(p.categoryId) || "";
+        const uomName = uomMap.get(p.uomId) || "";
+        const hay =
+          `${p.name || ""} ${p.sku || ""} ${catName} ${uomName}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+
+      return true;
+    });
+
+    return [...list].sort((a: any, b: any) => {
+      switch (sortBy) {
+        case "NAME_DESC":
+          return (b.name || "").localeCompare(a.name || "");
+        case "PRICE_DESC":
+          return (
+            getPriceDisplay(b, "basePrice") - getPriceDisplay(a, "basePrice")
+          );
+        case "PRICE_ASC":
+          return (
+            getPriceDisplay(a, "basePrice") - getPriceDisplay(b, "basePrice")
+          );
+        case "NEWEST": {
+          const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return tb - ta;
+        }
+        case "NAME_ASC":
+        default:
+          return (a.name || "").localeCompare(b.name || "");
+      }
+    });
+  }, [
+    activeTab,
+    products,
+    deferredSearch,
+    sortBy,
+    categoryMap,
+    uomMap,
+    getPriceDisplay,
+  ]);
+
+  // Reset halaman ke 1 setiap filter / sort / tab berubah
+  useEffect(() => {
+    setPage(1);
+  }, [deferredSearch, sortBy, activeTab, viewStatus]);
+
+  // PAGINATION
+  const activeList =
+    activeTab === "VALIDATOR" ? filteredValidator : filteredCatalog;
+
+  const totalPages = Math.max(1, Math.ceil(activeList.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+
+  const paginatedList = useMemo(
+    () => activeList.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [activeList, safePage],
+  );
+
+  // === [HELPER & HANDLER BATCH VALIDASI] ===
+  // Reset seleksi jika tab, halaman, atau kata kunci pencarian berubah
+  useEffect(() => {
+    setSelectedValidateIds([]);
+  }, [activeTab, page, deferredSearch]);
+
+  // Cek apakah seluruh baris di halaman aktif sudah tercentang
+  const isAllPageSelected = useMemo(() => {
+    if (activeTab !== "VALIDATOR" || paginatedList.length === 0) return false;
+    return paginatedList.every((p: any) => selectedValidateIds.includes(p.id));
+  }, [activeTab, paginatedList, selectedValidateIds]);
+
+  // Cek kondisi indeterminate (sebagian tercentang)
+  const isSomePageSelected = useMemo(() => {
+    if (activeTab !== "VALIDATOR") return false;
+    return (
+      paginatedList.some((p: any) => selectedValidateIds.includes(p.id)) &&
+      !isAllPageSelected
+    );
+  }, [activeTab, paginatedList, selectedValidateIds, isAllPageSelected]);
+
+  // Centang / Batal centang satu item
+  const toggleSelectOne = (id: string) => {
+    setSelectedValidateIds((prev) => {
+      if (prev.includes(id)) {
+        return prev.filter((item) => item !== id);
+      }
+      if (prev.length >= MAX_BATCH_LIMIT) {
+        sysToast.warn(
+          "Batas Maksimal",
+          `Maksimal ${MAX_BATCH_LIMIT} item per batch untuk menjaga kestabilan sistem.`,
+        );
+        return prev;
+      }
+      return [...prev, id];
+    });
   };
 
+  // Centang / Batal centang semua di halaman aktif
+  const toggleSelectAll = () => {
+    if (isAllPageSelected) {
+      const pageIds = new Set(paginatedList.map((p: any) => p.id));
+      setSelectedValidateIds((prev) => prev.filter((id) => !pageIds.has(id)));
+    } else {
+      const pageIds = paginatedList.map((p: any) => p.id);
+      const combined = Array.from(
+        new Set([...selectedValidateIds, ...pageIds]),
+      );
+      if (combined.length > MAX_BATCH_LIMIT) {
+        sysToast.warn(
+          "Dibatasi ke Halaman Aktif",
+          `Maksimal ${MAX_BATCH_LIMIT} item terpilih per batch.`,
+        );
+        setSelectedValidateIds(combined.slice(0, MAX_BATCH_LIMIT));
+      } else {
+        setSelectedValidateIds(combined);
+      }
+    }
+  };
+
+  // Eksekutor Batch dengan proteksi beban Ledger
+  const handleBatchValidate = (status: "APPROVED" | "REJECTED") => {
+    const count = selectedValidateIds.length;
+    if (count === 0) return;
+
+    const isApprove = status === "APPROVED";
+    openAlert({
+      title: isApprove
+        ? `Setujui ${count} Item Massal`
+        : `Tolak ${count} Item Massal`,
+      message: isApprove
+        ? `Setujui ${count} produk terpilih sekaligus sebagai standar baku?`
+        : `Tolak ${count} produk terpilih? Status data akan dikunci.`,
+      confirmText: isApprove ? "YA, SETUJUI" : "YA, TOLAK",
+      onConfirm: async () => {
+        setIsBatchProcessing(true);
+        try {
+          let successCount = 0;
+          for (const id of selectedValidateIds) {
+            const item = products.find((p) => p.id === id);
+            await globalCommandBus.execute({
+              type: "VALIDATE_PRODUCT",
+              payload: {
+                id,
+                approvalStatus: status,
+                validateId: isApprove ? item?.validateId || id : null,
+              },
+            });
+            successCount++;
+            // Jeda mikro 15ms antar event agar main-thread browser tidak beku
+            await new Promise((resolve) => setTimeout(resolve, 15));
+          }
+          sysToast.success(
+            "Validasi Selesai",
+            `Sukses memproses ${successCount} item (${status}).`,
+          );
+          setSelectedValidateIds([]);
+        } catch (err: any) {
+          sysToast.error("Gagal Validasi Batch", err.message);
+        } finally {
+          setIsBatchProcessing(false);
+        }
+      },
+    });
+  };
+
+  // =====================================================================
+  // IMPORT EXCEL
+  // =====================================================================
   const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1028,25 +1471,22 @@ export function ItemPage() {
       const itemState = useItemStore.getState();
       const companyId = localStorage.getItem("__unv_companyId") || "";
 
-      // 1. Inisialisasi Map Pencarian Lokal
-      const categoryMap = new Map<string, string>();
+      const catMapLocal = new Map<string, string>();
       itemState.categories.forEach((c) =>
-        categoryMap.set(c.name.trim().toUpperCase(), c.id),
+        catMapLocal.set(c.name.trim().toUpperCase(), c.id),
       );
 
-      const uomMap = new Map<string, string>();
+      const uomMapLocal = new Map<string, string>();
       itemState.uoms.forEach((u) =>
-        uomMap.set(u.name.trim().toUpperCase(), u.id),
+        uomMapLocal.set(u.name.trim().toUpperCase(), u.id),
       );
 
-      // Set nama produk untuk cegah duplikasi
       const existingProductNames = new Set(
         itemState.products
           .filter((p) => p.status !== "Arsip" && !p.isExpense)
           .map((p) => p.name.trim().toUpperCase()),
       );
 
-      // 2. Kategori Default Riil (Bukan String Fiktif)
       let defaultCatId = itemState.categories[0]?.id;
       if (!defaultCatId) {
         defaultCatId = `CAT_${ulid()}`;
@@ -1054,10 +1494,9 @@ export function ItemPage() {
           type: "CREATE_CATEGORY",
           payload: { id: defaultCatId, name: "BARANG UMUM" },
         });
-        categoryMap.set("BARANG UMUM", defaultCatId);
+        catMapLocal.set("BARANG UMUM", defaultCatId);
       }
 
-      // 3. UOM Default Riil (Bukan String Fiktif)
       let defaultUomId = itemState.uoms[0]?.id;
       if (!defaultUomId) {
         defaultUomId = `UOM_${ulid()}`;
@@ -1065,7 +1504,7 @@ export function ItemPage() {
           type: "CREATE_UOM",
           payload: { id: defaultUomId, name: "PCS" },
         });
-        uomMap.set("PCS", defaultUomId);
+        uomMapLocal.set("PCS", defaultUomId);
       }
 
       let successCount = 0;
@@ -1075,41 +1514,38 @@ export function ItemPage() {
         if (!row.name) continue;
         const cleanProdName = String(row.name).trim().toUpperCase();
 
-        // Lewati jika produk sudah terdaftar
         if (existingProductNames.has(cleanProdName)) {
           skippedCount++;
           continue;
         }
 
-        // Resolusi Kategori via Map Lokal
         let catId = defaultCatId;
         if (row.categoryName) {
           const cleanCat = String(row.categoryName).trim().toUpperCase();
-          if (categoryMap.has(cleanCat)) {
-            catId = categoryMap.get(cleanCat)!;
+          if (catMapLocal.has(cleanCat)) {
+            catId = catMapLocal.get(cleanCat)!;
           } else {
             catId = `CAT_${ulid()}`;
             await globalCommandBus.execute({
               type: "CREATE_CATEGORY",
               payload: { id: catId, name: cleanCat },
             });
-            categoryMap.set(cleanCat, catId); // Simpan ke map lokal seketika
+            catMapLocal.set(cleanCat, catId);
           }
         }
 
-        // Resolusi UOM via Map Lokal
         let uomId = defaultUomId;
         if (row.uomName) {
           const cleanUom = String(row.uomName).trim().toUpperCase();
-          if (uomMap.has(cleanUom)) {
-            uomId = uomMap.get(cleanUom)!;
+          if (uomMapLocal.has(cleanUom)) {
+            uomId = uomMapLocal.get(cleanUom)!;
           } else {
             uomId = `UOM_${ulid()}`;
             await globalCommandBus.execute({
               type: "CREATE_UOM",
               payload: { id: uomId, name: cleanUom },
             });
-            uomMap.set(cleanUom, uomId); // Simpan ke map lokal seketika
+            uomMapLocal.set(cleanUom, uomId);
           }
         }
 
@@ -1132,7 +1568,7 @@ export function ItemPage() {
             ? [
                 {
                   id: `UOMC_${ulid()}`,
-                  value: convValue,
+                  value: convUom,
                   uom: convUom,
                   label: `${convValue} ${convUom}`,
                   isDefault: true,
@@ -1175,6 +1611,14 @@ export function ItemPage() {
       setIsActionMenuOpen(false);
     }
   };
+
+  // Helper untuk badge "ACTIVE" tab
+  const showToolbar =
+    activeTab === "PRODUK" ||
+    activeTab === "EXPENSE" ||
+    activeTab === "VALIDATOR";
+
+  const showStatusFilter = activeTab === "PRODUK" || activeTab === "EXPENSE";
 
   return (
     <div className="relative h-full flex flex-col overflow-hidden bg-(--bg-card) rounded-xl shadow-sm border border-(--border-color)">
@@ -1294,7 +1738,6 @@ export function ItemPage() {
                 </div>
               )}
 
-            {/* TOMBOL TAMBAH SESUAI TAB */}
             {activeTab === "PRODUK" && viewStatus === "AKTIF" && (
               <button
                 onClick={() =>
@@ -1339,7 +1782,7 @@ export function ItemPage() {
           </div>
         </div>
 
-        {/* TABS UTAMA (SEGMENTASI MUTLAK PRODUK VS JASA) */}
+        {/* TABS UTAMA */}
         <div className="flex items-center gap-6 px-6">
           <button
             onClick={() => setActiveTab("PRODUK")}
@@ -1390,7 +1833,7 @@ export function ItemPage() {
       </div>
 
       {/* FILTER STATUS AKTIF / ARSIP */}
-      {(activeTab === "PRODUK" || activeTab === "EXPENSE") && (
+      {showStatusFilter && (
         <div className="px-6 py-2 bg-(--surface-hover) border-b border-(--border-color) flex items-center gap-4 shrink-0">
           <button
             onClick={() => setViewStatus("AKTIF")}
@@ -1415,8 +1858,44 @@ export function ItemPage() {
         </div>
       )}
 
+      {/* [BARU] TOOLKIT: SEARCH + SORT BY */}
+      {showToolbar && (
+        <div className="px-6 py-3 bg-(--bg-card) border-b border-(--border-color) flex items-center gap-3 shrink-0 flex-wrap">
+          <div className="relative flex-1 min-w-55 max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-(--text-secondary) pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Cari nama, SKU, kategori, atau UOM…"
+              className="w-full pl-9 pr-3 py-2 text-xs font-bold bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none focus:border-orange-500 transition"
+            />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <ArrowUpDown className="w-4 h-4 text-(--text-secondary)" />
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as SortKey)}
+              className="text-xs font-black py-2 px-3 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none focus:border-orange-500 cursor-pointer"
+            >
+              <option value="NAME_ASC">Nama A → Z</option>
+              <option value="NAME_DESC">Nama Z → A</option>
+              <option value="PRICE_ASC">Harga Terendah</option>
+              <option value="PRICE_DESC">Harga Tertinggi</option>
+              <option value="NEWEST">Terbaru</option>
+            </select>
+          </div>
+
+          <div className="text-[10px] font-bold text-(--text-secondary) ml-auto">
+            {activeList.length} data ditemukan
+          </div>
+        </div>
+      )}
+
       {/* BODY KONTEN TAB */}
       <div className="flex-1 overflow-auto bg-transparent p-6 custom-scrollbar">
+        {/* TAB 1 & 2: PRODUK / EXPENSE */}
         {(activeTab === "PRODUK" || activeTab === "EXPENSE") && (
           <div className="bg-(--bg-card) rounded-lg border border-(--border-color) overflow-hidden shadow-xs">
             <table className="w-full text-left border-collapse">
@@ -1444,97 +1923,29 @@ export function ItemPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-(--border-color) text-xs font-semibold text-(--text-primary)">
-                {products
-                  .filter((p: any) => {
-                    const matchExpense =
-                      activeTab === "EXPENSE"
-                        ? p.isExpense === true
-                        : !p.isExpense;
-
-                    // 1. Normalisasi Status Aktif vs Arsip
-                    const isProdActive =
-                      p.status !== undefined
-                        ? p.status === "Aktif"
-                        : p.isActive !== undefined
-                          ? Boolean(p.isActive)
-                          : Boolean(p.is_active);
-                    const matchStatus =
-                      viewStatus === "AKTIF" ? isProdActive : !isProdActive;
-
-                    if (
-                      !matchExpense ||
-                      !matchStatus ||
-                      p.approvalStatus === "MERGED"
-                    ) {
-                      return false;
-                    }
-
-                    // 2. Filter Perusahaan
-                    const localCompanyId =
-                      localStorage.getItem("__unv_companyId") || "";
-                    const localRegionId =
-                      localStorage.getItem("__unv_regionId") || "";
-                    const localOutletId =
-                      localStorage.getItem("__unv_outletId") || "";
-
-                    if (
-                      localCompanyId &&
-                      p.companyId &&
-                      p.companyId !== localCompanyId
-                    ) {
-                      return false;
-                    }
-
-                    // 3. Penyekatan Spasial:
-                    // Jika produk APPROVED: terlihat bersama di seluruh cabang
-                    if (p.approvalStatus === "APPROVED") {
-                      if (
-                        p.regionId &&
-                        localRegionId &&
-                        p.regionId !== localRegionId
-                      ) {
-                        return false;
-                      }
-                      if (
-                        localOutletId &&
-                        p.outletId &&
-                        p.outletId !== localOutletId
-                      ) {
-                        return false;
-                      }
-                    } else if (p.approvalStatus === "PENDING") {
-                      // Jika produk PENDING (draf mentah):
-                      // Di Outlet: HANYA terlihat jika dibuat oleh outlet ini sendiri
-                      if (localOutletId) {
-                        if (p.outletId && p.outletId !== localOutletId)
-                          return false;
-                      } else if (localRegionId) {
-                        // Di Region: terlihat jika dibuat di wilayah region ini
-                        if (p.regionId && p.regionId !== localRegionId)
-                          return false;
-                      }
-                    }
-
-                    return true;
-                  })
-                  .map((p) => {
-                    const uomName =
-                      uoms.find((u) => u.id === p.uomId)?.name || "N/A";
-                    const catName =
-                      categories.find((c) => c.id === p.categoryId)?.name ||
-                      "-";
+                {paginatedList.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={activeTab === "PRODUK" ? 7 : 5}
+                      className="px-4 py-10 text-center text-(--text-secondary) font-bold text-xs"
+                    >
+                      Tidak ada data yang cocok dengan pencarian / filter.
+                    </td>
+                  </tr>
+                ) : (
+                  paginatedList.map((p: any) => {
+                    // ==== O(1) LOOKUP: TANPA .find() / .filter() ====
+                    const uomName = uomMap.get(p.uomId) || "N/A";
+                    const catName = categoryMap.get(p.categoryId) || "-";
                     const isPending = p.approvalStatus === "PENDING";
                     const isRejected = p.approvalStatus === "REJECTED";
                     const base = getPriceDisplay(p, "basePrice");
                     const margin = getPriceDisplay(p, "marginPercentage");
                     const sell = getPriceDisplay(p, "sellingPrice");
 
-                    const aliases = products.filter(
-                      (a) =>
-                        a.approvalStatus === "MERGED" &&
-                        a.validateId === (p.validateId || p.id) &&
-                        a.status === p.status,
-                    );
+                    const aliases = (
+                      aliasMap.get(p.validateId || p.id) || []
+                    ).filter((a) => a.status === p.status);
 
                     return (
                       <React.Fragment key={p.id}>
@@ -1542,7 +1953,6 @@ export function ItemPage() {
                           <td className="px-4 py-3">
                             <div className="font-bold text-(--text-primary) flex items-center gap-2">
                               {p.name}
-                              {/* BADGE VARIAN KONVERSI ISI */}
                               {Array.isArray(p.uomConversions) &&
                                 p.uomConversions.length > 0 && (
                                   <div className="flex gap-1 mt-1 flex-wrap">
@@ -1678,9 +2088,19 @@ export function ItemPage() {
                         </tr>
                       </React.Fragment>
                     );
-                  })}
+                  })
+                )}
               </tbody>
             </table>
+
+            {/* [BARU] PAGINATION */}
+            <Pagination
+              page={safePage}
+              totalPages={totalPages}
+              totalItems={activeList.length}
+              pageSize={PAGE_SIZE}
+              onPageChange={setPage}
+            />
           </div>
         )}
 
@@ -1842,17 +2262,68 @@ export function ItemPage() {
             </div>
           </div>
         )}
-
         {/* TAB 4: PUSAT VALIDASI */}
         {activeTab === "VALIDATOR" && canValidate && (
           <div className="bg-(--bg-card) rounded-lg border border-(--border-color) overflow-hidden shadow-xs">
-            <div className="px-4 py-3 bg-rose-500/10 border-b border-rose-500/20 text-rose-500 font-bold text-xs flex items-center gap-2">
-              <Scale className="w-4 h-4" /> ANTREAN VALIDASI DATA DARI CABANG
-              (STATUS: PENDING)
+            {/* HEADER ANTREAN + BATCH ACTION TOOLBAR */}
+            <div className="px-4 py-3 bg-rose-500/10 border-b border-rose-500/20 flex items-center justify-between flex-wrap gap-2">
+              <div className="text-rose-500 font-bold text-xs flex items-center gap-2">
+                <Scale className="w-4 h-4" /> ANTREAN VALIDASI DATA DARI CABANG
+                (STATUS: PENDING)
+              </div>
+
+              {/* Floating Toolbar saat ada item terpilih */}
+              {selectedValidateIds.length > 0 && (
+                <div className="flex items-center gap-2 bg-(--bg-card) px-3 py-1.5 rounded-lg border border-(--border-color) shadow-sm animate-in fade-in zoom-in-95 duration-150">
+                  <span className="text-[11px] font-black text-orange-500 mr-1">
+                    {selectedValidateIds.length} item dipilih
+                  </span>
+
+                  <button
+                    type="button"
+                    disabled={isBatchProcessing}
+                    onClick={() => handleBatchValidate("APPROVED")}
+                    className="px-2.5 py-1 bg-emerald-500 text-white rounded text-[11px] font-black flex items-center gap-1 hover:bg-emerald-600 transition disabled:opacity-50 cursor-pointer shadow-xs"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Setujui Terpilih
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={isBatchProcessing}
+                    onClick={() => handleBatchValidate("REJECTED")}
+                    className="px-2.5 py-1 bg-rose-500 text-white rounded text-[11px] font-black flex items-center gap-1 hover:bg-rose-600 transition disabled:opacity-50 cursor-pointer shadow-xs"
+                  >
+                    <XCircle className="w-3.5 h-3.5" /> Tolak Terpilih
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedValidateIds([])}
+                    className="text-[10px] font-bold text-(--text-secondary) hover:text-(--text-primary) px-1.5 py-1 cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                </div>
+              )}
             </div>
+
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-(--surface-hover) border-b border-(--border-color) text-[10px] uppercase font-black text-(--text-secondary) tracking-wider">
+                  {/* Checkbox Select All di Header */}
+                  <th className="px-4 py-3 w-10 text-center">
+                    <input
+                      type="checkbox"
+                      checked={isAllPageSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = isSomePageSelected;
+                      }}
+                      onChange={toggleSelectAll}
+                      className="w-4 h-4 rounded border-(--border-color) text-orange-500 focus:ring-orange-500 cursor-pointer"
+                      title="Pilih semua di halaman ini"
+                    />
+                  </th>
                   <th className="px-4 py-3">Nama Input (Raw)</th>
                   <th className="px-4 py-3">Tipe</th>
                   <th className="px-4 py-3">Asal Usul Input</th>
@@ -1860,42 +2331,21 @@ export function ItemPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-(--border-color) text-xs font-semibold text-(--text-primary)">
-                {products
-                  .filter((p: any) => {
-                    const isProdActive =
-                      p.status !== undefined
-                        ? p.status === "Aktif"
-                        : p.isActive !== undefined
-                          ? Boolean(p.isActive)
-                          : Boolean(p.is_active);
-                    if (p.approvalStatus !== "PENDING" || !isProdActive)
-                      return false;
-
-                    const localCompanyId =
-                      localStorage.getItem("__unv_companyId") || "";
-                    const localRegionId =
-                      localStorage.getItem("__unv_regionId") || "";
-
-                    if (
-                      localCompanyId &&
-                      p.companyId &&
-                      p.companyId !== localCompanyId
-                    )
-                      return false;
-                    if (
-                      localRegionId &&
-                      p.regionId &&
-                      p.regionId !== localRegionId
-                    )
-                      return false;
-
-                    return true;
-                  })
-                  .map((p) => {
-                    const comp = companies.find((c) => c.id === p.companyId);
-                    const reg = regions.find((r) => r.id === p.regionId);
-                    const out = outlets.find((o) => o.id === p.outletId);
-
+                {paginatedList.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-4 py-10 text-center text-(--text-secondary) font-bold text-xs"
+                    >
+                      Tidak ada antrean validasi yang cocok.
+                    </td>
+                  </tr>
+                ) : (
+                  paginatedList.map((p: any) => {
+                    const isSelected = selectedValidateIds.includes(p.id);
+                    const comp = companyMap.get(p.companyId);
+                    const reg = regionMap.get(p.regionId);
+                    const out = outletMap.get(p.outletId);
                     let locationTag = {
                       badge: "HOLDING",
                       primary: comp?.name || "PUSAT",
@@ -1918,14 +2368,31 @@ export function ItemPage() {
                     return (
                       <tr
                         key={p.id}
-                        className="hover:bg-(--surface-hover) transition"
+                        className={`transition ${
+                          isSelected
+                            ? "bg-orange-500/5 hover:bg-orange-500/10"
+                            : "hover:bg-(--surface-hover)"
+                        }`}
                       >
+                        {/* Checkbox Per Baris */}
+                        <td className="px-4 py-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelectOne(p.id)}
+                            className="w-4 h-4 rounded border-(--border-color) text-orange-500 focus:ring-orange-500 cursor-pointer"
+                          />
+                        </td>
                         <td className="px-4 py-3 font-bold text-orange-500">
                           {p.name}
                         </td>
                         <td className="px-4 py-3">
                           <span
-                            className={`px-2 py-0.5 text-[9px] font-black rounded uppercase ${p.isExpense ? "bg-rose-500/10 text-rose-500" : "bg-blue-500/10 text-blue-500"}`}
+                            className={`px-2 py-0.5 text-[9px] font-black rounded uppercase ${
+                              p.isExpense
+                                ? "bg-rose-500/10 text-rose-500"
+                                : "bg-blue-500/10 text-blue-500"
+                            }`}
                           >
                             {p.isExpense ? "JASA / BIAYA" : "BARANG"}
                           </span>
@@ -2002,9 +2469,18 @@ export function ItemPage() {
                         </td>
                       </tr>
                     );
-                  })}
+                  })
+                )}
               </tbody>
             </table>
+
+            <Pagination
+              page={safePage}
+              totalPages={totalPages}
+              totalItems={activeList.length}
+              pageSize={PAGE_SIZE}
+              onPageChange={setPage}
+            />
           </div>
         )}
       </div>

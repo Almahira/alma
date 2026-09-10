@@ -92,14 +92,9 @@ const LiquidGlass: React.FC<LiquidGlassProps> = ({
         boxShadow: isHovered ? shadowHover : shadowIdle,
         ...style,
       }}
-      whileHover={idleFloat ? undefined : { scale: 1.01 }}
-      whileTap={idleFloat ? undefined : { scale: 0.99 }}
-      animate={idleFloat ? { y: [0, -4, 0] } : undefined}
-      transition={
-        idleFloat
-          ? { duration: 4, repeat: Infinity, ease: "easeInOut" }
-          : { type: "spring", stiffness: 300, damping: 20 }
-      }
+      whileHover={{ scale: 1.005 }}
+      whileTap={{ scale: 0.995 }}
+      transition={{ duration: 0.15 }}
     >
       {/* Highlight dinamis mengikuti kursor */}
       <div

@@ -3,6 +3,19 @@ import { globalLedger } from "../ledger/UniversalLedger";
 import { globalRegistry } from "./UniversalRegistry";
 import { SnapshotEngine } from "../ledger/SnapshotEngine";
 
+// Microtask Debouncer: Menggabungkan puluhan event sinkronisasi menjadi 1 sinyal UI render
+let isNotifyScheduled = false;
+
+export function notifyStateUpdated(): void {
+  if (typeof window === "undefined") return;
+  if (isNotifyScheduled) return;
+  isNotifyScheduled = true;
+  queueMicrotask(() => {
+    isNotifyScheduled = false;
+    window.dispatchEvent(new Event("UNV_STATE_UPDATED"));
+  });
+}
+
 export class EventBus {
   private static initialized = false;
   private static initPromise: Promise<void> | null = null;
@@ -20,9 +33,7 @@ export class EventBus {
       if (rxdb && rxdb.collections.events) {
         rxdb.collections.events.insert$.subscribe((changeEvent) => {
           globalRegistry.processEvent(changeEvent.documentData);
-          if (typeof window !== "undefined") {
-            window.dispatchEvent(new Event("UNV_STATE_UPDATED"));
-          }
+          notifyStateUpdated();
         });
       }
       this.initialized = true;
@@ -51,9 +62,7 @@ export class EventBus {
     if (allEvents.length > 0) {
       await SnapshotEngine.takeSnapshot();
     }
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(new Event("UNV_STATE_UPDATED"));
-    }
+    notifyStateUpdated();
   }
 
   /**
@@ -97,9 +106,7 @@ export class EventBus {
       console.log(
         "[RESYNC ENGINE] Penyelarasan sukses. Database lokal 100% sinkron!",
       );
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new Event("UNV_STATE_UPDATED"));
-      }
+      notifyStateUpdated();
     } catch (error) {
       console.error("[RESYNC ENGINE] Gagal melakukan safe resync:", error);
       throw error;

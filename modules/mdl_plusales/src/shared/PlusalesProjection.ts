@@ -33,9 +33,11 @@ export class PlusalesProjection implements ProjectionHandler<PlusalesState> {
   aggregateType = "PLUSALES_DOCUMENT";
   listenTo = ["ORGANIZATION", "RECEIVING_DOCUMENT"];
   private documents = new Map<string, PlusalesDocState>();
+  private cachedState: PlusalesState | null = null;
 
   public applyEvent(event: LedgerEventDoc): void {
     const { type, payload, aggregateId } = event;
+    this.cachedState = null;
 
     switch (type) {
       case "TX_PLUSALES_CREATED": {
@@ -216,14 +218,19 @@ export class PlusalesProjection implements ProjectionHandler<PlusalesState> {
   }
 
   public getState(): PlusalesState {
-    return {
+    if (this.cachedState) {
+      return this.cachedState;
+    }
+    this.cachedState = {
       documents: Array.from(this.documents.values()).sort(
         (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
       ),
     };
+    return this.cachedState;
   }
 
   public reset(): void {
+    this.cachedState = null;
     this.documents.clear();
   }
 

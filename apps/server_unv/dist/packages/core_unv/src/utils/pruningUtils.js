@@ -5,7 +5,19 @@ export const SYSTEM_AGGREGATES = [
     "OUTLET",
     "DICTIONARY",
     "USER",
+    "USER_ACCOUNT",
     "ROLE",
+    "EMPLOYEE",
+    "DIVISION",
+    "POSITION",
+    "DOCUMENT_TYPE",
+    "VENDOR",
+    "ITEM_DOMAIN",
+    "ITEM_CATEGORY",
+    "ITEM_UOM",
+    "ITEM_PRODUCT",
+    "EXECUTIVE_PANEL",
+    "EXECUTIVE_TARGET",
 ];
 export function isTransactionAggregate(aggregateType) {
     return !SYSTEM_AGGREGATES.includes(aggregateType);

@@ -1,5 +1,12 @@
 // File: modules/mdl_item/src/client/ItemPageSM.tsx
-import React, { useState, useRef, useEffect } from "react";
+import React, {
+  useState,
+  useRef,
+  useEffect,
+  useMemo,
+  useCallback,
+  useDeferredValue,
+} from "react";
 import {
   Package,
   FileDown,
@@ -17,13 +24,17 @@ import {
   FileSpreadsheet,
   Layers,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Wrench,
   Star,
+  Search,
+  ArrowUpDown,
 } from "lucide-react";
 import { useItemStore } from "./store";
+import { RuntimeSession } from "../../../../packages/core_unv/src/config/session";
 import { useOrgStore } from "../../../mdl_organization/src/client/store";
 import { globalCommandBus } from "../../../../packages/core_unv/src/cqrs/CommandBus";
-// PENTING: Gunakan useUniversalModal dari UniversalLayoutSM (mobile)
 import { useUniversalModal } from "../../../../apps/client_unv/src/shared-ui/UniversalLayoutSM";
 import { sysToast } from "../../../../apps/client_unv/src/shared-ui/useToastStore";
 import { ulid } from "ulidx";
@@ -37,7 +48,13 @@ import {
 } from "./features/excel-item";
 import { exportPdfItem } from "./features/pdf-item";
 
-// ========== Fungsi parseSmartNumber (sama persis dengan desktop) ==========
+// =========================================================================
+// KONSTANTA GLOBAL
+// =========================================================================
+const PAGE_SIZE = 30;
+
+type SortKey = "NAME_ASC" | "NAME_DESC" | "PRICE_ASC" | "PRICE_DESC" | "NEWEST";
+
 function parseSmartNumber(val: any): number {
   if (typeof val === "number") return isNaN(val) ? 0 : val;
   if (!val) return 0;
@@ -55,7 +72,6 @@ function parseSmartNumber(val: any): number {
   return isNaN(parsed) ? 0 : parsed;
 }
 
-// ========== Opsi konversi ==========
 const CONVERSION_UOM_OPTIONS = [
   { value: "KG", label: "Kilogram (KG)" },
   { value: "GRAM", label: "Gram (GRAM)" },
@@ -75,7 +91,57 @@ interface ConversionRow {
 }
 
 // =========================================================================
-// 1. MODAL FORM: PRODUK BARANG & JASA (SAMA SEPERTI DESKTOP)
+// [BARU] PAGINASI MOBILE (compact)
+// =========================================================================
+const PaginationSM: React.FC<{
+  page: number;
+  totalPages: number;
+  totalItems: number;
+  pageSize: number;
+  onPageChange: (p: number) => void;
+}> = ({ page, totalPages, totalItems, pageSize, onPageChange }) => {
+  if (totalItems === 0) return null;
+
+  const start = (page - 1) * pageSize + 1;
+  const end = Math.min(page * pageSize, totalItems);
+
+  return (
+    <div className="flex items-center justify-between gap-2 px-3 py-3 bg-(--surface-hover) border border-(--border-color) rounded-xl">
+      <button
+        type="button"
+        onClick={() => onPageChange(Math.max(1, page - 1))}
+        disabled={page === 1}
+        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-(--border-color) bg-(--bg-card) text-(--text-primary) text-[11px] font-bold disabled:opacity-40 disabled:cursor-not-allowed"
+        aria-label="Halaman sebelumnya"
+      >
+        <ChevronLeft className="w-3.5 h-3.5" /> Prev
+      </button>
+
+      <div className="text-[10px] font-bold text-(--text-secondary) text-center leading-tight">
+        <div>
+          Hal <span className="text-(--text-primary)">{page}</span> /{" "}
+          <span className="text-(--text-primary)">{totalPages}</span>
+        </div>
+        <div className="text-[9px] font-normal">
+          {start}–{end} dari {totalItems}
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+        disabled={page === totalPages}
+        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-(--border-color) bg-(--bg-card) text-(--text-primary) text-[11px] font-bold disabled:opacity-40 disabled:cursor-not-allowed"
+        aria-label="Halaman berikutnya"
+      >
+        Next <ChevronRight className="w-3.5 h-3.5" />
+      </button>
+    </div>
+  );
+};
+
+// =========================================================================
+// 1. MODAL FORM: PRODUK BARANG & JASA
 // =========================================================================
 const ProductForm: React.FC<{
   isEditMode: boolean;
@@ -337,11 +403,9 @@ const ProductForm: React.FC<{
     }
   };
 
-  // UI Form sama, mungkin sedikit penyesuaian padding
   return (
     <form onSubmit={handleSave} className="flex flex-col h-full space-y-4">
       <div className="flex-1 space-y-4 px-1">
-        {/* Nama */}
         <div>
           <label className="block text-[11px] font-black text-(--text-secondary) mb-1">
             NAMA {isExpenseMode ? "JASA / BIAYA OPERASIONAL" : "PRODUK BARANG"}
@@ -363,10 +427,7 @@ const ProductForm: React.FC<{
           />
         </div>
 
-        {/* Kategori & UOM */}
-        <div
-          className={`grid ${!isExpenseMode ? "grid-cols-1 gap-3" : "grid-cols-1"} gap-3`}
-        >
+        <div className="grid grid-cols-1 gap-3">
           <div>
             <label className="block text-[11px] font-black text-(--text-secondary) mb-1">
               KATEGORI
@@ -464,7 +525,6 @@ const ProductForm: React.FC<{
           )}
         </div>
 
-        {/* Panel Varian Konversi */}
         {!isExpenseMode && (
           <div className="bg-(--surface-hover) p-3.5 rounded-xl border border-(--border-color) space-y-2.5">
             <div className="flex items-center justify-between">
@@ -564,7 +624,6 @@ const ProductForm: React.FC<{
           </div>
         )}
 
-        {/* Harga */}
         <div className="bg-orange-500/5 p-3.5 rounded-xl border border-orange-500/20 mt-4">
           <label className="block text-[11px] font-black text-orange-500 mb-3 uppercase tracking-wider">
             {isExpenseMode ? "NOMINAL BIAYA / HPP" : "STRUKTUR HARGA PRODUK"}
@@ -653,7 +712,7 @@ const ProductForm: React.FC<{
 };
 
 // =========================================================================
-// 2. MODAL: RINCIAN HARGA MULTI-CABANG (Sama, mungkin sedikit penyesuaian)
+// 2. MODAL: RINCIAN HARGA MULTI-CABANG
 // =========================================================================
 const PricingDetailModal: React.FC<{
   item: any;
@@ -662,13 +721,30 @@ const PricingDetailModal: React.FC<{
   const { companies, regions, outlets } = useOrgStore();
   const pricingKeys = Object.keys(item.pricing || {});
 
+  // O(1) lookup untuk label lokasi
+  const companyMap = useMemo(() => {
+    const m = new Map<string, any>();
+    companies.forEach((c: any) => m.set(c.id, c));
+    return m;
+  }, [companies]);
+  const regionMap = useMemo(() => {
+    const m = new Map<string, any>();
+    regions.forEach((r: any) => m.set(r.id, r));
+    return m;
+  }, [regions]);
+  const outletMap = useMemo(() => {
+    const m = new Map<string, any>();
+    outlets.forEach((o: any) => m.set(o.id, o));
+    return m;
+  }, [outlets]);
+
   const getLocationLabel = (key: string) => {
     if (key === "DEFAULT") return "HARGA STANDAR (DEFAULT)";
-    const comp = companies.find((c) => c.id === key);
+    const comp = companyMap.get(key);
     if (comp) return `PERUSAHAAN (HOLDING): ${comp.name}`;
-    const reg = regions.find((r) => r.id === key);
+    const reg = regionMap.get(key);
     if (reg) return `REGIONAL: ${reg.name}`;
-    const out = outlets.find((o) => o.id === key);
+    const out = outletMap.get(key);
     if (out) return `OUTLET: ${out.name}`;
     return `LOKASI KHUSUS (${key.substring(0, 10)}...)`;
   };
@@ -746,7 +822,7 @@ const PricingDetailModal: React.FC<{
 };
 
 // =========================================================================
-// 3. KOMPONEN: MERGE MODAL (Sama)
+// 3. KOMPONEN: MERGE MODAL
 // =========================================================================
 const MergeModal: React.FC<{
   sourceItem: any;
@@ -821,7 +897,7 @@ const MergeModal: React.FC<{
 };
 
 // =========================================================================
-// 4. FORM KATEGORI & UOM (Sama)
+// 4. FORM KATEGORI & UOM
 // =========================================================================
 const MasterItemForm: React.FC<{
   type: "CATEGORY" | "UOM";
@@ -922,7 +998,7 @@ export function ItemPageSM() {
     openCenterModal,
     closeCenterModal,
     openAlert,
-  } = useUniversalModal(); // dari UniversalLayoutSM
+  } = useUniversalModal();
 
   const [activeTab, setActiveTab] = useState<
     "PRODUK" | "EXPENSE" | "KAT_UOM" | "VALIDATOR"
@@ -934,6 +1010,17 @@ export function ItemPageSM() {
   const [isActionMenuOpen, setIsActionMenuOpen] = useState(false);
   const actionMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // === [BARU] TOOLKIT STATE: SEARCH + SORT + PAGINATION ===
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortBy, setSortBy] = useState<SortKey>("NAME_ASC");
+  const [page, setPage] = useState(1);
+  const deferredSearch = useDeferredValue(searchQuery);
+
+  // === [STATE BATCH VALIDASI] ===
+  const [selectedValidateIds, setSelectedValidateIds] = useState<string[]>([]);
+  const [isBatchProcessing, setIsBatchProcessing] = useState(false);
+  const MAX_BATCH_LIMIT = 30; // Batas aman event ledger per eksekusi
 
   const deviceScope =
     localStorage.getItem("__unv_deviceScope") ||
@@ -953,8 +1040,56 @@ export function ItemPageSM() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const toggleAlias = (id: string) =>
-    setExpandedAliases((prev) => ({ ...prev, [id]: !prev[id] }));
+  // =====================================================================
+  // [BARU] PRE-COMPUTED HASH MAPS O(1)
+  // =====================================================================
+  const categoryMap = useMemo(() => {
+    const m = new Map<string, string>();
+    categories.forEach((c: any) => m.set(c.id, c.name));
+    return m;
+  }, [categories]);
+
+  const uomMap = useMemo(() => {
+    const m = new Map<string, string>();
+    uoms.forEach((u: any) => m.set(u.id, u.name));
+    return m;
+  }, [uoms]);
+
+  const companyMap = useMemo(() => {
+    const m = new Map<string, any>();
+    companies.forEach((c: any) => m.set(c.id, c));
+    return m;
+  }, [companies]);
+
+  const regionMap = useMemo(() => {
+    const m = new Map<string, any>();
+    regions.forEach((r: any) => m.set(r.id, r));
+    return m;
+  }, [regions]);
+
+  const outletMap = useMemo(() => {
+    const m = new Map<string, any>();
+    outlets.forEach((o: any) => m.set(o.id, o));
+    return m;
+  }, [outlets]);
+
+  // Alias MERGED dikelompokkan sekali (satu putaran O(M))
+  const aliasMap = useMemo(() => {
+    const m = new Map<string, any[]>();
+    products.forEach((a: any) => {
+      if (a.approvalStatus === "MERGED" && a.validateId) {
+        if (!m.has(a.validateId)) m.set(a.validateId, []);
+        m.get(a.validateId)!.push(a);
+      }
+    });
+    return m;
+  }, [products]);
+
+  const toggleAlias = useCallback(
+    (id: string) =>
+      setExpandedAliases((prev) => ({ ...prev, [id]: !prev[id] })),
+    [],
+  );
 
   const handleAction = async (type: string, id: string, payload: any = {}) => {
     try {
@@ -973,32 +1108,303 @@ export function ItemPageSM() {
     });
   };
 
-  const getPriceDisplay = (
-    item: any,
-    type: "basePrice" | "marginPercentage" | "sellingPrice",
-  ) => {
-    if (!item.pricing) return 0;
-    const localOutletId = localStorage.getItem("__unv_outletId");
-    const localRegionId = localStorage.getItem("__unv_regionId");
-    const localCompanyId = localStorage.getItem("__unv_companyId");
+  const getPriceDisplay = useCallback(
+    (item: any, type: "basePrice" | "marginPercentage" | "sellingPrice") => {
+      if (!item.pricing) return 0;
+      const fallbackKeys = [
+        RuntimeSession.outletId,
+        RuntimeSession.regionId,
+        RuntimeSession.companyId,
+        item.outletId,
+        item.regionId,
+        item.companyId,
+        "DEFAULT",
+      ].filter(Boolean) as string[];
 
-    const fallbackKeys = [
-      localOutletId,
-      localRegionId,
-      localCompanyId,
-      item.outletId,
-      item.regionId,
-      item.companyId,
-      "DEFAULT",
-    ].filter(Boolean);
+      for (const key of fallbackKeys) {
+        if (item.pricing[key]) return item.pricing[key][type] || 0;
+      }
+      const firstKey = Object.keys(item.pricing)[0];
+      return firstKey ? item.pricing[firstKey][type] || 0 : 0;
+    },
+    [],
+  );
 
-    for (const key of fallbackKeys) {
-      if (item.pricing[key]) return item.pricing[key][type] || 0;
-    }
-    const firstKey = Object.keys(item.pricing)[0];
-    return firstKey ? item.pricing[firstKey][type] || 0 : 0;
+  // =====================================================================
+  // [BARU] FILTER + SEARCH + SORT — single pass, tanpa nested .find()
+  // =====================================================================
+  const filteredCatalog = useMemo(() => {
+    const localCompanyId = localStorage.getItem("__unv_companyId") || "";
+    const localRegionId = localStorage.getItem("__unv_regionId") || "";
+    const localOutletId = localStorage.getItem("__unv_outletId") || "";
+    const q = deferredSearch.trim().toLowerCase();
+
+    const list = products.filter((p: any) => {
+      const matchExpense =
+        activeTab === "EXPENSE" ? p.isExpense === true : !p.isExpense;
+
+      const isProdActive =
+        p.status !== undefined
+          ? p.status === "Aktif"
+          : p.isActive !== undefined
+            ? Boolean(p.isActive)
+            : Boolean(p.is_active);
+      const matchStatus = viewStatus === "AKTIF" ? isProdActive : !isProdActive;
+
+      if (!matchExpense || !matchStatus || p.approvalStatus === "MERGED") {
+        return false;
+      }
+
+      if (localCompanyId && p.companyId && p.companyId !== localCompanyId) {
+        return false;
+      }
+
+      if (p.approvalStatus === "APPROVED") {
+        if (p.regionId && localRegionId && p.regionId !== localRegionId)
+          return false;
+        if (localOutletId && p.outletId && p.outletId !== localOutletId)
+          return false;
+      } else if (p.approvalStatus === "PENDING") {
+        if (localOutletId) {
+          if (p.outletId && p.outletId !== localOutletId) return false;
+        } else if (localRegionId) {
+          if (p.regionId && p.regionId !== localRegionId) return false;
+        }
+      }
+
+      if (q) {
+        const catName = categoryMap.get(p.categoryId) || "";
+        const uomName = uomMap.get(p.uomId) || "";
+        const hay =
+          `${p.name || ""} ${p.sku || ""} ${p.validateId || ""} ${catName} ${uomName}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+
+      return true;
+    });
+
+    return [...list].sort((a: any, b: any) => {
+      switch (sortBy) {
+        case "NAME_ASC":
+          return (a.name || "").localeCompare(b.name || "");
+        case "NAME_DESC":
+          return (b.name || "").localeCompare(a.name || "");
+        case "PRICE_ASC":
+          return (
+            getPriceDisplay(a, "basePrice") - getPriceDisplay(b, "basePrice")
+          );
+        case "PRICE_DESC":
+          return (
+            getPriceDisplay(b, "basePrice") - getPriceDisplay(a, "basePrice")
+          );
+        case "NEWEST": {
+          const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return tb - ta;
+        }
+        default:
+          return 0;
+      }
+    });
+  }, [
+    products,
+    activeTab,
+    viewStatus,
+    deferredSearch,
+    sortBy,
+    categoryMap,
+    uomMap,
+    getPriceDisplay,
+  ]);
+
+  const filteredValidator = useMemo(() => {
+    if (activeTab !== "VALIDATOR") return [];
+    const localCompanyId = localStorage.getItem("__unv_companyId") || "";
+    const localRegionId = localStorage.getItem("__unv_regionId") || "";
+    const q = deferredSearch.trim().toLowerCase();
+
+    const list = products.filter((p: any) => {
+      const isProdActive =
+        p.status !== undefined
+          ? p.status === "Aktif"
+          : p.isActive !== undefined
+            ? Boolean(p.isActive)
+            : Boolean(p.is_active);
+      if (p.approvalStatus !== "PENDING" || !isProdActive) return false;
+
+      if (localCompanyId && p.companyId && p.companyId !== localCompanyId)
+        return false;
+      if (localRegionId && p.regionId && p.regionId !== localRegionId)
+        return false;
+
+      if (q) {
+        const catName = categoryMap.get(p.categoryId) || "";
+        const uomName = uomMap.get(p.uomId) || "";
+        const hay =
+          `${p.name || ""} ${p.sku || ""} ${catName} ${uomName}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+
+      return true;
+    });
+
+    return [...list].sort((a: any, b: any) => {
+      switch (sortBy) {
+        case "NAME_DESC":
+          return (b.name || "").localeCompare(a.name || "");
+        case "PRICE_DESC":
+          return (
+            getPriceDisplay(b, "basePrice") - getPriceDisplay(a, "basePrice")
+          );
+        case "PRICE_ASC":
+          return (
+            getPriceDisplay(a, "basePrice") - getPriceDisplay(b, "basePrice")
+          );
+        case "NEWEST": {
+          const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return tb - ta;
+        }
+        case "NAME_ASC":
+        default:
+          return (a.name || "").localeCompare(b.name || "");
+      }
+    });
+  }, [
+    activeTab,
+    products,
+    deferredSearch,
+    sortBy,
+    categoryMap,
+    uomMap,
+    getPriceDisplay,
+  ]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [deferredSearch, sortBy, activeTab, viewStatus]);
+
+  // PAGINATION
+  const activeList =
+    activeTab === "VALIDATOR" ? filteredValidator : filteredCatalog;
+
+  const totalPages = Math.max(1, Math.ceil(activeList.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+
+  const paginatedList = useMemo(
+    () => activeList.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [activeList, safePage],
+  );
+
+  // === [HELPER & HANDLER BATCH VALIDASI] ===
+  // Reset seleksi jika tab, halaman, atau kata kunci pencarian berubah
+  useEffect(() => {
+    setSelectedValidateIds([]);
+  }, [activeTab, page, deferredSearch]);
+
+  // Cek apakah seluruh baris di halaman aktif sudah tercentang
+  const isAllPageSelected = useMemo(() => {
+    if (activeTab !== "VALIDATOR" || paginatedList.length === 0) return false;
+    return paginatedList.every((p: any) => selectedValidateIds.includes(p.id));
+  }, [activeTab, paginatedList, selectedValidateIds]);
+
+  // Cek kondisi indeterminate (sebagian tercentang)
+  const isSomePageSelected = useMemo(() => {
+    if (activeTab !== "VALIDATOR") return false;
+    return (
+      paginatedList.some((p: any) => selectedValidateIds.includes(p.id)) &&
+      !isAllPageSelected
+    );
+  }, [activeTab, paginatedList, selectedValidateIds, isAllPageSelected]);
+
+  // Centang / Batal centang satu item
+  const toggleSelectOne = (id: string) => {
+    setSelectedValidateIds((prev) => {
+      if (prev.includes(id)) {
+        return prev.filter((item) => item !== id);
+      }
+      if (prev.length >= MAX_BATCH_LIMIT) {
+        sysToast.warn(
+          "Batas Maksimal",
+          `Maksimal ${MAX_BATCH_LIMIT} item per batch untuk menjaga kestabilan sistem.`,
+        );
+        return prev;
+      }
+      return [...prev, id];
+    });
   };
 
+  // Centang / Batal centang semua di halaman aktif
+  const toggleSelectAll = () => {
+    if (isAllPageSelected) {
+      const pageIds = new Set(paginatedList.map((p: any) => p.id));
+      setSelectedValidateIds((prev) => prev.filter((id) => !pageIds.has(id)));
+    } else {
+      const pageIds = paginatedList.map((p: any) => p.id);
+      const combined = Array.from(
+        new Set([...selectedValidateIds, ...pageIds]),
+      );
+      if (combined.length > MAX_BATCH_LIMIT) {
+        sysToast.warn(
+          "Dibatasi ke Halaman Aktif",
+          `Maksimal ${MAX_BATCH_LIMIT} item terpilih per batch.`,
+        );
+        setSelectedValidateIds(combined.slice(0, MAX_BATCH_LIMIT));
+      } else {
+        setSelectedValidateIds(combined);
+      }
+    }
+  };
+
+  // Eksekutor Batch dengan proteksi beban Ledger
+  const handleBatchValidate = (status: "APPROVED" | "REJECTED") => {
+    const count = selectedValidateIds.length;
+    if (count === 0) return;
+
+    const isApprove = status === "APPROVED";
+    openAlert({
+      title: isApprove
+        ? `Setujui ${count} Item Massal`
+        : `Tolak ${count} Item Massal`,
+      message: isApprove
+        ? `Setujui ${count} produk terpilih sekaligus sebagai standar baku?`
+        : `Tolak ${count} produk terpilih? Status data akan dikunci.`,
+      confirmText: isApprove ? "YA, SETUJUI" : "YA, TOLAK",
+      onConfirm: async () => {
+        setIsBatchProcessing(true);
+        try {
+          let successCount = 0;
+          for (const id of selectedValidateIds) {
+            const item = products.find((p) => p.id === id);
+            await globalCommandBus.execute({
+              type: "VALIDATE_PRODUCT",
+              payload: {
+                id,
+                approvalStatus: status,
+                validateId: isApprove ? item?.validateId || id : null,
+              },
+            });
+            successCount++;
+            // Jeda mikro 15ms antar event agar main-thread browser tidak beku
+            await new Promise((resolve) => setTimeout(resolve, 15));
+          }
+          sysToast.success(
+            "Validasi Selesai",
+            `Sukses memproses ${successCount} item (${status}).`,
+          );
+          setSelectedValidateIds([]);
+        } catch (err: any) {
+          sysToast.error("Gagal Validasi Batch", err.message);
+        } finally {
+          setIsBatchProcessing(false);
+        }
+      },
+    });
+  };
+
+  // =====================================================================
+  // IMPORT EXCEL
+  // =====================================================================
   const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1012,14 +1418,14 @@ export function ItemPageSM() {
       const itemState = useItemStore.getState();
       const companyId = localStorage.getItem("__unv_companyId") || "";
 
-      const categoryMap = new Map<string, string>();
+      const catMapLocal = new Map<string, string>();
       itemState.categories.forEach((c) =>
-        categoryMap.set(c.name.trim().toUpperCase(), c.id),
+        catMapLocal.set(c.name.trim().toUpperCase(), c.id),
       );
 
-      const uomMap = new Map<string, string>();
+      const uomMapLocal = new Map<string, string>();
       itemState.uoms.forEach((u) =>
-        uomMap.set(u.name.trim().toUpperCase(), u.id),
+        uomMapLocal.set(u.name.trim().toUpperCase(), u.id),
       );
 
       const existingProductNames = new Set(
@@ -1035,7 +1441,7 @@ export function ItemPageSM() {
           type: "CREATE_CATEGORY",
           payload: { id: defaultCatId, name: "BARANG UMUM" },
         });
-        categoryMap.set("BARANG UMUM", defaultCatId);
+        catMapLocal.set("BARANG UMUM", defaultCatId);
       }
 
       let defaultUomId = itemState.uoms[0]?.id;
@@ -1045,7 +1451,7 @@ export function ItemPageSM() {
           type: "CREATE_UOM",
           payload: { id: defaultUomId, name: "PCS" },
         });
-        uomMap.set("PCS", defaultUomId);
+        uomMapLocal.set("PCS", defaultUomId);
       }
 
       let successCount = 0;
@@ -1063,30 +1469,30 @@ export function ItemPageSM() {
         let catId = defaultCatId;
         if (row.categoryName) {
           const cleanCat = String(row.categoryName).trim().toUpperCase();
-          if (categoryMap.has(cleanCat)) {
-            catId = categoryMap.get(cleanCat)!;
+          if (catMapLocal.has(cleanCat)) {
+            catId = catMapLocal.get(cleanCat)!;
           } else {
             catId = `CAT_${ulid()}`;
             await globalCommandBus.execute({
               type: "CREATE_CATEGORY",
               payload: { id: catId, name: cleanCat },
             });
-            categoryMap.set(cleanCat, catId);
+            catMapLocal.set(cleanCat, catId);
           }
         }
 
         let uomId = defaultUomId;
         if (row.uomName) {
           const cleanUom = String(row.uomName).trim().toUpperCase();
-          if (uomMap.has(cleanUom)) {
-            uomId = uomMap.get(cleanUom)!;
+          if (uomMapLocal.has(cleanUom)) {
+            uomId = uomMapLocal.get(cleanUom)!;
           } else {
             uomId = `UOM_${ulid()}`;
             await globalCommandBus.execute({
               type: "CREATE_UOM",
               payload: { id: uomId, name: cleanUom },
             });
-            uomMap.set(cleanUom, uomId);
+            uomMapLocal.set(cleanUom, uomId);
           }
         }
 
@@ -1153,6 +1559,11 @@ export function ItemPageSM() {
     }
   };
 
+  const showToolbar =
+    activeTab === "PRODUK" ||
+    activeTab === "EXPENSE" ||
+    activeTab === "VALIDATOR";
+
   return (
     <div className="relative h-full flex flex-col overflow-hidden bg-(--bg-card) rounded-xl shadow-sm border border-(--border-color)">
       {/* HEADER MOBILE */}
@@ -1211,7 +1622,7 @@ export function ItemPageSM() {
 
         {/* FILTER STATUS + AKSI */}
         {(activeTab === "PRODUK" || activeTab === "EXPENSE") && (
-          <div className="px-3 py-2 flex items-center justify-between bg-(--surface-hover) border-b border-(--border-color)">
+          <div className="px-3 py-2 flex items-center justify-between bg-(--surface-hover) border-b border-(--border-color) gap-2">
             <div className="flex gap-2">
               <button
                 onClick={() => setViewStatus("AKTIF")}
@@ -1236,7 +1647,6 @@ export function ItemPageSM() {
             </div>
 
             <div className="flex items-center gap-2">
-              {/* Tombol Tambah */}
               {activeTab === "PRODUK" && viewStatus === "AKTIF" && (
                 <button
                   onClick={() =>
@@ -1278,7 +1688,6 @@ export function ItemPageSM() {
                 </button>
               )}
 
-              {/* Aksi & Dokumen */}
               {(activeTab === "PRODUK" || activeTab === "EXPENSE") &&
                 viewStatus === "AKTIF" && (
                   <div className="relative" ref={actionMenuRef}>
@@ -1296,14 +1705,16 @@ export function ItemPageSM() {
                             downloadTemplateExcel();
                             setIsActionMenuOpen(false);
                           }}
-                          className="w-full text-left px-4 py-2.5 text-xs font-bold hover:bg-(--surface-hover)"
+                          className="w-full text-left px-4 py-2.5 text-xs font-bold hover:bg-(--surface-hover) flex items-center gap-2"
                         >
+                          <Download className="w-4 h-4 text-(--text-secondary)" />{" "}
                           Unduh Template Excel
                         </button>
                         <button
                           onClick={() => fileInputRef.current?.click()}
-                          className="w-full text-left px-4 py-2.5 text-xs font-bold hover:bg-(--surface-hover)"
+                          className="w-full text-left px-4 py-2.5 text-xs font-bold hover:bg-(--surface-hover) flex items-center gap-2"
                         >
+                          <FileSpreadsheet className="w-4 h-4 text-emerald-500" />{" "}
                           Import File Excel
                         </button>
                         <div className="h-px bg-(--border-color) my-1" />
@@ -1328,8 +1739,9 @@ export function ItemPageSM() {
                             );
                             setIsActionMenuOpen(false);
                           }}
-                          className="w-full text-left px-4 py-2.5 text-xs font-bold hover:bg-(--surface-hover)"
+                          className="w-full text-left px-4 py-2.5 text-xs font-bold hover:bg-(--surface-hover) flex items-center gap-2"
                         >
+                          <Upload className="w-4 h-4 text-(--text-secondary)" />{" "}
                           Export ke Excel
                         </button>
                         <button
@@ -1357,9 +1769,10 @@ export function ItemPageSM() {
                             );
                             setIsActionMenuOpen(false);
                           }}
-                          className="w-full text-left px-4 py-2.5 text-xs font-bold hover:bg-(--surface-hover)"
+                          className="w-full text-left px-4 py-2.5 text-xs font-bold hover:bg-(--surface-hover) flex items-center gap-2"
                         >
-                          Export ke PDF
+                          <FileDown className="w-4 h-4 text-rose-500" /> Export
+                          ke PDF
                         </button>
                       </div>
                     )}
@@ -1375,93 +1788,67 @@ export function ItemPageSM() {
             </div>
           </div>
         )}
+
+        {/* [BARU] TOOLKIT: SEARCH + SORT BY (mobile) */}
+        {showToolbar && (
+          <div className="px-3 py-2 bg-(--bg-card) border-b border-(--border-color) flex items-center gap-2">
+            <div className="relative flex-1 min-w-0">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-(--text-secondary) pointer-events-none" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Cari nama, kategori, UOM…"
+                className="w-full pl-8 pr-2 py-2 text-xs font-bold bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none focus:border-orange-500"
+              />
+            </div>
+            <div className="relative shrink-0">
+              <ArrowUpDown className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-(--text-secondary) pointer-events-none" />
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as SortKey)}
+                className="text-[11px] font-black py-2 pl-7 pr-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none focus:border-orange-500 appearance-none cursor-pointer"
+              >
+                <option value="NAME_ASC">A→Z</option>
+                <option value="NAME_DESC">Z→A</option>
+                <option value="PRICE_ASC">Harga ↑</option>
+                <option value="PRICE_DESC">Harga ↓</option>
+                <option value="NEWEST">Terbaru</option>
+              </select>
+            </div>
+          </div>
+        )}
+
+        {/* Info hasil pencarian */}
+        {showToolbar && (
+          <div className="px-3 pb-2 bg-(--bg-card) text-[10px] font-bold text-(--text-secondary) border-b border-(--border-color)">
+            {activeList.length} data ditemukan
+          </div>
+        )}
       </div>
 
       {/* BODY KONTEN TAB */}
       <div className="flex-1 overflow-auto p-3 bg-transparent custom-scrollbar">
         {(activeTab === "PRODUK" || activeTab === "EXPENSE") && (
           <div className="space-y-3">
-            {products
-              .filter((p: any) => {
-                const matchExpense =
-                  activeTab === "EXPENSE" ? p.isExpense === true : !p.isExpense;
-
-                const isProdActive =
-                  p.status !== undefined
-                    ? p.status === "Aktif"
-                    : p.isActive !== undefined
-                      ? Boolean(p.isActive)
-                      : Boolean(p.is_active);
-                const matchStatus =
-                  viewStatus === "AKTIF" ? isProdActive : !isProdActive;
-
-                if (
-                  !matchExpense ||
-                  !matchStatus ||
-                  p.approvalStatus === "MERGED"
-                ) {
-                  return false;
-                }
-
-                const localCompanyId =
-                  localStorage.getItem("__unv_companyId") || "";
-                const localRegionId =
-                  localStorage.getItem("__unv_regionId") || "";
-                const localOutletId =
-                  localStorage.getItem("__unv_outletId") || "";
-
-                if (
-                  localCompanyId &&
-                  p.companyId &&
-                  p.companyId !== localCompanyId
-                ) {
-                  return false;
-                }
-
-                if (p.approvalStatus === "APPROVED") {
-                  if (
-                    p.regionId &&
-                    localRegionId &&
-                    p.regionId !== localRegionId
-                  ) {
-                    return false;
-                  }
-                  if (
-                    localOutletId &&
-                    p.outletId &&
-                    p.outletId !== localOutletId
-                  ) {
-                    return false;
-                  }
-                } else if (p.approvalStatus === "PENDING") {
-                  if (localOutletId) {
-                    if (p.outletId && p.outletId !== localOutletId)
-                      return false;
-                  } else if (localRegionId) {
-                    if (p.regionId && p.regionId !== localRegionId)
-                      return false;
-                  }
-                }
-
-                return true;
-              })
-              .map((p) => {
-                const uomName =
-                  uoms.find((u) => u.id === p.uomId)?.name || "N/A";
-                const catName =
-                  categories.find((c) => c.id === p.categoryId)?.name || "-";
+            {paginatedList.length === 0 ? (
+              <div className="text-center py-10 text-(--text-secondary) font-bold text-xs bg-(--bg-card) border border-(--border-color) rounded-xl">
+                Tidak ada data yang cocok dengan pencarian / filter.
+              </div>
+            ) : (
+              paginatedList.map((p: any) => {
+                // ==== O(1) LOOKUP ====
+                const uomName = uomMap.get(p.uomId) || "N/A";
+                const catName = categoryMap.get(p.categoryId) || "-";
                 const isPending = p.approvalStatus === "PENDING";
                 const isRejected = p.approvalStatus === "REJECTED";
                 const base = getPriceDisplay(p, "basePrice");
                 const margin = getPriceDisplay(p, "marginPercentage");
                 const sell = getPriceDisplay(p, "sellingPrice");
 
-                const aliases = products.filter(
-                  (a) =>
-                    a.approvalStatus === "MERGED" &&
-                    a.validateId === (p.validateId || p.id) &&
-                    a.status === p.status,
-                );
+                const aliases = (
+                  aliasMap.get(p.validateId || p.id) || []
+                ).filter((a) => a.status === p.status);
 
                 return (
                   <div
@@ -1474,7 +1861,7 @@ export function ItemPageSM() {
                           {p.name}
                           {Array.isArray(p.uomConversions) &&
                             p.uomConversions.length > 0 && (
-                              <div className="flex gap-1 mt-1">
+                              <div className="flex gap-1 mt-1 flex-wrap">
                                 {p.uomConversions.map(
                                   (conv: any, i: number) => (
                                     <span
@@ -1550,7 +1937,6 @@ export function ItemPageSM() {
                       </div>
                     </div>
 
-                    {/* Aksi */}
                     <div className="flex justify-end gap-2 border-t border-(--border-color) pt-2 mt-1">
                       {viewStatus === "AKTIF" ? (
                         <>
@@ -1610,7 +1996,19 @@ export function ItemPageSM() {
                     </div>
                   </div>
                 );
-              })}
+              })
+            )}
+
+            {/* [BARU] PAGINASI */}
+            {paginatedList.length > 0 && (
+              <PaginationSM
+                page={safePage}
+                totalPages={totalPages}
+                totalItems={activeList.length}
+                pageSize={PAGE_SIZE}
+                onPageChange={setPage}
+              />
+            )}
           </div>
         )}
 
@@ -1772,17 +2170,68 @@ export function ItemPageSM() {
         {/* TAB VALIDATOR */}
         {activeTab === "VALIDATOR" && canValidate && (
           <div className="space-y-3">
-            <div className="bg-rose-500/10 border border-rose-500/20 text-rose-500 font-bold text-xs p-3 rounded-lg flex items-center gap-2">
-              <Scale className="w-4 h-4" /> ANTREAN VALIDASI (PENDING)
+            {/* HEADER ANTREAN + TOMBOL PILIH SEMUA */}
+            <div className="bg-rose-500/10 border border-rose-500/20 text-rose-500 font-bold text-xs p-3 rounded-lg flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Scale className="w-4 h-4 shrink-0" />
+                <span>ANTREAN VALIDASI (PENDING)</span>
+              </div>
+              {paginatedList.length > 0 && (
+                <button
+                  type="button"
+                  onClick={toggleSelectAll}
+                  className="px-2.5 py-1 text-[10px] font-black rounded-md border border-rose-500/30 bg-(--bg-card) text-rose-600 active:scale-95 transition cursor-pointer"
+                >
+                  {isAllPageSelected ? "Batal Semua" : "Pilih Semua"}
+                </button>
+              )}
             </div>
-            {products
-              .filter(
-                (p) => p.approvalStatus === "PENDING" && p.status === "Aktif",
-              )
-              .map((p) => {
-                const comp = companies.find((c) => c.id === p.companyId);
-                const reg = regions.find((r) => r.id === p.regionId);
-                const out = outlets.find((o) => o.id === p.outletId);
+
+            {/* STICKY BATCH ACTIONS BAR (Muncul jika ada item terpilih) */}
+            {selectedValidateIds.length > 0 && (
+              <div className="sticky top-0 z-20 bg-(--bg-card) border border-orange-500/40 p-2.5 rounded-xl shadow-lg flex items-center justify-between gap-2 animate-in fade-in slide-in-from-top-2 duration-150">
+                <div className="text-[11px] font-black text-orange-500 pl-1">
+                  {selectedValidateIds.length} Dipilih
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={isBatchProcessing}
+                    onClick={() => handleBatchValidate("APPROVED")}
+                    className="px-2.5 py-1.5 bg-emerald-500 text-white rounded-lg font-black text-[11px] flex items-center gap-1 active:scale-95 transition disabled:opacity-50 shadow-xs cursor-pointer"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Approve
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isBatchProcessing}
+                    onClick={() => handleBatchValidate("REJECTED")}
+                    className="px-2.5 py-1.5 bg-rose-500 text-white rounded-lg font-black text-[11px] flex items-center gap-1 active:scale-95 transition disabled:opacity-50 shadow-xs cursor-pointer"
+                  >
+                    <XCircle className="w-3.5 h-3.5" /> Reject
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedValidateIds([])}
+                    className="px-2 py-1 text-[10px] font-bold text-(--text-secondary) hover:text-(--text-primary) cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {paginatedList.length === 0 ? (
+              <div className="text-center py-10 text-(--text-secondary) font-bold text-xs bg-(--bg-card) border border-(--border-color) rounded-xl">
+                Tidak ada antrean validasi yang cocok.
+              </div>
+            ) : (
+              paginatedList.map((p: any) => {
+                // ==== O(1) LOOKUP ====
+                const comp = companyMap.get(p.companyId);
+                const reg = regionMap.get(p.regionId);
+                const out = outletMap.get(p.outletId);
+                const isSelected = selectedValidateIds.includes(p.id);
 
                 let locationTag = {
                   badge: "HOLDING",
@@ -1806,40 +2255,57 @@ export function ItemPageSM() {
                 return (
                   <div
                     key={p.id}
-                    className="bg-(--bg-card) border border-(--border-color) rounded-xl p-3 shadow-xs"
+                    className={`border rounded-xl p-3 shadow-xs transition ${
+                      isSelected
+                        ? "bg-orange-500/5 border-orange-500 ring-1 ring-orange-500/30"
+                        : "bg-(--bg-card) border-(--border-color)"
+                    }`}
                   >
-                    <div className="font-bold text-sm text-orange-500">
-                      {p.name}
+                    {/* BAGIAN ATAS: CHECKBOX SELEKSI & NAMA PRODUK */}
+                    <div className="flex items-start gap-3">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleSelectOne(p.id)}
+                        className="mt-0.5 w-4 h-4 rounded border-(--border-color) text-orange-500 focus:ring-orange-500 cursor-pointer shrink-0"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="font-bold text-sm text-orange-500 truncate">
+                          {p.name}
+                        </div>
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                          <span
+                            className={`px-2 py-0.5 text-[9px] font-black rounded uppercase ${
+                              p.isExpense
+                                ? "bg-rose-500/10 text-rose-500"
+                                : "bg-blue-500/10 text-blue-500"
+                            }`}
+                          >
+                            {p.isExpense ? "JASA / BIAYA" : "BARANG"}
+                          </span>
+                          <span
+                            className={`px-1.5 py-0.5 text-[9px] font-black rounded ${
+                              locationTag.badge === "OUTLET"
+                                ? "bg-emerald-500/10 text-emerald-500"
+                                : locationTag.badge === "REGION"
+                                  ? "bg-blue-500/10 text-blue-500"
+                                  : "bg-orange-500/10 text-orange-500"
+                            }`}
+                          >
+                            {locationTag.badge}
+                          </span>
+                          <span className="text-xs text-(--text-secondary) truncate">
+                            {locationTag.primary}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-(--text-secondary) mt-0.5">
+                          {locationTag.secondary}
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span
-                        className={`px-2 py-0.5 text-[9px] font-black rounded uppercase ${
-                          p.isExpense
-                            ? "bg-rose-500/10 text-rose-500"
-                            : "bg-blue-500/10 text-blue-500"
-                        }`}
-                      >
-                        {p.isExpense ? "JASA / BIAYA" : "BARANG"}
-                      </span>
-                      <span
-                        className={`px-1.5 py-0.5 text-[9px] font-black rounded ${
-                          locationTag.badge === "OUTLET"
-                            ? "bg-emerald-500/10 text-emerald-500"
-                            : locationTag.badge === "REGION"
-                              ? "bg-blue-500/10 text-blue-500"
-                              : "bg-orange-500/10 text-orange-500"
-                        }`}
-                      >
-                        {locationTag.badge}
-                      </span>
-                      <span className="text-xs text-(--text-secondary)">
-                        {locationTag.primary}
-                      </span>
-                    </div>
-                    <div className="text-[10px] text-(--text-secondary) mt-1">
-                      {locationTag.secondary}
-                    </div>
-                    <div className="flex flex-wrap gap-2 mt-3">
+
+                    {/* BAGIAN BAWAH: AKSI SATUAN TETAP TERSEDIA */}
+                    <div className="flex flex-wrap gap-2 mt-3 pt-2.5 border-t border-(--border-color)">
                       <button
                         onClick={() =>
                           openAlert({
@@ -1853,7 +2319,7 @@ export function ItemPageSM() {
                               }),
                           })
                         }
-                        className="px-3 py-1.5 bg-emerald-500/10 text-emerald-500 rounded-md font-bold text-[11px] flex items-center gap-1"
+                        className="px-3 py-1.5 bg-emerald-500/10 text-emerald-500 rounded-md font-bold text-[11px] flex items-center gap-1 cursor-pointer"
                       >
                         <CheckCircle2 className="w-3.5 h-3.5" /> Approve
                       </button>
@@ -1869,7 +2335,7 @@ export function ItemPageSM() {
                             ),
                           })
                         }
-                        className="px-3 py-1.5 bg-blue-500/10 text-blue-500 rounded-md font-bold text-[11px] flex items-center gap-1"
+                        className="px-3 py-1.5 bg-blue-500/10 text-blue-500 rounded-md font-bold text-[11px] flex items-center gap-1 cursor-pointer"
                       >
                         <GitMerge className="w-3.5 h-3.5" /> Merge
                       </button>
@@ -1885,14 +2351,26 @@ export function ItemPageSM() {
                               }),
                           })
                         }
-                        className="px-3 py-1.5 bg-rose-500/10 text-rose-500 rounded-md font-bold text-[11px] flex items-center gap-1"
+                        className="px-3 py-1.5 bg-rose-500/10 text-rose-500 rounded-md font-bold text-[11px] flex items-center gap-1 cursor-pointer"
                       >
                         <XCircle className="w-3.5 h-3.5" /> Reject
                       </button>
                     </div>
                   </div>
                 );
-              })}
+              })
+            )}
+
+            {/* [BARU] PAGINASI VALIDATOR */}
+            {paginatedList.length > 0 && (
+              <PaginationSM
+                page={safePage}
+                totalPages={totalPages}
+                totalItems={activeList.length}
+                pageSize={PAGE_SIZE}
+                onPageChange={setPage}
+              />
+            )}
           </div>
         )}
       </div>
