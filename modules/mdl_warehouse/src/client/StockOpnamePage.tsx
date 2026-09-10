@@ -1,5 +1,5 @@
 // File: modules/mdl_warehouse/src/client/StockOpnamePage.tsx
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   Scale,
   Plus,
@@ -23,7 +23,6 @@ import { useOrgStore } from "../../../mdl_organization/src/client/store";
 import { globalCommandBus } from "../../../../packages/core_unv/src/cqrs/CommandBus";
 import { sysToast } from "../../../../apps/client_unv/src/shared-ui/useToastStore";
 import { useUniversalModal } from "../../../../apps/client_unv/src/shared-ui/UniversalLayout";
-
 import {
   printBlankOpnameChecklistPdf,
   printStockOpnameReportPdf,
@@ -42,7 +41,6 @@ const InitialStockModal: React.FC<{
     e.preventDefault();
     const outletId = localStorage.getItem("__unv_outletId") || "";
     const companyId = localStorage.getItem("__unv_companyId") || "";
-
     try {
       await globalCommandBus.execute({
         type: "SET_INITIAL_STOCK",
@@ -68,7 +66,6 @@ const InitialStockModal: React.FC<{
         </h4>
         <p className="text-xs text-orange-500 font-bold mt-0.5">{item.name}</p>
       </div>
-
       <div>
         <label className="block text-[10px] font-black text-(--text-secondary) uppercase mb-1">
           Jumlah Stok Awal ({item.uomName || "PCS"})
@@ -86,7 +83,6 @@ const InitialStockModal: React.FC<{
           className="w-full text-base font-black p-2.5 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none font-mono text-center"
         />
       </div>
-
       <div className="pt-3 flex justify-end gap-2 border-t border-(--border-color)">
         <button
           type="button"
@@ -106,6 +102,96 @@ const InitialStockModal: React.FC<{
   );
 };
 
+// =========================================================================
+// KONSTANTA & KOMPONEN PAGINASI (MAKSIMAL 50 BARIS / HALAMAN)
+// =========================================================================
+const ROWS_PER_PAGE = 50;
+
+const PaginationControls: React.FC<{
+  currentPage: number;
+  totalItems: number;
+  onPageChange: (page: number) => void;
+  label?: string;
+}> = ({ currentPage, totalItems, onPageChange, label = "baris" }) => {
+  const totalPages = Math.max(1, Math.ceil(totalItems / ROWS_PER_PAGE));
+  if (totalItems === 0) return null;
+
+  const startRow = (currentPage - 1) * ROWS_PER_PAGE + 1;
+  const endRow = Math.min(currentPage * ROWS_PER_PAGE, totalItems);
+
+  // Deretan nomor halaman + ellipsis
+  const pageNumbers: (number | string)[] = [];
+  if (totalPages <= 7) {
+    for (let i = 1; i <= totalPages; i++) pageNumbers.push(i);
+  } else {
+    pageNumbers.push(1);
+    let startPage = Math.max(2, currentPage - 1);
+    let endPage = Math.min(totalPages - 1, currentPage + 1);
+    if (currentPage <= 3) {
+      startPage = 2;
+      endPage = 4;
+    }
+    if (currentPage >= totalPages - 2) {
+      startPage = totalPages - 3;
+      endPage = totalPages - 1;
+    }
+    if (startPage > 2) pageNumbers.push("...");
+    for (let i = startPage; i <= endPage; i++) pageNumbers.push(i);
+    if (endPage < totalPages - 1) pageNumbers.push("...");
+    pageNumbers.push(totalPages);
+  }
+
+  return (
+    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 border-t border-(--border-color) bg-(--surface-hover)">
+      <span className="text-[10px] font-black uppercase text-(--text-secondary) tracking-wide">
+        Menampilkan {startRow}–{endRow} dari {totalItems} {label} • Halaman{" "}
+        {currentPage} / {totalPages}
+      </span>
+      <div className="flex items-center gap-1 flex-wrap justify-center">
+        <button
+          type="button"
+          disabled={currentPage === 1}
+          onClick={() => onPageChange(currentPage - 1)}
+          className="px-2.5 py-1 text-[11px] font-black rounded-lg border border-(--border-color) bg-(--bg-card) text-(--text-primary) disabled:opacity-40 disabled:cursor-not-allowed hover:bg-(--surface-hover) cursor-pointer"
+        >
+          ‹ PREV
+        </button>
+        {pageNumbers.map((p, idx) =>
+          typeof p === "number" ? (
+            <button
+              key={idx}
+              type="button"
+              onClick={() => onPageChange(p)}
+              className={`min-w-7 px-2 py-1 text-[11px] font-black rounded-lg border transition cursor-pointer ${
+                p === currentPage
+                  ? "bg-orange-500 text-white border-orange-600 shadow-xs"
+                  : "bg-(--bg-card) text-(--text-primary) border-(--border-color) hover:bg-(--surface-hover)"
+              }`}
+            >
+              {p}
+            </button>
+          ) : (
+            <span
+              key={idx}
+              className="px-1 text-[11px] font-black text-(--text-secondary)"
+            >
+              …
+            </span>
+          ),
+        )}
+        <button
+          type="button"
+          disabled={currentPage >= totalPages}
+          onClick={() => onPageChange(currentPage + 1)}
+          className="px-2.5 py-1 text-[11px] font-black rounded-lg border border-(--border-color) bg-(--bg-card) text-(--text-primary) disabled:opacity-40 disabled:cursor-not-allowed hover:bg-(--surface-hover) cursor-pointer"
+        >
+          NEXT ›
+        </button>
+      </div>
+    </div>
+  );
+};
+
 export function StockOpnamePage() {
   const { distributions, initialStocks, opnames, spoilWastes } =
     useWarehouseStore();
@@ -113,7 +199,6 @@ export function StockOpnamePage() {
   const { documents: receivingDocs } = useReceivingStore();
   const { outlets } = useOrgStore();
   const { openCenterModal, closeCenterModal, openAlert } = useUniversalModal();
-
   const [activeTab, setActiveTab] = useState<
     "ACTIVE_OPNAME" | "OPNAME_HISTORY"
   >("ACTIVE_OPNAME");
@@ -121,7 +206,6 @@ export function StockOpnamePage() {
     new Date().toISOString().split("T")[0],
   );
   const [searchTerm, setSearchTerm] = useState("");
-
   const localCompanyId = localStorage.getItem("__unv_companyId") || "";
   const localRegionId = localStorage.getItem("__unv_regionId") || "";
   const localOutletId = localStorage.getItem("__unv_outletId") || "";
@@ -131,17 +215,23 @@ export function StockOpnamePage() {
     localOutletId || outlets[0]?.id || "",
   );
   const activeOutletId = localOutletId || selectedOutletId;
-
   const currentOutlet = outlets.find((o) => o.id === activeOutletId);
   const outletName = currentOutlet
     ? currentOutlet.name.toUpperCase()
     : "GUDANG REGION";
+
+  // State Seleksi Item
+  const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
 
   // State Input Fisik & Catatan per Item
   const [physicalCounts, setPhysicalCounts] = useState<Record<string, number>>(
     {},
   );
   const [itemNotes, setItemNotes] = useState<Record<string, string>>({});
+
+  // State Paginasi (maks 50 baris per halaman)
+  const [activePage, setActivePage] = useState(1);
+  const [historyPage, setHistoryPage] = useState(1);
 
   // Cek apakah hari ini sudah pernah dilakukan closing opname di unit ini
   const isAlreadyAdjustedToday = useMemo(() => {
@@ -165,7 +255,6 @@ export function StockOpnamePage() {
     // 1. Indexing O(1) Kategori & UOM
     const uomMap = new Map<string, string>();
     uoms.forEach((u: any) => uomMap.set(u.id, u.name));
-
     const catMap = new Map<string, string>();
     categories.forEach((c: any) => catMap.set(c.id, c.name));
 
@@ -182,7 +271,6 @@ export function StockOpnamePage() {
         ? doc.outletId === activeOutletId
         : !doc.outletId && (!localRegionId || doc.regionId === localRegionId);
       const matchActive = doc.status !== "CANCELLED" && isDocActive !== false;
-
       if (
         matchCompany &&
         matchOutlet &&
@@ -198,7 +286,6 @@ export function StockOpnamePage() {
           };
           const itemQty = Number(it.receivedQty || it.qty || 0);
           const itemPrice = Math.round(Number(it.price || 0));
-
           stockInMap.set(it.itemId, {
             qty: prev.qty + itemQty,
             previousPrice: prev.currentPrice || itemPrice,
@@ -216,7 +303,6 @@ export function StockOpnamePage() {
         ? d.outletId === activeOutletId
         : !d.outletId;
       const matchCompany = !localCompanyId || d.companyId === localCompanyId;
-
       if (matchOutlet && matchCompany && isDistActive !== false && d.itemId) {
         const cur = stockOutMap.get(d.itemId) || 0;
         stockOutMap.set(d.itemId, cur + Number(d.qty || 0));
@@ -231,7 +317,6 @@ export function StockOpnamePage() {
         ? sw.outletId === activeOutletId
         : !sw.outletId;
       const matchCompany = !localCompanyId || sw.companyId === localCompanyId;
-
       if (matchOutlet && matchCompany && isSwActive !== false && sw.itemId) {
         const cur = spoilWasteMap.get(sw.itemId) || 0;
         spoilWasteMap.set(
@@ -245,18 +330,14 @@ export function StockOpnamePage() {
     return validProducts.map((p: any) => {
       const uomName = uomMap.get(p.uomId) || "PCS";
       const catName = catMap.get(p.categoryId) || "-";
-
       const initialStockKey = `${activeOutletId || localRegionId}_${p.id}`;
       const initialStock = initialStocks[initialStockKey] || 0;
-
       const rcvData = stockInMap.get(p.id);
       const stockIn = rcvData?.qty || 0;
       const stockOut = stockOutMap.get(p.id) || 0;
       const spoilWasteQty = spoilWasteMap.get(p.id) || 0;
-
       const rawSystemStock = initialStock + stockIn - stockOut - spoilWasteQty;
       const systemStock = parseFloat(rawSystemStock.toFixed(4));
-
       const scopeKey =
         activeOutletId || localRegionId || localCompanyId || "DEFAULT";
       const pricing =
@@ -266,13 +347,11 @@ export function StockOpnamePage() {
       const currentPrice =
         rcvData?.currentPrice || Math.round(Number(pricing.basePrice || 0));
       const previousPrice = rcvData?.previousPrice || currentPrice;
-
       const physicalStock =
         physicalCounts[p.id] !== undefined ? physicalCounts[p.id] : systemStock;
       const varianceQty = parseFloat((physicalStock - systemStock).toFixed(4));
       const varianceCost = Math.round(varianceQty * currentPrice);
       const note = itemNotes[p.id] || "";
-
       return {
         id: p.id,
         itemId: p.id,
@@ -317,9 +396,7 @@ export function StockOpnamePage() {
     );
   }, [opnameMatrix, searchTerm]);
 
-  // =========================================================================
-  // PERBAIKAN LEAK TAB 2: RIWAYAT BERITA ACARA TERSEKAT PER CABANG
-  // =========================================================================
+  // Riwayat Berita Acara
   const filteredOpnames = useMemo(() => {
     return opnames.filter((o) => {
       if (localOutletId && o.outletId && o.outletId !== localOutletId)
@@ -337,6 +414,35 @@ export function StockOpnamePage() {
     });
   }, [opnames, localOutletId, localRegionId, localCompanyId]);
 
+  // =========================================================================
+  // PAGINASI: potong data maksimal 50 baris per halaman
+  // =========================================================================
+  const totalActivePages = Math.max(
+    1,
+    Math.ceil(filteredMatrix.length / ROWS_PER_PAGE),
+  );
+  const pagedMatrix = useMemo(
+    () =>
+      filteredMatrix.slice(
+        (activePage - 1) * ROWS_PER_PAGE,
+        activePage * ROWS_PER_PAGE,
+      ),
+    [filteredMatrix, activePage],
+  );
+
+  const totalHistoryPages = Math.max(
+    1,
+    Math.ceil(filteredOpnames.length / ROWS_PER_PAGE),
+  );
+  const pagedOpnames = useMemo(
+    () =>
+      filteredOpnames.slice(
+        (historyPage - 1) * ROWS_PER_PAGE,
+        historyPage * ROWS_PER_PAGE,
+      ),
+    [filteredOpnames, historyPage],
+  );
+
   // Ringkasan Akumulasi Selisih
   const totalVarianceCost = useMemo(() => {
     return filteredMatrix.reduce((sum, it) => sum + it.varianceCost, 0);
@@ -347,6 +453,82 @@ export function StockOpnamePage() {
       filteredMatrix.reduce((sum, it) => sum + it.varianceQty, 0).toFixed(4),
     );
   }, [filteredMatrix]);
+
+  // Reset pilihan jika tab, tanggal, atau outlet berubah
+  useEffect(() => {
+    setSelectedItemIds([]);
+  }, [activeTab, opnameDate, activeOutletId]);
+
+  // Reset ke halaman 1 setiap filter/tanggal/outlet/tab berubah
+  useEffect(() => {
+    setActivePage(1);
+  }, [searchTerm, activeOutletId, opnameDate, activeTab]);
+
+  useEffect(() => {
+    setHistoryPage(1);
+  }, [activeTab]);
+
+  // Clamp bila jumlah halaman menyusut (mis. setelah data berubah)
+  useEffect(() => {
+    if (activePage > totalActivePages) setActivePage(totalActivePages);
+  }, [activePage, totalActivePages]);
+
+  useEffect(() => {
+    if (historyPage > totalHistoryPages) setHistoryPage(totalHistoryPages);
+  }, [historyPage, totalHistoryPages]);
+
+  // Status Select All
+  const isAllSelected = useMemo(() => {
+    if (filteredMatrix.length === 0) return false;
+    return filteredMatrix.every((it) => selectedItemIds.includes(it.id));
+  }, [filteredMatrix, selectedItemIds]);
+
+  const isSomeSelected = useMemo(() => {
+    return (
+      filteredMatrix.some((it) => selectedItemIds.includes(it.id)) &&
+      !isAllSelected
+    );
+  }, [filteredMatrix, selectedItemIds, isAllSelected]);
+
+  const toggleSelectOne = (id: string) => {
+    setSelectedItemIds((prev) =>
+      prev.includes(id)
+        ? prev.filter((itemId) => itemId !== id)
+        : [...prev, id],
+    );
+  };
+
+  const toggleSelectAll = () => {
+    if (isAllSelected) {
+      const visibleIds = new Set(filteredMatrix.map((it) => it.id));
+      setSelectedItemIds((prev) => prev.filter((id) => !visibleIds.has(id)));
+    } else {
+      const visibleIds = filteredMatrix.map((it) => it.id);
+      setSelectedItemIds((prev) =>
+        Array.from(new Set([...prev, ...visibleIds])),
+      );
+    }
+  };
+
+  // Handler Export Excel Pintar (Hanya item terpilih jika ada)
+  const handleExportExcel = () => {
+    const itemsToExport =
+      selectedItemIds.length > 0
+        ? opnameMatrix.filter((it) => selectedItemIds.includes(it.id))
+        : filteredMatrix;
+
+    if (itemsToExport.length === 0) {
+      return sysToast.warn("Kosong", "Tidak ada data barang untuk diekspor.");
+    }
+
+    exportExcelStockOpname(itemsToExport, opnameDate);
+    sysToast.success(
+      "Export Selesai",
+      `Berhasil mengekspor ${itemsToExport.length} barang ${
+        selectedItemIds.length > 0 ? "terpilih " : ""
+      }ke file Excel.`,
+    );
+  };
 
   // Handle Input Fisik per Item
   const handlePhysicalCountChange = (itemId: string, val: string) => {
@@ -381,7 +563,6 @@ export function StockOpnamePage() {
             varianceCost: it.varianceCost,
             notes: it.note || null,
           }));
-
           await globalCommandBus.execute({
             type: "COMPLETE_STOCK_OPNAME",
             payload: {
@@ -394,7 +575,6 @@ export function StockOpnamePage() {
               items: itemsPayload,
             },
           });
-
           sysToast.success(
             "Opname Selesai",
             `Berita Acara Opname ${opnameDate} tersimpan & stok sistem telah diselaraskan.`,
@@ -422,7 +602,6 @@ export function StockOpnamePage() {
               {outletName} • Tanggal: {opnameDate}
             </p>
           </div>
-
           <div className="flex items-center gap-2 flex-wrap">
             {/* CETAK LEMBAR BLANK CHECKLIST KERTAS */}
             <button
@@ -440,13 +619,39 @@ export function StockOpnamePage() {
               <Printer className="w-4 h-4 text-slate-400" /> CETAK FORM KERTAS
             </button>
 
-            {/* EXPORT EXCEL HASIL OPNAME */}
-            <button
-              onClick={() => exportExcelStockOpname(opnameMatrix, opnameDate)}
-              className="px-3.5 py-2 bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 hover:bg-emerald-500/20 rounded-xl text-xs font-black transition flex items-center gap-1.5 cursor-pointer"
-            >
-              <FileSpreadsheet className="w-4 h-4" /> EXPORT EXCEL
-            </button>
+            {/* EXPORT EXCEL HASIL OPNAME (DINAMIS DENGAN SELEKSI) */}
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={handleExportExcel}
+                className={`px-3.5 py-2 rounded-xl text-xs font-black transition flex items-center gap-1.5 cursor-pointer shadow-xs border ${
+                  selectedItemIds.length > 0
+                    ? "bg-emerald-500 text-white border-emerald-600 shadow-[0_2px_10px_rgba(16,185,129,0.3)] hover:bg-emerald-600"
+                    : "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 hover:bg-emerald-500/20"
+                }`}
+                title={
+                  selectedItemIds.length > 0
+                    ? `Export ${selectedItemIds.length} item terpilih ke Excel`
+                    : "Export seluruh barang ke Excel"
+                }
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                <span>
+                  {selectedItemIds.length > 0
+                    ? `EXPORT EXCEL (${selectedItemIds.length} DIPILIH)`
+                    : "EXPORT EXCEL"}
+                </span>
+              </button>
+
+              {selectedItemIds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedItemIds([])}
+                  className="px-2.5 py-2 text-[11px] font-bold text-(--text-secondary) hover:text-(--text-primary) cursor-pointer"
+                >
+                  Batal
+                </button>
+              )}
+            </div>
 
             {/* TOMBOL SIMPAN & ADJUST STOK */}
             {activeTab === "ACTIVE_OPNAME" && (
@@ -470,37 +675,48 @@ export function StockOpnamePage() {
               {filteredMatrix.length} Produk
             </span>
           </div>
-
           <div className="p-3 bg-(--bg-card) rounded-xl border border-(--border-color)">
             <span className="text-[9px] font-black uppercase text-(--text-secondary) block">
               TOTAL SELISIH FISIK (QTY)
             </span>
             <span
-              className={`text-sm font-black font-mono block mt-0.5 ${totalVarianceQty === 0 ? "text-slate-400" : totalVarianceQty < 0 ? "text-rose-500" : "text-emerald-500"}`}
+              className={`text-sm font-black font-mono block mt-0.5 ${
+                totalVarianceQty === 0
+                  ? "text-slate-400"
+                  : totalVarianceQty < 0
+                    ? "text-rose-500"
+                    : "text-emerald-500"
+              }`}
             >
               {totalVarianceQty > 0 ? "+" : ""}
               {totalVarianceQty} Satuan
             </span>
           </div>
-
           <div className="p-3 bg-(--bg-card) rounded-xl border border-(--border-color)">
             <span className="text-[9px] font-black uppercase text-(--text-secondary) block">
               NILAI VARIANCE FINANSIAL (RP)
             </span>
             <span
-              className={`text-sm font-black font-mono block mt-0.5 ${totalVarianceCost === 0 ? "text-slate-400" : totalVarianceCost < 0 ? "text-rose-500" : "text-emerald-500"}`}
+              className={`text-sm font-black font-mono block mt-0.5 ${
+                totalVarianceCost === 0
+                  ? "text-slate-400"
+                  : totalVarianceCost < 0
+                    ? "text-rose-500"
+                    : "text-emerald-500"
+              }`}
             >
               Rp {totalVarianceCost.toLocaleString()}
             </span>
           </div>
-
           <div className="p-3 bg-(--bg-card) rounded-xl border border-(--border-color) flex items-center justify-between">
             <div>
               <span className="text-[9px] font-black uppercase text-(--text-secondary) block">
                 STATUS HARI INI
               </span>
               <span
-                className={`text-xs font-black uppercase block mt-0.5 ${isAlreadyAdjustedToday ? "text-emerald-500" : "text-amber-500"}`}
+                className={`text-xs font-black uppercase block mt-0.5 ${
+                  isAlreadyAdjustedToday ? "text-emerald-500" : "text-amber-500"
+                }`}
               >
                 {isAlreadyAdjustedToday
                   ? "TER-ADJUSTED (LOCKED)"
@@ -541,7 +757,6 @@ export function StockOpnamePage() {
               RIWAYAT BERITA ACARA ({filteredOpnames.length})
             </button>
           </div>
-
           {activeTab === "ACTIVE_OPNAME" && (
             <div className="flex items-center gap-2 bg-(--bg-input) border border-(--border-color) rounded-xl px-3 py-1.5">
               <Calendar className="w-4 h-4 text-orange-500" />
@@ -574,7 +789,6 @@ export function StockOpnamePage() {
             </select>
           )}
         </div>
-
         {activeTab === "ACTIVE_OPNAME" && (
           <div className="relative w-64">
             <Search className="w-4 h-4 text-(--text-secondary) absolute left-3 top-2.5" />
@@ -598,6 +812,19 @@ export function StockOpnamePage() {
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-(--surface-hover) border-b border-(--border-color) text-[10px] uppercase font-black text-(--text-secondary) tracking-wider">
+                  {/* CHECKBOX SELECT ALL */}
+                  <th className="px-3 py-3 w-10 text-center">
+                    <input
+                      type="checkbox"
+                      checked={isAllSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = isSomeSelected;
+                      }}
+                      onChange={toggleSelectAll}
+                      className="w-4 h-4 rounded border-(--border-color) text-orange-500 focus:ring-orange-500 cursor-pointer"
+                      title="Pilih semua barang yang tampil"
+                    />
+                  </th>
                   <th className="px-4 py-3">Nama Barang</th>
                   <th className="px-3 py-3 text-center">UOM</th>
                   <th className="px-3 py-3 text-center">Stok Awal</th>
@@ -623,15 +850,29 @@ export function StockOpnamePage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-(--border-color) text-xs font-semibold text-(--text-primary)">
-                {filteredMatrix.map((item) => {
+                {pagedMatrix.map((item) => {
                   const isPriceUp = item.currentPrice > item.previousPrice;
                   const isPriceDown = item.currentPrice < item.previousPrice;
-
+                  const isSelected = selectedItemIds.includes(item.id);
                   return (
                     <tr
                       key={item.id}
-                      className="hover:bg-(--surface-hover) transition"
+                      className={`transition ${
+                        isSelected
+                          ? "bg-orange-500/5 hover:bg-orange-500/10"
+                          : "hover:bg-(--surface-hover)"
+                      }`}
                     >
+                      {/* CHECKBOX PER BARIS */}
+                      <td className="px-3 py-2.5 text-center">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleSelectOne(item.id)}
+                          className="w-4 h-4 rounded border-(--border-color) text-orange-500 focus:ring-orange-500 cursor-pointer"
+                        />
+                      </td>
+
                       {/* NAMA BARANG */}
                       <td className="px-4 py-2.5">
                         <div className="font-bold text-(--text-primary)">
@@ -692,6 +933,7 @@ export function StockOpnamePage() {
                       <td className="px-3 py-2.5 text-center font-mono text-amber-500 font-bold">
                         -{item.spoilWasteQty}
                       </td>
+
                       {/* SISA SISTEM */}
                       <td className="px-3 py-2.5 text-center font-mono font-black text-(--text-primary) bg-(--bg-input)/50">
                         {item.systemStock}
@@ -777,11 +1019,10 @@ export function StockOpnamePage() {
                     </tr>
                   );
                 })}
-
                 {filteredMatrix.length === 0 && (
                   <tr>
                     <td
-                      colSpan={12}
+                      colSpan={13}
                       className="p-12 text-center text-(--text-secondary) font-bold text-xs italic"
                     >
                       Belum ada katalog barang fisik untuk di-opname.
@@ -790,6 +1031,12 @@ export function StockOpnamePage() {
                 )}
               </tbody>
             </table>
+            <PaginationControls
+              currentPage={activePage}
+              totalItems={filteredMatrix.length}
+              onPageChange={setActivePage}
+              label="barang"
+            />
           </div>
         ) : (
           /* TAB 2: RIWAYAT BERITA ACARA TERSEKAT PER CABANG */
@@ -807,7 +1054,7 @@ export function StockOpnamePage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-(--border-color) text-xs font-semibold text-(--text-primary)">
-                {filteredOpnames.map((doc) => (
+                {pagedOpnames.map((doc) => (
                   <tr
                     key={doc.id}
                     className="hover:bg-(--surface-hover) transition"
@@ -828,7 +1075,13 @@ export function StockOpnamePage() {
                     </td>
                     <td className="px-4 py-3 text-center font-mono font-bold">
                       <span
-                        className={`px-2 py-0.5 rounded text-[10px] ${doc.totalVarianceQty === 0 ? "text-slate-400" : doc.totalVarianceQty < 0 ? "text-rose-500" : "text-emerald-500"}`}
+                        className={`px-2 py-0.5 rounded text-[10px] ${
+                          doc.totalVarianceQty === 0
+                            ? "text-slate-400"
+                            : doc.totalVarianceQty < 0
+                              ? "text-rose-500"
+                              : "text-emerald-500"
+                        }`}
                       >
                         {doc.totalVarianceQty > 0 ? "+" : ""}
                         {doc.totalVarianceQty}
@@ -868,6 +1121,12 @@ export function StockOpnamePage() {
                 )}
               </tbody>
             </table>
+            <PaginationControls
+              currentPage={historyPage}
+              totalItems={filteredOpnames.length}
+              onPageChange={setHistoryPage}
+              label="berita acara"
+            />
           </div>
         )}
       </div>

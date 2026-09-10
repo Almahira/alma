@@ -1,5 +1,5 @@
 // File: apps/client_unv/src/executive-dashboard/desktop_dashboard.tsx
-import React, { useState, useRef } from "react";
+import React, { useState, useMemo } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -12,8 +12,15 @@ import {
   Sun,
   Moon,
   ArrowLeft,
+  TrendingUp,
+  TrendingDown,
+  Wallet,
+  ShieldCheck,
+  AlertTriangle,
+  BarChart3,
+  Percent,
 } from "lucide-react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { DebtReceivableView } from "./components/DebtReceivableView";
 import {
   AreaChart,
@@ -27,91 +34,40 @@ import {
 import { useNavigate } from "react-router-dom";
 
 /* ------------------------------------------------------------------ */
-/*  HOOK: Mouse position untuk efek highlight dinamis pada liquid glass */
+/*  KOMPONEN CARD EKSEKUTIF: SMOKED OBSIDIAN GLASS                    */
 /* ------------------------------------------------------------------ */
-const useMousePosition = () => {
-  const [position, setPosition] = useState({ x: 0, y: 0 });
-  const handleMouseMove = (e: React.MouseEvent) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    setPosition({ x: e.clientX - rect.left, y: e.clientY - rect.top });
-  };
-  return { position, handleMouseMove };
-};
-
-/* ------------------------------------------------------------------ */
-/*  TIPE PROPS UNTUK LIQUID GLASS                                      */
-/* ------------------------------------------------------------------ */
-interface LiquidGlassProps {
+const ExecutiveCard: React.FC<{
   children: React.ReactNode;
   className?: string;
-  style?: React.CSSProperties;
-  onClick?: () => void;
-  idleFloat?: boolean;
-  dark?: boolean;
-}
+  isDark?: boolean;
+  highlight?: "gold" | "emerald" | "rose" | "none";
+}> = ({ children, className = "", isDark = true, highlight = "none" }) => {
+  const borderHighlight =
+    highlight === "gold"
+      ? "border-amber-500/40 shadow-[0_0_25px_rgba(217,119,6,0.15)]"
+      : highlight === "emerald"
+        ? "border-emerald-500/40 shadow-[0_0_25px_rgba(16,185,129,0.15)]"
+        : highlight === "rose"
+          ? "border-rose-500/40 shadow-[0_0_25px_rgba(244,63,94,0.15)]"
+          : isDark
+            ? "border-white/[0.08] hover:border-white/[0.15]"
+            : "border-slate-200 hover:border-slate-300";
 
-/* ------------------------------------------------------------------ */
-/*  KOMPONEN LIQUID GLASS (mendukung light & dark)                     */
-/* ------------------------------------------------------------------ */
-const LiquidGlass: React.FC<LiquidGlassProps> = ({
-  children,
-  className = "",
-  style,
-  onClick,
-  idleFloat = false,
-  dark = false,
-}) => {
-  const { position, handleMouseMove } = useMousePosition();
-  const [isHovered, setIsHovered] = useState(false);
-
-  // Warna background, border, dan shadow untuk light / dark
-  const background = dark
-    ? "rgba(30, 41, 59, 0.85)" // dark slate
-    : "rgba(255, 255, 255, 0.85)";
-  const borderColor = dark ? "rgba(148, 163, 184, 0.3)" : "rgba(0, 0, 0, 0.1)";
-  const shadowHover = dark
-    ? "0 8px 32px rgba(0,0,0,0.5), 0 0 20px rgba(56,189,248,0.2), inset 0 0 20px rgba(148,163,184,0.1)"
-    : "0 8px 32px rgba(0,0,0,0.08), 0 0 20px rgba(255,255,255,0.2), inset 0 0 20px rgba(255,255,255,0.3)";
-  const shadowIdle = dark
-    ? "0 4px 20px rgba(0,0,0,0.4), 0 0 10px rgba(56,189,248,0.1)"
-    : "0 4px 20px rgba(0,0,0,0.05), 0 0 10px rgba(255,255,255,0.1)";
-  const highlightColor = dark
-    ? "rgba(255,255,255,0.15)"
-    : "rgba(255,255,255,0.4)";
+  const bgStyle = isDark
+    ? "bg-gradient-to-b from-[#131B2A]/90 to-[#0B0F17]/95 backdrop-blur-2xl"
+    : "bg-white/95 backdrop-blur-xl shadow-lg";
 
   return (
-    <motion.div
-      onMouseMove={handleMouseMove}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      onClick={onClick}
-      className={`relative overflow-hidden rounded-2xl border backdrop-blur-xl transition-all duration-300 ${className}`}
-      style={{
-        background,
-        borderColor,
-        boxShadow: isHovered ? shadowHover : shadowIdle,
-        ...style,
-      }}
-      whileHover={{ scale: 1.005 }}
-      whileTap={{ scale: 0.995 }}
-      transition={{ duration: 0.15 }}
+    <div
+      className={`relative overflow-hidden rounded-2xl border transition-all duration-300 ${borderHighlight} ${bgStyle} ${className}`}
     >
-      {/* Highlight dinamis mengikuti kursor */}
-      <div
-        className="pointer-events-none absolute inset-0 z-0"
-        style={{
-          background: `radial-gradient(circle at ${position.x}px ${position.y}px, ${highlightColor} 0%, transparent 70%)`,
-          opacity: isHovered ? 1 : 0,
-          transition: "opacity 0.3s",
-        }}
-      />
-      <div className="relative z-10 h-full">{children}</div>
-    </motion.div>
+      {children}
+    </div>
   );
 };
 
 /* ------------------------------------------------------------------ */
-/*  KOMPONEN UTAMA DASHBOARD                                           */
+/*  KOMPONEN UTAMA DASHBOARD EKSEKUTIF                                 */
 /* ------------------------------------------------------------------ */
 export const DesktopDashboard: React.FC<{
   data: any;
@@ -150,1199 +106,855 @@ export const DesktopDashboard: React.FC<{
   const [expandedPendukungCat, setExpandedPendukungCat] = useState<
     Record<string, boolean>
   >({});
-  const [ripples, setRipples] = useState<
-    { x: number; y: number; id: number }[]
-  >([]);
-  const logoRef = useRef<HTMLDivElement>(null);
-
-  // State tema (default light)
-  const [isDark, setIsDark] = useState(false);
+  const [isDark, setIsDark] = useState(true);
 
   const toggleSec = (key: string) =>
     setExpandedSections((p) => ({ ...p, [key]: !p[key] }));
   const togglePendukung = (key: string) =>
     setExpandedPendukungCat((p) => ({ ...p, [key]: !p[key] }));
 
+  const netSalesNominal = data.revenue.netSales || 0;
+
   const formatPct = (nom: number) => {
-    if (!data.revenue.netSales || data.revenue.netSales <= 0) return "0,00%";
-    return `${((nom / data.revenue.netSales) * 100).toFixed(2).replace(".", ",")}%`;
+    if (!netSalesNominal || netSalesNominal <= 0) return "0,0%";
+    return `${((nom / netSalesNominal) * 100).toFixed(1).replace(".", ",")}%`;
   };
 
-  const handleLogoClick = (e: React.MouseEvent) => {
-    const rect = logoRef.current?.getBoundingClientRect();
-    if (rect) {
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      const id = Date.now();
-      setRipples((prev) => [...prev, { x, y, id }]);
-      setTimeout(() => {
-        setRipples((prev) => prev.filter((r) => r.id !== id));
-      }, 600);
-    }
-  };
+  const chartData = useMemo(() => {
+    return (data.outletPerformance || []).map((o: any) => ({
+      name: o.outletName,
+      netSales: o.netSales,
+    }));
+  }, [data.outletPerformance]);
 
-  const chartData = data.outletPerformance.map((o: any) => ({
-    name: o.outletName,
-    netSales: o.netSales,
-  }));
+  // Palet Warna Dewasa & Elegan
+  const bgCanvas = isDark
+    ? "bg-[#080C14] text-slate-100"
+    : "bg-slate-100 text-slate-900";
 
-  /* ------------------------------------------------------------------ */
-  /*  KELAS WARNA UTAMA BERDASARKAN TEMA                                 */
-  /* ------------------------------------------------------------------ */
-  const rootBg = isDark
-    ? "bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900"
-    : "bg-gradient-to-br from-teal-400 via-cyan-500 to-blue-500";
-  const primaryText = isDark ? "text-slate-100" : "text-slate-800";
-  const secondaryText = isDark ? "text-slate-300" : "text-slate-600";
-  const mutedText = isDark ? "text-slate-400" : "text-slate-500";
+  const subText = isDark ? "text-slate-400" : "text-slate-500";
+  const cardSubBg = isDark ? "bg-white/[0.03]" : "bg-slate-50";
 
   return (
     <div
-      className={`h-dvh flex flex-col ${rootBg} ${primaryText} font-sans overflow-hidden`}
+      className={`h-dvh flex flex-col font-sans overflow-hidden ${bgCanvas}`}
     >
       {/* ===================================================================== */}
-      {/* HEADER (30% tinggi viewport)                                        */}
+      {/* 1. TOP EXECUTIVE APP BAR                                              */}
       {/* ===================================================================== */}
-      <div className="flex-none h-[23%] p-4 pb-2">
-        <LiquidGlass
-          className="h-full p-4 flex flex-col justify-between"
-          dark={isDark}
-        >
-          {/* Baris atas: Logo + Judul + Toolkit + Toggle Utama + Toggle Tema */}
-          <div className="flex items-center justify-between gap-3">
-            {/* Kiri: Logo & Judul */}
-            <div className="flex items-center gap-3 shrink-0">
-              <button
-                onClick={() => navigate("/app")}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-xs font-black uppercase transition shadow-md cursor-pointer mr-1"
-                title="Kembali ke Ruang Kerja Kasir / ERP"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                <span className="hidden sm:inline">Kembali ke ERP</span>
-              </button>
-              <motion.div
-                ref={logoRef}
-                onClick={handleLogoClick}
-                className="w-10 h-10 rounded-xl bg-linear-to-br from-amber-400 to-orange-500 flex items-center justify-center cursor-pointer relative overflow-hidden shadow-md"
-                whileHover={{ scale: 1.1 }}
-                whileTap={{ scale: 0.9 }}
-              >
-                <motion.span
-                  className="text-white font-black text-xl select-none"
-                  whileHover={{ rotateY: 360 }}
-                  transition={{ duration: 0.8 }}
-                >
-                  Z
-                </motion.span>
-                {ripples.map((r) => (
-                  <motion.span
-                    key={r.id}
-                    className="absolute rounded-full bg-white/60 pointer-events-none"
-                    style={{
-                      left: r.x - 20,
-                      top: r.y - 20,
-                      width: 40,
-                      height: 40,
-                    }}
-                    initial={{ scale: 0, opacity: 0.8 }}
-                    animate={{ scale: 4, opacity: 0 }}
-                    transition={{ duration: 0.6 }}
-                  />
-                ))}
-              </motion.div>
+      <header className="px-6 py-3 border-b border-white/8 shrink-0 bg-[#0B101B]/80 backdrop-blur-xl flex items-center justify-between gap-4 z-20">
+        {/* Sisi Kiri: Branding & Navigasi Cepat */}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate("/app")}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-xs font-semibold tracking-wide transition cursor-pointer text-slate-200"
+            title="Kembali ke Ruang Kerja Kasir / ERP"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>Workspace</span>
+          </button>
 
-              <div className="leading-tight">
-                <div className="flex items-center gap-2">
-                  <h1
-                    className={`text-base font-black tracking-tight ${isDark ? "text-white" : "text-slate-900"} uppercase`}
-                  >
-                    EXECUTIVE OWNER PORTAL
-                  </h1>
-                  <div
-                    className={`flex items-center gap-1 px-2 py-0.5 rounded-full border shadow-sm ${isDark ? "bg-slate-700/70 border-slate-500/50" : "bg-white/70 border-slate-300/60"}`}
-                  >
-                    <span className="relative flex h-1.5 w-1.5">
-                      <span
-                        className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${isLiveSyncing ? "bg-amber-400" : "bg-emerald-500"}`}
-                      ></span>
-                      <span
-                        className={`relative inline-flex rounded-full h-1.5 w-1.5 ${isLiveSyncing ? "bg-amber-500" : "bg-emerald-600"}`}
-                      ></span>
-                    </span>
-                    <span
-                      className={`text-[9px] font-bold font-mono ${isDark ? "text-slate-200" : "text-slate-600"}`}
-                    >
-                      {isLiveSyncing
-                        ? "Syncing..."
-                        : `Live • ${lastSyncTime || "Realtime"}`}
-                    </span>
-                    {onManualSync && (
-                      <button
-                        onClick={onManualSync}
-                        disabled={isLiveSyncing}
-                        className={`p-0.5 rounded cursor-pointer transition disabled:opacity-50 ${isDark ? "text-slate-300 hover:text-white" : "text-slate-500 hover:text-slate-800"}`}
-                        title="Sinkronkan Sekarang"
-                      >
-                        <RotateCw
-                          className={`w-3 h-3 ${isLiveSyncing ? "animate-spin text-orange-500" : ""}`}
-                        />
-                      </button>
-                    )}
-                  </div>
-                </div>
-                <p className={`text-[10px] font-semibold ${secondaryText}`}>
-                  Laporan Arus Kas &amp; Profitabilitas Standar Eksekutif
-                </p>
-              </div>
+          <div className="h-4 w-px bg-white/10 mx-1" />
+
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-sm font-black tracking-wider uppercase text-white flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]" />
+                EXECUTIVE OWNER SUITE
+              </h1>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/20 font-bold">
+                HOLDING LEVEL
+              </span>
             </div>
+            <p className="text-[10px] font-medium text-slate-400">
+              Konsolidasi Arus Kas Bersih &amp; Profitabilitas Pemilik Usaha
+            </p>
+          </div>
+        </div>
 
-            {/* Kanan: Toolkit + Toggle Utama + Toggle Tema */}
-            <div className="flex items-center gap-2 flex-wrap justify-end">
-              {/* Toggle Tema */}
-              <button
-                onClick={() => setIsDark(!isDark)}
-                className={`p-1.5 rounded-lg border shadow-sm transition cursor-pointer ${
-                  isDark
-                    ? "bg-slate-700 border-slate-500 text-amber-300 hover:bg-slate-600"
-                    : "bg-white/60 border-slate-300/70 text-slate-600 hover:bg-white/80"
+        {/* Sisi Kanan: Kontrol Filter & Switcher */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Status Sinkronisasi Real-Time */}
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-white/10 bg-white/3 text-[10px] font-mono text-slate-300">
+            <span className="relative flex h-1.5 w-1.5">
+              <span
+                className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                  isLiveSyncing ? "bg-amber-400" : "bg-emerald-400"
                 }`}
-                title={isDark ? "Ganti ke mode terang" : "Ganti ke mode gelap"}
-              >
-                {isDark ? (
-                  <Sun className="w-3.5 h-3.5" />
-                ) : (
-                  <Moon className="w-3.5 h-3.5" />
-                )}
-              </button>
-
-              {/* Region */}
-              <div
-                className={`flex items-center gap-1 border rounded-lg px-2 py-1 shadow-sm ${isDark ? "bg-slate-700/70 border-slate-500/50" : "bg-white/60 border-slate-300/70"}`}
-              >
-                <Building2 className="w-3 h-3 text-orange-500" />
-                <select
-                  value={filters.regionId}
-                  onChange={(e) =>
-                    setFilters((p: any) => ({
-                      ...p,
-                      regionId: e.target.value,
-                      outletId: "",
-                    }))
-                  }
-                  className={`bg-transparent text-[10px] font-bold outline-none cursor-pointer max-w-27.5 ${isDark ? "text-slate-100" : "text-slate-800"}`}
-                >
-                  <option
-                    value=""
-                    className={
-                      isDark
-                        ? "bg-slate-800 text-slate-100"
-                        : "bg-white text-slate-800"
-                    }
-                  >
-                    Semua Wilayah
-                  </option>
-                  {regions.map((r) => (
-                    <option
-                      key={r.id}
-                      value={r.id}
-                      className={
-                        isDark
-                          ? "bg-slate-800 text-slate-100"
-                          : "bg-white text-slate-800"
-                      }
-                    >
-                      {r.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Outlet */}
-              <div
-                className={`flex items-center gap-1 border rounded-lg px-2 py-1 shadow-sm ${isDark ? "bg-slate-700/70 border-slate-500/50" : "bg-white/60 border-slate-300/70"}`}
-              >
-                <Building2 className="w-3 h-3 text-orange-500" />
-                <select
-                  value={filters.outletId}
-                  onChange={(e) =>
-                    setFilters((p: any) => ({ ...p, outletId: e.target.value }))
-                  }
-                  className={`bg-transparent text-[10px] font-bold outline-none cursor-pointer max-w-27.5 ${isDark ? "text-slate-100" : "text-slate-800"}`}
-                >
-                  <option
-                    value=""
-                    className={
-                      isDark
-                        ? "bg-slate-800 text-slate-100"
-                        : "bg-white text-slate-800"
-                    }
-                  >
-                    Semua Outlet
-                  </option>
-                  {outlets
-                    .filter(
-                      (o) =>
-                        !filters.regionId || o.regionId === filters.regionId,
-                    )
-                    .map((o) => (
-                      <option
-                        key={o.id}
-                        value={o.id}
-                        className={
-                          isDark
-                            ? "bg-slate-800 text-slate-100"
-                            : "bg-white text-slate-800"
-                        }
-                      >
-                        {o.name}
-                      </option>
-                    ))}
-                </select>
-              </div>
-
-              {/* Bulan */}
-              <div
-                className={`flex items-center gap-1 border rounded-lg px-2 py-1 shadow-sm ${isDark ? "bg-slate-700/70 border-slate-500/50" : "bg-white/60 border-slate-300/70"}`}
-              >
-                <Calendar className="w-3 h-3 text-orange-500" />
-                <input
-                  type="month"
-                  value={filters.month}
-                  onChange={(e) =>
-                    setFilters((p: any) => ({ ...p, month: e.target.value }))
-                  }
-                  className={`bg-transparent text-[10px] font-bold outline-none font-mono cursor-pointer w-22.5 ${isDark ? "text-slate-100" : "text-slate-800"}`}
-                />
-              </div>
-
-              {/* Toggle Deviden */}
-              <button
-                onClick={() =>
-                  setFilters((p: any) => ({
-                    ...p,
-                    devidenPosition:
-                      p.devidenPosition === "TOP_NET_SALES"
-                        ? "BOTTOM_OWNER"
-                        : "TOP_NET_SALES",
-                  }))
-                }
-                title={
-                  filters.devidenPosition === "TOP_NET_SALES"
-                    ? "Deviden dipotong dari Net Sales (Atas)"
-                    : "Deviden dipotong dari Laba Owner (Bawah)"
-                }
-                className={`px-2 py-1 rounded-lg border flex items-center gap-1 font-bold transition cursor-pointer shadow-sm text-[10px] ${
-                  filters.devidenPosition === "TOP_NET_SALES"
-                    ? isDark
-                      ? "bg-amber-900/50 text-amber-300 border-amber-500/50 hover:bg-amber-800/50"
-                      : "bg-amber-100 text-amber-800 border-amber-300 hover:bg-amber-200"
-                    : isDark
-                      ? "bg-blue-900/50 text-blue-300 border-blue-500/50 hover:bg-blue-800/50"
-                      : "bg-blue-100 text-blue-800 border-blue-300 hover:bg-blue-200"
+              />
+              <span
+                className={`relative inline-flex rounded-full h-1.5 w-1.5 ${
+                  isLiveSyncing ? "bg-amber-400" : "bg-emerald-400"
                 }`}
+              />
+            </span>
+            <span>
+              {isLiveSyncing ? "Syncing..." : lastSyncTime || "Realtime"}
+            </span>
+            {onManualSync && (
+              <button
+                onClick={onManualSync}
+                disabled={isLiveSyncing}
+                className="p-0.5 text-slate-400 hover:text-white transition cursor-pointer"
+                title="Sinkronkan Data Sekarang"
               >
-                <ArrowRightLeft className="w-3 h-3" />
-                <span>
-                  {filters.devidenPosition === "TOP_NET_SALES"
-                    ? "Deviden Atas"
-                    : "Deviden Bawah"}
-                </span>
-              </button>
-
-              {/* Toggle Pajak */}
-              <label
-                className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border cursor-pointer select-none shadow-sm ${isDark ? "bg-slate-700/70 border-slate-500/50" : "bg-white/60 border-slate-300/70"}`}
-              >
-                <input
-                  type="checkbox"
-                  checked={filters.showTaxService}
-                  onChange={(e) =>
-                    setFilters((p: any) => ({
-                      ...p,
-                      showTaxService: e.target.checked,
-                    }))
-                  }
-                  className="w-3.5 h-3.5 rounded text-orange-500 accent-orange-500"
+                <RotateCw
+                  className={`w-3 h-3 ${isLiveSyncing ? "animate-spin text-amber-400" : ""}`}
                 />
-                <span
-                  className={`font-bold text-[10px] ${isDark ? "text-slate-200" : "text-slate-700"}`}
-                >
-                  Pajak PB1 &amp; Servis
-                </span>
-              </label>
-
-              {/* Toggle Utama (P&L vs Hutang) */}
-              <div
-                className={`flex items-center border rounded-lg p-0.5 shadow-sm ${isDark ? "bg-slate-700/70 border-slate-500/50" : "bg-white/60 border-slate-300/70"}`}
-              >
-                <button
-                  onClick={() => setActiveTab("PL_WATERFALL")}
-                  className={`px-2 py-1 rounded-md text-[10px] font-black uppercase tracking-wider transition cursor-pointer ${
-                    activeTab === "PL_WATERFALL"
-                      ? "bg-linear-to-r from-blue-500 to-teal-400 text-white shadow"
-                      : isDark
-                        ? "text-slate-300 hover:text-white"
-                        : "text-slate-600 hover:text-slate-900"
-                  }`}
-                >
-                  P&amp;L
-                </button>
-                <button
-                  onClick={() => setActiveTab("DEBT_RECEIVABLE")}
-                  className={`px-2 py-1 rounded-md text-[10px] font-black uppercase tracking-wider transition cursor-pointer ${
-                    activeTab === "DEBT_RECEIVABLE"
-                      ? "bg-linear-to-r from-blue-500 to-teal-400 text-white shadow"
-                      : isDark
-                        ? "text-slate-300 hover:text-white"
-                        : "text-slate-600 hover:text-slate-900"
-                  }`}
-                >
-                  Hutang
-                </button>
-              </div>
-            </div>
+              </button>
+            )}
           </div>
 
-          {/* Baris bawah: 3 Hero Cards */}
-          <div className="grid grid-cols-3 gap-3 mt-2 flex-1 items-stretch">
-            <LiquidGlass
-              className="p-3 flex flex-col justify-center"
-              dark={isDark}
+          {/* Filter Region */}
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-white/10 bg-white/3 text-xs font-semibold">
+            <Building2 className="w-3.5 h-3.5 text-amber-400" />
+            <select
+              value={filters.regionId}
+              onChange={(e) =>
+                setFilters((p: any) => ({
+                  ...p,
+                  regionId: e.target.value,
+                  outletId: "",
+                }))
+              }
+              className="bg-transparent text-xs font-semibold outline-none cursor-pointer text-slate-200"
             >
-              <span
-                className={`text-[9px] font-black uppercase tracking-wider block ${isDark ? "text-emerald-400" : "text-emerald-600"}`}
-              >
-                TOTAL NETT SALES (100%)
+              <option value="" className="bg-[#0F172A] text-slate-200">
+                Semua Wilayah
+              </option>
+              {regions.map((r) => (
+                <option
+                  key={r.id}
+                  value={r.id}
+                  className="bg-[#0F172A] text-slate-200"
+                >
+                  {r.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Filter Outlet */}
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-white/10 bg-white/3 text-xs font-semibold">
+            <select
+              value={filters.outletId}
+              onChange={(e) =>
+                setFilters((p: any) => ({ ...p, outletId: e.target.value }))
+              }
+              className="bg-transparent text-xs font-semibold outline-none cursor-pointer text-slate-200"
+            >
+              <option value="" className="bg-[#0F172A] text-slate-200">
+                Semua Cabang
+              </option>
+              {outlets
+                .filter(
+                  (o) => !filters.regionId || o.regionId === filters.regionId,
+                )
+                .map((o) => (
+                  <option
+                    key={o.id}
+                    value={o.id}
+                    className="bg-[#0F172A] text-slate-200"
+                  >
+                    {o.name}
+                  </option>
+                ))}
+            </select>
+          </div>
+
+          {/* Filter Bulan */}
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-white/10 bg-white/3 text-xs font-semibold">
+            <Calendar className="w-3.5 h-3.5 text-amber-400" />
+            <input
+              type="month"
+              value={filters.month}
+              onChange={(e) =>
+                setFilters((p: any) => ({ ...p, month: e.target.value }))
+              }
+              className="bg-transparent text-xs font-mono font-bold outline-none cursor-pointer text-slate-200"
+            />
+          </div>
+
+          {/* Tab Utama: P&L vs Hutang Piutang */}
+          <div className="flex items-center rounded-lg border border-white/10 bg-black/40 p-0.5">
+            <button
+              onClick={() => setActiveTab("PL_WATERFALL")}
+              className={`px-3 py-1 rounded-md text-xs font-bold transition cursor-pointer ${
+                activeTab === "PL_WATERFALL"
+                  ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              Laba Rugi (P&amp;L)
+            </button>
+            <button
+              onClick={() => setActiveTab("DEBT_RECEIVABLE")}
+              className={`px-3 py-1 rounded-md text-xs font-bold transition cursor-pointer ${
+                activeTab === "DEBT_RECEIVABLE"
+                  ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              Hutang &amp; Piutang
+            </button>
+          </div>
+
+          {/* Toggle Light / Dark */}
+          <button
+            onClick={() => setIsDark(!isDark)}
+            className="p-1.5 rounded-lg border border-white/10 bg-white/3 text-slate-400 hover:text-amber-300 transition cursor-pointer"
+            title="Ganti Tema"
+          >
+            {isDark ? (
+              <Sun className="w-3.5 h-3.5" />
+            ) : (
+              <Moon className="w-3.5 h-3.5" />
+            )}
+          </button>
+        </div>
+      </header>
+
+      {/* ===================================================================== */}
+      {/* 2. HERO KPI CARDS: 3 PILAR UTAMA FINANSIAL OWNER                      */}
+      {/* ===================================================================== */}
+      <div className="px-6 py-4 grid grid-cols-1 md:grid-cols-3 gap-4 shrink-0 bg-linear-to-b from-[#0B101B]/60 to-transparent">
+        {/* PILAR 1: OMSET BERSIH */}
+        <ExecutiveCard isDark={isDark} className="p-4" highlight="gold">
+          <div className="flex justify-between items-start">
+            <div>
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
+                1. OMSET BERSIH (NET REVENUE)
               </span>
-              <div
-                className={`text-lg font-black font-mono mt-0.5 ${isDark ? "text-emerald-300" : "text-emerald-700"}`}
-              >
+              <div className="text-2xl font-black font-mono tracking-tight text-white mt-1">
                 Rp {data.revenue.netSales.toLocaleString()}
               </div>
-              <span className={`text-[9px] block mt-0.5 ${mutedText}`}>
-                Gross: Rp {data.revenue.grossSales.toLocaleString()} | Diskon:
-                Rp {data.revenue.discount.toLocaleString()}
-              </span>
-            </LiquidGlass>
+            </div>
+            <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
+              <BarChart3 className="w-5 h-5" />
+            </div>
+          </div>
+          <div className="mt-2.5 pt-2.5 border-t border-white/6 flex items-center justify-between text-[11px] text-slate-400">
+            <span>Gross: Rp {data.revenue.grossSales.toLocaleString()}</span>
+            <span className="text-rose-400">
+              Diskon: -Rp {data.revenue.discount.toLocaleString()}
+            </span>
+          </div>
+        </ExecutiveCard>
 
-            <LiquidGlass
-              className="p-3 flex flex-col justify-center"
-              dark={isDark}
-            >
-              <span
-                className={`text-[9px] font-black uppercase tracking-wider block ${isDark ? "text-amber-400" : "text-amber-600"}`}
-              >
-                GROSS OPERATING PROFIT (GOP / UNTUNG RESTO)
+        {/* PILAR 2: UNTUNG RESTO (GOP) */}
+        <ExecutiveCard isDark={isDark} className="p-4">
+          <div className="flex justify-between items-start">
+            <div>
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
+                2. UNTUNG RESTORAN (GOP OPERASIONAL)
               </span>
-              <div
-                className={`text-lg font-black font-mono mt-0.5 ${isDark ? "text-amber-300" : "text-amber-700"}`}
-              >
-                Rp {data.gop.grossOperatingProfit.toLocaleString()} (
-                {data.gop.gopPercentage}%)
+              <div className="text-2xl font-black font-mono tracking-tight text-amber-300 mt-1">
+                Rp {data.gop.grossOperatingProfit.toLocaleString()}
               </div>
-              <span className={`text-[9px] block mt-0.5 ${mutedText}`}>
-                Total Biaya Toko: Rp{" "}
-                {(
-                  data.summaryUsage.totalUsageAll + data.payroll.realisasiGaji
-                ).toLocaleString()}
-              </span>
-            </LiquidGlass>
+            </div>
+            <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
+              <Percent className="w-5 h-5" />
+            </div>
+          </div>
+          <div className="mt-2.5 pt-2.5 border-t border-white/6 flex items-center justify-between text-[11px]">
+            <span className="text-slate-400">Marjin Restoran:</span>
+            <span className="font-mono font-bold text-amber-300">
+              {data.gop.gopPercentage}% dari Penjualan
+            </span>
+          </div>
+        </ExecutiveCard>
 
-            <LiquidGlass
-              className={`p-3 flex flex-col justify-center ${
-                data.finalProfit.isNomplok
-                  ? isDark
-                    ? "border-rose-500/60"
-                    : "border-rose-400/60"
-                  : isDark
-                    ? "border-emerald-500/60"
-                    : "border-emerald-400/60"
-              }`}
-              dark={isDark}
-            >
-              <span
-                className={`text-[9px] font-black uppercase tracking-wider block ${secondaryText}`}
-              >
-                SISA PROFIT PAK HAJI &amp; BU HAJI
+        {/* PILAR 3: SISA LABA BERSIH OWNER */}
+        <ExecutiveCard
+          isDark={isDark}
+          className="p-4"
+          highlight={data.finalProfit.isNomplok ? "rose" : "emerald"}
+        >
+          <div className="flex justify-between items-start">
+            <div>
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
+                3. SISA UANG BERSIH PEMILIK (NET RETAINED)
               </span>
               <div
-                className={`text-lg font-black font-mono mt-0.5 ${
+                className={`text-2xl font-black font-mono tracking-tight mt-1 ${
                   data.finalProfit.isNomplok
-                    ? isDark
-                      ? "text-rose-400 animate-pulse"
-                      : "text-rose-600 animate-pulse"
-                    : isDark
-                      ? "text-emerald-300"
-                      : "text-emerald-700"
+                    ? "text-rose-400"
+                    : "text-emerald-400"
                 }`}
               >
-                Rp {data.finalProfit.finalProfitOwner.toLocaleString()} (
-                {data.finalProfit.finalProfitPercentage}%)
+                Rp {data.finalProfit.finalProfitOwner.toLocaleString()}
               </div>
-              <span
-                className={`text-[9px] font-bold block mt-0.5 ${secondaryText}`}
-              >
-                {data.finalProfit.isNomplok
-                  ? "⚠️ DEFISIT OPERASIONAL: Penarikan Melebihi Laba Bersih"
-                  : "✅ SISA KAS BERSIH DI TANGAN"}
-              </span>
-            </LiquidGlass>
+            </div>
+            <div
+              className={`p-2 rounded-xl border ${
+                data.finalProfit.isNomplok
+                  ? "bg-rose-500/10 border-rose-500/20 text-rose-400"
+                  : "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+              }`}
+            >
+              <Wallet className="w-5 h-5" />
+            </div>
           </div>
-        </LiquidGlass>
+          <div className="mt-2.5 pt-2.5 border-t border-white/6 flex items-center justify-between text-[11px]">
+            <span className="text-slate-400">Status Kas Bersih:</span>
+            <span
+              className={`font-bold font-mono ${
+                data.finalProfit.isNomplok
+                  ? "text-rose-400"
+                  : "text-emerald-400"
+              }`}
+            >
+              {data.finalProfit.isNomplok
+                ? "DEFISIT OPERASIONAL"
+                : `${data.finalProfit.finalProfitPercentage}% Siap Disimpan`}
+            </span>
+          </div>
+        </ExecutiveCard>
       </div>
 
       {/* ===================================================================== */}
-      {/* KONTEN UTAMA (70% tinggi viewport) - sekarang bisa di-scroll penuh  */}
+      {/* 3. KONTEN UTAMA DASHBOARD                                             */}
       {/* ===================================================================== */}
-      <div className="flex-1 p-4 pt-2 overflow-y-auto">
+      <main className="flex-1 px-6 pb-6 overflow-y-auto custom-scrollbar">
         {activeTab === "PL_WATERFALL" ? (
-          <div className="grid grid-cols-10 gap-3">
-            {/* Kolom Kiri: Laporan P&L (40%) */}
-            <div className="col-span-4">
-              <LiquidGlass className="p-3 flex flex-col" dark={isDark}>
-                <div
-                  className={`border-b pb-1 mb-2 flex justify-between items-center ${isDark ? "border-slate-600/60" : "border-slate-200/60"}`}
-                >
-                  <h3
-                    className={`font-black text-[11px] uppercase tracking-wide ${isDark ? "text-orange-400" : "text-orange-600"}`}
-                  >
-                    📊 LAPORAN P&amp;L ARUS KAS AIR TERJUN
-                  </h3>
-                  <span className={`text-[9px] font-mono ${mutedText}`}>
-                    Periode: {filters.month}
-                  </span>
+          <div className="grid grid-cols-12 gap-5">
+            {/* ------------------------------------------------------------- */}
+            {/* KOLOM KIRI (7/12): WATERFALL ALIRAN KAS INTUITIF              */}
+            {/* ------------------------------------------------------------- */}
+            <div className="col-span-12 lg:col-span-7 space-y-4">
+              <ExecutiveCard isDark={isDark} className="p-5">
+                {/* Header Section */}
+                <div className="flex items-center justify-between pb-3 border-b border-white/8 mb-4">
+                  <div>
+                    <h3 className="text-xs font-black uppercase tracking-wider text-slate-200">
+                      STRUKTUR PENYUSUTAN ARUS KAS DARI OMSET (WATERFALL)
+                    </h3>
+                    <p className="text-[10px] text-slate-400">
+                      Bagaimana omset Anda terdistribusi ke bahan baku, toko,
+                      dan laba
+                    </p>
+                  </div>
+                  {/* Pilihan Posisi Deviden & Pajak */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() =>
+                        setFilters((p: any) => ({
+                          ...p,
+                          devidenPosition:
+                            p.devidenPosition === "TOP_NET_SALES"
+                              ? "BOTTOM_OWNER"
+                              : "TOP_NET_SALES",
+                        }))
+                      }
+                      className="px-2.5 py-1 rounded-lg border border-white/10 bg-white/5 text-[10px] font-bold text-slate-300 hover:text-white transition flex items-center gap-1"
+                    >
+                      <ArrowRightLeft className="w-3 h-3 text-amber-400" />
+                      <span>
+                        {filters.devidenPosition === "TOP_NET_SALES"
+                          ? "Sharing: Potong Omset (Atas)"
+                          : "Sharing: Potong Laba (Bawah)"}
+                      </span>
+                    </button>
+                    <label className="flex items-center gap-1 text-[10px] font-bold text-slate-300 cursor-pointer px-2 py-1 rounded-lg bg-white/5 border border-white/10">
+                      <input
+                        type="checkbox"
+                        checked={filters.showTaxService}
+                        onChange={(e) =>
+                          setFilters((p: any) => ({
+                            ...p,
+                            showTaxService: e.target.checked,
+                          }))
+                        }
+                        className="rounded border-white/20 accent-amber-500"
+                      />
+                      <span>Pajak &amp; Servis</span>
+                    </label>
+                  </div>
                 </div>
 
-                {/* Konten P&L tanpa scroll internal */}
-                <div className="space-y-1 text-[10px] font-semibold">
-                  {/* Revenue block */}
-                  <div className="py-1 space-y-0.5">
+                {/* VISUAL MINI-WATERFALL BAR (Untuk Pemilik Tanpa Background Akuntansi) */}
+                <div className="mb-5 p-3 rounded-xl bg-black/40 border border-white/6 space-y-2">
+                  <div className="flex justify-between text-[10px] font-bold text-slate-400">
+                    <span>Proporsi Penyerapan Omset (100%):</span>
+                    <span className="font-mono text-amber-300">
+                      Rp {data.revenue.netSales.toLocaleString()}
+                    </span>
+                  </div>
+                  {/* Multi-Segment Proportion Bar */}
+                  <div className="h-3.5 w-full rounded-full bg-slate-800 overflow-hidden flex">
                     <div
-                      className={`text-[8px] font-black uppercase tracking-wider ${mutedText}`}
-                    >
-                      REVENUE MONTH TO DATE
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          (data.cogs.totalBelanjaDapur /
+                            (netSalesNominal || 1)) *
+                            100,
+                        )}%`,
+                      }}
+                      className="h-full bg-rose-500/80 transition-all"
+                      title={`Bahan Dapur (CoGS): ${formatPct(data.cogs.totalBelanjaDapur)}`}
+                    />
+                    <div
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          (data.pendukung.totalBelanjaPendukung /
+                            (netSalesNominal || 1)) *
+                            100,
+                        )}%`,
+                      }}
+                      className="h-full bg-orange-500/80 transition-all"
+                      title={`Operasional & OPEX: ${formatPct(
+                        data.pendukung.totalBelanjaPendukung,
+                      )}`}
+                    />
+                    <div
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          (data.payroll.realisasiGaji /
+                            (netSalesNominal || 1)) *
+                            100,
+                        )}%`,
+                      }}
+                      className="h-full bg-amber-500/80 transition-all"
+                      title={`Gaji Karyawan: ${formatPct(data.payroll.realisasiGaji)}`}
+                    />
+                    <div
+                      style={{
+                        width: `${Math.max(
+                          0,
+                          (data.gop.grossOperatingProfit /
+                            (netSalesNominal || 1)) *
+                            100,
+                        )}%`,
+                      }}
+                      className="h-full bg-emerald-500/90 transition-all"
+                      title={`Laba Resto (GOP): ${data.gop.gopPercentage}%`}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between text-[9px] font-bold text-slate-400 pt-1 flex-wrap gap-2">
+                    <span className="flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-rose-500" />{" "}
+                      Dapur (CoGS): {formatPct(data.cogs.totalBelanjaDapur)}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-orange-500" />{" "}
+                      OPEX Toko:{" "}
+                      {formatPct(data.pendukung.totalBelanjaPendukung)}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-amber-500" />{" "}
+                      Gaji Toko: {formatPct(data.payroll.realisasiGaji)}
+                    </span>
+                    <span className="flex items-center gap-1 text-emerald-400 font-black">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500" />{" "}
+                      Laba Resto: {data.gop.gopPercentage}%
+                    </span>
+                  </div>
+                </div>
+
+                {/* DAFTAR POS ARUS KAS (ACCORDION BERSIH) */}
+                <div className="space-y-2 text-xs">
+                  {/* 1. OMSET DASAR */}
+                  <div className="p-3 rounded-xl bg-white/2 border border-white/6 space-y-1">
+                    <div className="flex justify-between items-center font-bold text-slate-200">
+                      <span>1. PENJUALAN KOTOR (GROSS SALES)</span>
+                      <span className="font-mono">
+                        Rp {data.revenue.grossSales.toLocaleString()}
+                      </span>
                     </div>
-                    <div
-                      className={`flex justify-between pl-3 ${secondaryText}`}
-                    >
-                      <span>FOOD SALES</span>
-                      <div className="flex gap-3 font-mono">
-                        <span>
-                          Rp {data.revenue.foodSales.toLocaleString()}
-                        </span>
-                        <span className={`w-10 text-right ${mutedText}`}>
-                          {formatPct(data.revenue.foodSales)}
-                        </span>
-                      </div>
-                    </div>
-                    <div
-                      className={`flex justify-between pl-3 ${secondaryText}`}
-                    >
-                      <span>BEVERAGE SALES</span>
-                      <div className="flex gap-3 font-mono">
-                        <span>
-                          Rp {data.revenue.beverageSales.toLocaleString()}
-                        </span>
-                        <span className={`w-10 text-right ${mutedText}`}>
-                          {formatPct(data.revenue.beverageSales)}
-                        </span>
-                      </div>
-                    </div>
-                    <div
-                      className={`flex justify-between pl-3 ${secondaryText}`}
-                    >
-                      <span>CHARGE</span>
-                      <div className="flex gap-3 font-mono">
-                        <span>
-                          Rp {data.revenue.chargeSales.toLocaleString()}
-                        </span>
-                        <span className={`w-10 text-right ${mutedText}`}>
-                          {formatPct(data.revenue.chargeSales)}
-                        </span>
-                      </div>
-                    </div>
-                    <div
-                      className={`flex justify-between pl-2 font-bold pt-0.5 border-t ${isDark ? "border-slate-600/70 text-white" : "border-slate-200/70 text-slate-900"}`}
-                    >
-                      <span>GROSS SALES</span>
-                      <div className="flex gap-3 font-mono">
-                        <span>
-                          Rp {data.revenue.grossSales.toLocaleString()}
-                        </span>
-                        <span className={`w-10 text-right ${mutedText}`}>
-                          115,00%
-                        </span>
-                      </div>
-                    </div>
-                    {filters.showTaxService && (
-                      <>
-                        <div
-                          className={`flex justify-between pl-3 ${mutedText}`}
-                        >
-                          <span>TAX (PB1 10%)</span>
-                          <div className="flex gap-3 font-mono">
-                            <span>Rp {data.revenue.tax.toLocaleString()}</span>
-                            <span className="w-10 text-right">10,00%</span>
-                          </div>
-                        </div>
-                        <div
-                          className={`flex justify-between pl-3 ${mutedText}`}
-                        >
-                          <span>SERVICE (5%)</span>
-                          <div className="flex gap-3 font-mono">
-                            <span>
-                              Rp {data.revenue.service.toLocaleString()}
-                            </span>
-                            <span className="w-10 text-right">5,00%</span>
-                          </div>
-                        </div>
-                      </>
-                    )}
-                    <div
-                      className={`flex justify-between pl-2 font-bold ${isDark ? "text-slate-200" : "text-slate-800"}`}
-                    >
-                      <span>NETT BEFORE DISCOUNT</span>
-                      <div className="flex gap-3 font-mono">
-                        <span>
-                          Rp {data.revenue.nettBeforeDiscount.toLocaleString()}
-                        </span>
-                        <span className={`w-10 text-right ${mutedText}`}>
-                          100,30%
-                        </span>
-                      </div>
-                    </div>
-                    <div
-                      className={`flex justify-between pl-3 ${isDark ? "text-rose-400" : "text-rose-600"}`}
-                    >
-                      <span>DISCOUNT</span>
-                      <div className="flex gap-3 font-mono">
-                        <span>
+                    {data.revenue.discount > 0 && (
+                      <div className="flex justify-between items-center text-[11px] text-rose-400 pl-3">
+                        <span>Potongan Diskon Penjualan</span>
+                        <span className="font-mono">
                           - Rp {data.revenue.discount.toLocaleString()}
                         </span>
-                        <span className={`w-10 text-right ${mutedText}`}>
-                          {formatPct(data.revenue.discount)}
-                        </span>
                       </div>
-                    </div>
-                    <div
-                      className={`flex justify-between p-1.5 rounded-lg font-black text-[11px] border ${
-                        isDark
-                          ? "bg-emerald-900/50 border-emerald-500/50 text-emerald-300"
-                          : "bg-emerald-50 border-emerald-200 text-emerald-700"
-                      }`}
-                    >
-                      <span>NETT SALES</span>
-                      <div className="flex gap-3 font-mono">
-                        <span>Rp {data.revenue.netSales.toLocaleString()}</span>
-                        <span className="w-10 text-right">100,00%</span>
-                      </div>
+                    )}
+                    <div className="flex justify-between items-center font-black text-amber-300 pt-1 border-t border-white/4">
+                      <span>= OMSET BERSIH (NETT SALES)</span>
+                      <span className="font-mono">
+                        Rp {data.revenue.netSales.toLocaleString()} (100%)
+                      </span>
                     </div>
                   </div>
 
-                  {/* Sales Sharing (posisi atas) */}
-                  {filters.devidenPosition === "TOP_NET_SALES" && (
-                    <div
-                      className={`py-1 flex justify-between p-1.5 rounded-lg font-bold border ${
-                        isDark
-                          ? "bg-amber-900/50 border-amber-500/50 text-amber-300"
-                          : "bg-amber-50 border-amber-200 text-amber-700"
-                      }`}
-                    >
-                      <div className="flex items-center gap-1">
-                        <Handshake className="w-3 h-3 text-amber-600" />
-                        <span>
-                          SALES SHARING ({data.salesSharing.recipientName})
+                  {/* SALES SHARING (JIKA DI ATAS) */}
+                  {filters.devidenPosition === "TOP_NET_SALES" &&
+                    data.salesSharing.amount > 0 && (
+                      <div className="p-2.5 rounded-xl bg-amber-500/5 border border-amber-500/20 flex justify-between items-center font-bold text-amber-300">
+                        <span className="flex items-center gap-1.5">
+                          <Handshake className="w-3.5 h-3.5" />
+                          Sales Sharing ({data.salesSharing.recipientName})
+                        </span>
+                        <span className="font-mono">
+                          - Rp {data.salesSharing.amount.toLocaleString()} (
+                          {formatPct(data.salesSharing.amount)})
                         </span>
                       </div>
-                      <div className="flex gap-3 font-mono">
-                        <span>
-                          - Rp {data.salesSharing.amount.toLocaleString()}
-                        </span>
-                        <span className={`w-10 text-right ${mutedText}`}>
-                          {formatPct(data.salesSharing.amount)}
-                        </span>
-                      </div>
-                    </div>
-                  )}
+                    )}
 
-                  {/* Belanja Dapur (CoGS) */}
-                  <div className="py-1 space-y-0.5">
+                  {/* 2. BELANJA DAPUR (CoGS) */}
+                  <div className="rounded-xl bg-white/2 border border-white/6 overflow-hidden">
                     <div
                       onClick={() => toggleSec("cogs")}
-                      className={`flex justify-between font-black uppercase cursor-pointer select-none ${isDark ? "text-rose-400" : "text-rose-600"}`}
+                      className="p-3 flex justify-between items-center cursor-pointer hover:bg-white/4 transition select-none"
                     >
-                      <span className="flex items-center gap-1">
+                      <div className="flex items-center gap-2 font-bold text-slate-200">
                         {expandedSections.cogs ? (
-                          <ChevronDown className="w-3 h-3" />
+                          <ChevronDown className="w-4 h-4 text-amber-400" />
                         ) : (
-                          <ChevronRight className="w-3 h-3" />
+                          <ChevronRight className="w-4 h-4 text-slate-500" />
                         )}
-                        BELANJA DAPUR (CoGS)
-                      </span>
-                      <div className="flex gap-3 font-mono">
+                        <span>2. BELANJA DAPUR (CoGS BAHAN BAKU)</span>
+                      </div>
+                      <div className="flex items-center gap-3 font-mono font-bold text-rose-400">
                         <span>
-                          Rp {data.cogs.totalBelanjaDapur.toLocaleString()}
+                          - Rp {data.cogs.totalBelanjaDapur.toLocaleString()}
                         </span>
-                        <span className={`w-10 text-right ${mutedText}`}>
+                        <span className="text-[10px] text-slate-500 w-12 text-right">
                           {formatPct(data.cogs.totalBelanjaDapur)}
                         </span>
                       </div>
                     </div>
                     {expandedSections.cogs && (
-                      <div
-                        className={`pl-4 space-y-0.5 font-normal ${secondaryText}`}
-                      >
+                      <div className="px-4 pb-3 pt-1 border-t border-white/4 space-y-1.5 text-[11px] text-slate-400">
                         <div className="flex justify-between">
-                          <span>FOOD COST</span>
-                          <div className="flex gap-3 font-mono">
-                            <span>
-                              Rp {data.cogs.foodCost.toLocaleString()}
-                            </span>
-                            <span className={`w-10 text-right ${mutedText}`}>
-                              {formatPct(data.cogs.foodCost)}
-                            </span>
-                          </div>
+                          <span>Bahan Makanan (Food Cost)</span>
+                          <span className="font-mono">
+                            Rp {data.cogs.foodCost.toLocaleString()} (
+                            {formatPct(data.cogs.foodCost)})
+                          </span>
                         </div>
                         <div className="flex justify-between">
-                          <span>BEVERAGE COST</span>
-                          <div className="flex gap-3 font-mono">
-                            <span>
-                              Rp {data.cogs.beverageCost.toLocaleString()}
-                            </span>
-                            <span className={`w-10 text-right ${mutedText}`}>
-                              {formatPct(data.cogs.beverageCost)}
-                            </span>
-                          </div>
+                          <span>Bahan Minuman (Beverage Cost)</span>
+                          <span className="font-mono">
+                            Rp {data.cogs.beverageCost.toLocaleString()} (
+                            {formatPct(data.cogs.beverageCost)})
+                          </span>
                         </div>
-                        <div className="flex justify-between">
-                          <span>SPOIL &amp; RUSAK</span>
-                          <div className="flex gap-3 font-mono">
-                            <span>
-                              Rp {data.cogs.spoilLoss.toLocaleString()}
-                            </span>
-                            <span className={`w-10 text-right ${mutedText}`}>
-                              {formatPct(data.cogs.spoilLoss)}
-                            </span>
-                          </div>
+                        <div className="flex justify-between text-rose-400">
+                          <span>Kerugian Bahan (Spoil &amp; Rusak)</span>
+                          <span className="font-mono">
+                            Rp {data.cogs.spoilLoss.toLocaleString()} (
+                            {formatPct(data.cogs.spoilLoss)})
+                          </span>
                         </div>
                       </div>
                     )}
                   </div>
 
-                  {/* Pendukung (OPEX) */}
-                  <div className="py-1 space-y-0.5">
+                  {/* 3. BIAYA PENDUKUNG TOKO (OPEX) */}
+                  <div className="rounded-xl bg-white/2 border border-white/6 overflow-hidden">
                     <div
                       onClick={() => toggleSec("pendukung")}
-                      className={`flex justify-between font-black uppercase cursor-pointer select-none ${isDark ? "text-rose-400" : "text-rose-600"}`}
+                      className="p-3 flex justify-between items-center cursor-pointer hover:bg-white/4 transition select-none"
                     >
-                      <span className="flex items-center gap-1">
+                      <div className="flex items-center gap-2 font-bold text-slate-200">
                         {expandedSections.pendukung ? (
-                          <ChevronDown className="w-3 h-3" />
+                          <ChevronDown className="w-4 h-4 text-amber-400" />
                         ) : (
-                          <ChevronRight className="w-3 h-3" />
+                          <ChevronRight className="w-4 h-4 text-slate-500" />
                         )}
-                        PENDUKUNG (BIAYA RESTO / OPEX)
-                      </span>
-                      <div className="flex gap-3 font-mono">
+                        <span>3. OPERASIONAL TOKO (OPEX &amp; LOGISTIK)</span>
+                      </div>
+                      <div className="flex items-center gap-3 font-mono font-bold text-rose-400">
                         <span>
-                          Rp{" "}
+                          - Rp{" "}
                           {data.pendukung.totalBelanjaPendukung.toLocaleString()}
                         </span>
-                        <span className={`w-10 text-right ${mutedText}`}>
+                        <span className="text-[10px] text-slate-500 w-12 text-right">
                           {formatPct(data.pendukung.totalBelanjaPendukung)}
                         </span>
                       </div>
                     </div>
                     {expandedSections.pendukung && (
-                      <div className="pl-3 space-y-1">
-                        {Object.entries(data.pendukung.categories).map(
+                      <div className="px-4 pb-3 pt-1 border-t border-white/4 space-y-2 text-[11px] text-slate-400">
+                        {Object.entries(data.pendukung.categories || {}).map(
                           ([catKey, cat]: any) => {
                             const isOpen = expandedPendukungCat[catKey];
                             return (
                               <div
                                 key={catKey}
-                                className={`p-1.5 rounded-lg border ${isDark ? "bg-slate-700/50 border-slate-600/50" : "bg-white/50 border-slate-200/70"}`}
+                                className="p-2 rounded-lg bg-white/2 border border-white/4"
                               >
                                 <div
                                   onClick={() => togglePendukung(catKey)}
-                                  className={`flex justify-between items-center text-[10px] font-bold cursor-pointer ${isDark ? "text-slate-200 hover:text-white" : "text-slate-700 hover:text-slate-900"}`}
+                                  className="flex justify-between items-center cursor-pointer hover:text-white"
                                 >
-                                  <span className="flex items-center gap-1">
+                                  <span className="flex items-center gap-1.5 font-semibold text-slate-300">
                                     {isOpen ? (
-                                      <ChevronDown className="w-2.5 h-2.5 text-orange-500" />
+                                      <ChevronDown className="w-3 h-3 text-amber-400" />
                                     ) : (
-                                      <ChevronRight className="w-2.5 h-2.5 text-slate-400" />
+                                      <ChevronRight className="w-3 h-3 text-slate-500" />
                                     )}
                                     {cat.categoryName}
                                   </span>
-                                  <div className="flex gap-2 font-mono">
-                                    <span>
-                                      Rp {cat.amount.toLocaleString()}
-                                    </span>
-                                    <span
-                                      className={`w-10 text-right text-[9px] ${mutedText}`}
-                                    >
-                                      {formatPct(cat.amount)}
-                                    </span>
-                                  </div>
+                                  <span className="font-mono font-bold text-rose-400">
+                                    Rp {cat.amount.toLocaleString()} (
+                                    {formatPct(cat.amount)})
+                                  </span>
                                 </div>
                                 {isOpen && (
-                                  <div
-                                    className={`pl-4 pt-1 space-y-0.5 text-[10px] font-mono ${mutedText}`}
-                                  >
-                                    {cat.items.map((it: any, i: number) => (
+                                  <div className="pl-4 pt-1.5 space-y-1 text-[10px] font-mono text-slate-400 border-t border-white/4 mt-1.5">
+                                    {cat.items.map((it: any, idx: number) => (
                                       <div
-                                        key={i}
+                                        key={idx}
                                         className="flex justify-between"
                                       >
-                                        <span>
-                                          • {it.name} (Nota:{" "}
-                                          {it.invoiceNumber || "-"})
+                                        <span className="truncate max-w-60">
+                                          {it.name} ({it.invoiceNumber || "-"})
                                         </span>
                                         <span>
                                           Rp {it.subtotal.toLocaleString()}
                                         </span>
                                       </div>
                                     ))}
-                                    {cat.items.length === 0 && (
-                                      <div className="text-[9px] italic">
-                                        Belum ada nota belanja.
-                                      </div>
-                                    )}
                                   </div>
                                 )}
                               </div>
                             );
                           },
                         )}
-                        <div
-                          className={`flex justify-between p-1.5 rounded-lg border text-[10px] font-bold ${isDark ? "bg-slate-700/50 border-slate-600/50 text-slate-200" : "bg-white/50 border-slate-200/70 text-slate-700"}`}
-                        >
-                          <span>
-                            🍽️ Employee Meals (Jatah Makan Karyawan EDR)
+                        <div className="flex justify-between pt-1">
+                          <span>Makan Karyawan (EDR)</span>
+                          <span className="font-mono">
+                            Rp {data.pendukung.employeeMeals.toLocaleString()} (
+                            {formatPct(data.pendukung.employeeMeals)})
                           </span>
-                          <div className="flex gap-2 font-mono">
-                            <span>
-                              Rp {data.pendukung.employeeMeals.toLocaleString()}
-                            </span>
-                            <span
-                              className={`w-10 text-right text-[9px] ${mutedText}`}
-                            >
-                              {formatPct(data.pendukung.employeeMeals)}
-                            </span>
-                          </div>
                         </div>
                       </div>
                     )}
                   </div>
 
-                  {/* Total Usage */}
-                  <div
-                    className={`py-1 flex justify-between font-black p-1.5 rounded-lg border ${
-                      isDark
-                        ? "bg-rose-900/50 border-rose-500/50 text-rose-300"
-                        : "bg-rose-50 border-rose-200 text-rose-600"
-                    }`}
-                  >
-                    <span>TOTAL USAGE BELANJA DAPUR + PENDUKUNG</span>
-                    <div className="flex gap-3 font-mono">
-                      <span>
-                        Rp {data.summaryUsage.totalUsageAll.toLocaleString()}
+                  {/* 4. GAJI & BIAYA BANK */}
+                  <div className="p-3 rounded-xl bg-white/2 border border-white/6 space-y-1.5">
+                    <div className="flex justify-between items-center font-bold text-slate-200">
+                      <span>4. GAJI &amp; BIAYA BANK TOKO</span>
+                      <span className="font-mono text-rose-400 font-bold">
+                        - Rp{" "}
+                        {(
+                          data.payroll.realisasiGaji + data.payroll.bankFee
+                        ).toLocaleString()}
                       </span>
-                      <span className={`w-10 text-right ${mutedText}`}>
-                        {formatPct(data.summaryUsage.totalUsageAll)}
+                    </div>
+                    <div className="flex justify-between items-center text-[11px] text-slate-400 pl-3">
+                      <span>Realisasi Gaji Karyawan Toko</span>
+                      <span className="font-mono">
+                        Rp {data.payroll.realisasiGaji.toLocaleString()} (
+                        {formatPct(data.payroll.realisasiGaji)})
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center text-[11px] text-slate-400 pl-3">
+                      <span>
+                        Biaya Transaksi EDC / QRIS (MDR{" "}
+                        {data.payroll.bankFeePct}%)
+                      </span>
+                      <span className="font-mono">
+                        Rp {data.payroll.bankFee.toLocaleString()} (
+                        {formatPct(data.payroll.bankFee)})
                       </span>
                     </div>
                   </div>
 
-                  {/* Gaji & Biaya Bank */}
-                  <div className="py-1 space-y-0.5">
-                    <div
-                      className={`flex justify-between pl-3 ${secondaryText}`}
-                    >
-                      <span>ALOKASI GAJI (15%)</span>
-                      <div className="flex gap-3 font-mono">
-                        <span>
-                          Rp {data.payroll.alokasiGaji.toLocaleString()}
-                        </span>
-                        <span className="w-10 text-right">15,00%</span>
-                      </div>
-                    </div>
-                    <div
-                      className={`flex justify-between pl-3 font-bold ${isDark ? "text-rose-400" : "text-rose-600"}`}
-                    >
-                      <span>REALISASI GAJI KARYAWAN</span>
-                      <div className="flex gap-3 font-mono">
-                        <span>
-                          - Rp {data.payroll.realisasiGaji.toLocaleString()}
-                        </span>
-                        <span className={`w-10 text-right ${mutedText}`}>
-                          {formatPct(data.payroll.realisasiGaji)}
-                        </span>
-                      </div>
-                    </div>
-                    <div
-                      className={`flex justify-between pl-3 ${secondaryText}`}
-                    >
-                      <span>
-                        Bank Fee (MDR EDC/QRIS {data.payroll.bankFeePct || 0.7}
-                        %)
+                  {/* MILESTONE: UNTUNG RESTORAN (GOP) */}
+                  <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex justify-between items-center font-black">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-amber-400" />
+                      <span className="text-amber-300">
+                        = LABA KOTOR RESTORAN (GOP)
                       </span>
-                      <div className="flex gap-3 font-mono">
-                        <span>
-                          - Rp {data.payroll.bankFee.toLocaleString()}
-                        </span>
-                        <span className={`w-10 text-right ${mutedText}`}>
-                          {formatPct(data.payroll.bankFee)}
-                        </span>
-                      </div>
+                    </div>
+                    <div className="font-mono text-base text-amber-300">
+                      Rp {data.gop.grossOperatingProfit.toLocaleString()} (
+                      {data.gop.gopPercentage}%)
                     </div>
                   </div>
 
-                  {/* GOP */}
-                  <div
-                    className={`py-1.5 flex justify-between p-2 rounded-lg font-black text-[11px] border ${
-                      isDark
-                        ? "bg-amber-900/50 border-amber-500/50 text-amber-300"
-                        : "bg-amber-50 border-amber-200 text-amber-700"
-                    }`}
-                  >
-                    <span>GROSS OPERATING PROFIT (GOP / UNTUNG RESTO)</span>
-                    <div className="flex gap-3 font-mono">
-                      <span>
-                        Rp {data.gop.grossOperatingProfit.toLocaleString()}
-                      </span>
-                      <span className="w-10 text-right">
-                        {data.gop.gopPercentage}%
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Owner & Development Expenses */}
-                  <div className="py-1 space-y-0.5">
+                  {/* 5. PENARIKAN OWNER & PROYEK */}
+                  <div className="rounded-xl bg-white/2 border border-white/6 overflow-hidden">
                     <div
                       onClick={() => toggleSec("owner")}
-                      className={`flex justify-between font-black uppercase cursor-pointer select-none ${isDark ? "text-orange-400" : "text-orange-600"}`}
+                      className="p-3 flex justify-between items-center cursor-pointer hover:bg-white/4 transition select-none"
                     >
-                      <span className="flex items-center gap-1">
+                      <div className="flex items-center gap-2 font-bold text-slate-200">
                         {expandedSections.owner ? (
-                          <ChevronDown className="w-3 h-3" />
+                          <ChevronDown className="w-4 h-4 text-amber-400" />
                         ) : (
-                          <ChevronRight className="w-3 h-3" />
+                          <ChevronRight className="w-4 h-4 text-slate-500" />
                         )}
-                        OWNER &amp; DEVELOPMENT EXPENSES
-                      </span>
-                      <div className="flex gap-3 font-mono">
+                        <span>5. PENARIKAN OWNER, PROYEK &amp; ALOKASI</span>
+                      </div>
+                      <div className="flex items-center gap-3 font-mono font-bold text-rose-400">
                         <span>
-                          Rp{" "}
+                          - Rp{" "}
                           {data.ownerExpenses.totalOwnerExpenses.toLocaleString()}
                         </span>
-                        <span className={`w-10 text-right ${mutedText}`}>
+                        <span className="text-[10px] text-slate-500 w-12 text-right">
                           {formatPct(data.ownerExpenses.totalOwnerExpenses)}
                         </span>
                       </div>
                     </div>
                     {expandedSections.owner && (
-                      <div
-                        className={`pl-4 space-y-0.5 font-normal ${secondaryText}`}
-                      >
+                      <div className="px-4 pb-3 pt-1 border-t border-white/4 space-y-1.5 text-[11px] text-slate-400">
                         <div className="flex justify-between">
-                          <span>PRIVE OWNER</span>
-                          <div className="flex gap-3 font-mono">
-                            <span>
-                              Rp {data.ownerExpenses.prive.toLocaleString()}
-                            </span>
-                            <span className={`w-10 text-right ${mutedText}`}>
-                              {formatPct(data.ownerExpenses.prive)}
-                            </span>
-                          </div>
+                          <span>Prive Pribadi Pemilik</span>
+                          <span className="font-mono">
+                            Rp {data.ownerExpenses.prive.toLocaleString()} (
+                            {formatPct(data.ownerExpenses.prive)})
+                          </span>
                         </div>
                         <div className="flex justify-between">
-                          <span>GAJI HOLDING</span>
-                          <div className="flex gap-3 font-mono">
-                            <span>
-                              Rp{" "}
-                              {data.ownerExpenses.gajiHolding.toLocaleString()}
-                            </span>
-                            <span className={`w-10 text-right ${mutedText}`}>
-                              {formatPct(data.ownerExpenses.gajiHolding)}
-                            </span>
-                          </div>
+                          <span>Gaji Manajemen Holding</span>
+                          <span className="font-mono">
+                            Rp {data.ownerExpenses.gajiHolding.toLocaleString()}{" "}
+                            ({formatPct(data.ownerExpenses.gajiHolding)})
+                          </span>
                         </div>
                         <div className="flex justify-between">
-                          <span>SAVING PENGEMBANGAN / PROYEK</span>
-                          <div className="flex gap-3 font-mono">
-                            <span>
-                              Rp{" "}
-                              {data.ownerExpenses.savingPengembangan.toLocaleString()}
-                            </span>
-                            <span className={`w-10 text-right ${mutedText}`}>
-                              {formatPct(data.ownerExpenses.savingPengembangan)}
-                            </span>
-                          </div>
+                          <span>Saving Proyek &amp; Pengembangan</span>
+                          <span className="font-mono">
+                            Rp{" "}
+                            {data.ownerExpenses.savingPengembangan.toLocaleString()}{" "}
+                            ({formatPct(data.ownerExpenses.savingPengembangan)})
+                          </span>
                         </div>
                         <div className="flex justify-between">
-                          <span>COMPLIMENT</span>
-                          <div className="flex gap-3 font-mono">
-                            <span>
-                              Rp{" "}
-                              {data.ownerExpenses.compliment.toLocaleString()}
-                            </span>
-                            <span className={`w-10 text-right ${mutedText}`}>
-                              {formatPct(data.ownerExpenses.compliment)}
-                            </span>
-                          </div>
+                          <span>Alokasi Umroh (2%) &amp; THR (1%)</span>
+                          <span className="font-mono">
+                            Rp{" "}
+                            {(
+                              data.ownerExpenses.alokasiUmroh +
+                              data.ownerExpenses.alokasiThr
+                            ).toLocaleString()}{" "}
+                            (3,0%)
+                          </span>
                         </div>
-                        <div className="flex justify-between">
-                          <span>ALOKASI UMROH (2%)</span>
-                          <div className="flex gap-3 font-mono">
-                            <span>
-                              Rp{" "}
-                              {data.ownerExpenses.alokasiUmroh.toLocaleString()}
-                            </span>
-                            <span className={`w-10 text-right ${mutedText}`}>
-                              2,00%
-                            </span>
-                          </div>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>ALOKASI THR (1%)</span>
-                          <div className="flex gap-3 font-mono">
-                            <span>
-                              Rp{" "}
-                              {data.ownerExpenses.alokasiThr.toLocaleString()}
-                            </span>
-                            <span className={`w-10 text-right ${mutedText}`}>
-                              1,00%
-                            </span>
-                          </div>
-                        </div>
-                        {filters.devidenPosition === "BOTTOM_OWNER" && (
-                          <div
-                            className={`flex justify-between font-bold ${isDark ? "text-amber-400" : "text-amber-600"}`}
-                          >
-                            <span>
-                              🤝 DEVIDEN MITRA (
-                              {data.salesSharing.recipientName})
-                            </span>
-                            <div className="flex gap-3 font-mono">
+                        {filters.devidenPosition === "BOTTOM_OWNER" &&
+                          data.salesSharing.amount > 0 && (
+                            <div className="flex justify-between text-amber-300 font-bold">
                               <span>
-                                Rp {data.salesSharing.amount.toLocaleString()}
+                                Deviden Mitra ({data.salesSharing.recipientName}
+                                )
                               </span>
-                              <span className={`w-10 text-right ${mutedText}`}>
-                                {formatPct(data.salesSharing.amount)}
+                              <span className="font-mono">
+                                Rp {data.salesSharing.amount.toLocaleString()} (
+                                {formatPct(data.salesSharing.amount)})
                               </span>
                             </div>
-                          </div>
-                        )}
+                          )}
                       </div>
                     )}
                   </div>
 
-                  {/* Sisa Profit */}
+                  {/* HASIL AKHIR: SISA LABA BERSIH OWNER */}
                   <div
-                    className={`py-2 flex justify-between p-2.5 rounded-xl font-black text-[12px] border-2 shadow-md ${
+                    className={`p-4 rounded-xl border-2 flex justify-between items-center ${
                       data.finalProfit.isNomplok
-                        ? isDark
-                          ? "bg-rose-900/80 border-rose-500 text-rose-300"
-                          : "bg-rose-100/80 border-rose-400 text-rose-700"
-                        : isDark
-                          ? "bg-emerald-900/80 border-emerald-500 text-emerald-300"
-                          : "bg-emerald-100/80 border-emerald-400 text-emerald-700"
+                        ? "bg-rose-500/10 border-rose-500/50 text-rose-300"
+                        : "bg-emerald-500/10 border-emerald-500/50 text-emerald-300"
                     }`}
                   >
-                    <span>
-                      {data.finalProfit.isNomplok
-                        ? "⚠️ SISA PROFIT (NOMPLOK / MINUS)"
-                        : "🏦 SISA LABA BERSIH PEMILIK (RETAINED PROFIT)"}
-                    </span>
-                    <div className="flex gap-3 font-mono">
-                      <span>
-                        Rp {data.finalProfit.finalProfitOwner.toLocaleString()}
+                    <div>
+                      <div className="font-black text-sm uppercase flex items-center gap-1.5">
+                        {data.finalProfit.isNomplok ? (
+                          <>
+                            <AlertTriangle className="w-4 h-4 text-rose-400" />
+                            <span>DEFISIT: PENARIKAN MELEBIHI LABA TOKO</span>
+                          </>
+                        ) : (
+                          <>
+                            <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                            <span>
+                              SISA KAS BERSIH DI TANGAN (RETAINED PROFIT)
+                            </span>
+                          </>
+                        )}
+                      </div>
+                      <span className="text-[10px] text-slate-400">
+                        Dana bersih yang siap ditabung / tidak terpakai
                       </span>
-                      <span className="w-10 text-right">
-                        {data.finalProfit.finalProfitPercentage}%
+                    </div>
+                    <div className="text-right font-mono font-black text-lg">
+                      Rp {data.finalProfit.finalProfitOwner.toLocaleString()}{" "}
+                      <span className="text-xs font-bold">
+                        ({data.finalProfit.finalProfitPercentage}%)
                       </span>
                     </div>
                   </div>
                 </div>
-              </LiquidGlass>
+              </ExecutiveCard>
             </div>
 
-            {/* Kolom Tengah: Performa Outlet (30%) */}
-            <div className="col-span-3">
-              <LiquidGlass className="p-3 flex flex-col" dark={isDark}>
-                <div className="flex justify-between items-center mb-2">
-                  <span
-                    className={`font-black text-[11px] uppercase tracking-wider ${isDark ? "text-orange-400" : "text-orange-600"}`}
-                  >
-                    🏆 PERFORMA OUTLET
+            {/* ------------------------------------------------------------- */}
+            {/* KOLOM KANAN (5/12): GRAFIK PERFORMA & RADAR ANGGARAN          */}
+            {/* ------------------------------------------------------------- */}
+            <div className="col-span-12 lg:col-span-5 space-y-4">
+              {/* RADAR TARGET & BATAS ANGGARAN (TRAFFIC LIGHT SYSTEM) */}
+              <ExecutiveCard isDark={isDark} className="p-5">
+                <div className="flex items-center justify-between pb-3 border-b border-white/8 mb-4">
+                  <div className="flex items-center gap-2">
+                    <Target className="w-4 h-4 text-amber-400" />
+                    <h3 className="text-xs font-black uppercase tracking-wider text-slate-200">
+                      INDIKATOR BATAS AMAN BIAYA (BUDGET)
+                    </h3>
+                  </div>
+                  <span className="text-[10px] font-mono text-slate-400">
+                    Bulan: {filters.month}
                   </span>
-                  <span className={`text-[9px] ${mutedText}`}>
-                    Net Sales per Outlet
-                  </span>
                 </div>
 
-                <div className="h-40 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart
-                      data={chartData}
-                      margin={{ top: 5, right: 10, left: 0, bottom: 0 }}
-                    >
-                      <defs>
-                        <linearGradient
-                          id="colorNetSales"
-                          x1="0"
-                          y1="0"
-                          x2="0"
-                          y2="1"
-                        >
-                          <stop
-                            offset="5%"
-                            stopColor="#0EA5E9"
-                            stopOpacity={0.8}
-                          />
-                          <stop
-                            offset="95%"
-                            stopColor="#0EA5E9"
-                            stopOpacity={0}
-                          />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid
-                        strokeDasharray="3 3"
-                        stroke={
-                          isDark ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.1)"
-                        }
-                      />
-                      <XAxis
-                        dataKey="name"
-                        stroke={isDark ? "#94A3B8" : "#64748B"}
-                        fontSize={9}
-                        tickLine={false}
-                      />
-                      <YAxis
-                        stroke={isDark ? "#94A3B8" : "#64748B"}
-                        fontSize={9}
-                        tickLine={false}
-                        tickFormatter={(value) =>
-                          `Rp ${(value / 1000000).toFixed(0)}Jt`
-                        }
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: isDark ? "#1E293B" : "#ffffff",
-                          border: isDark
-                            ? "1px solid #475569"
-                            : "1px solid #CBD5E1",
-                          borderRadius: "8px",
-                          color: isDark ? "#F1F5F9" : "#1E293B",
-                          boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
-                          fontSize: "10px",
-                        }}
-                        formatter={(value: any) => [
-                          `Rp ${Number(value ?? 0).toLocaleString()}`,
-                          "Net Sales",
-                        ]}
-                      />
-                      <Area
-                        type="monotone"
-                        dataKey="netSales"
-                        stroke="#0EA5E9"
-                        fillOpacity={1}
-                        fill="url(#colorNetSales)"
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-
-                <div className="mt-2 space-y-1">
-                  {data.outletPerformance.map((out: any, idx: number) => (
-                    <div
-                      key={out.outletId}
-                      className={`flex justify-between items-center p-1.5 rounded-lg border text-[10px] font-bold ${
-                        isDark
-                          ? "bg-slate-700/50 border-slate-600/50 text-slate-200"
-                          : "bg-white/50 border-slate-200/70 text-slate-700"
-                      }`}
-                    >
-                      <span className="truncate">
-                        #{idx + 1} {out.outletName}
+                <div className="space-y-3.5">
+                  {/* Target Omset */}
+                  <div className="p-3 rounded-xl bg-white/2 border border-white/6 space-y-1.5">
+                    <div className="flex justify-between text-xs font-bold">
+                      <span className="text-slate-300">
+                        Pencapaian Target Penjualan:
                       </span>
-                      <span
-                        className={`font-mono font-black whitespace-nowrap ${isDark ? "text-orange-400" : "text-orange-600"}`}
-                      >
-                        Rp {(out.netSales / 1000000).toFixed(1)} Jt
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </LiquidGlass>
-            </div>
-
-            {/* Kolom Kanan: Kuota Biaya (30%) */}
-            <div className="col-span-3">
-              <LiquidGlass className="p-3 flex flex-col" dark={isDark}>
-                <div
-                  className={`border-b pb-1 mb-2 ${isDark ? "border-slate-600/60" : "border-slate-200/60"}`}
-                >
-                  <h3
-                    className={`font-black text-[11px] uppercase tracking-wide flex items-center gap-1 ${isDark ? "text-orange-400" : "text-orange-600"}`}
-                  >
-                    <Target className="w-3.5 h-3.5" /> KUOTA BIAYA &amp; TARGET
-                  </h3>
-                </div>
-
-                <div className="space-y-2">
-                  <div
-                    className={`p-2 rounded-lg border ${isDark ? "bg-slate-700/50 border-slate-600/50" : "bg-white/50 border-slate-200/70"}`}
-                  >
-                    <div
-                      className={`flex justify-between text-[10px] font-bold ${isDark ? "text-slate-200" : "text-slate-700"}`}
-                    >
-                      <span>Target Net Sales:</span>
-                      <span
-                        className={`font-mono font-black ${isDark ? "text-orange-400" : "text-orange-600"}`}
-                      >
+                      <span className="font-mono text-amber-300">
                         {data.budgeting.salesAchievedPct}%
                       </span>
                     </div>
-                    <div
-                      className={`h-1.5 rounded-full overflow-hidden mt-1 ${isDark ? "bg-slate-500" : "bg-slate-200"}`}
-                    >
+                    <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
                       <div
-                        className="h-full bg-linear-to-r from-orange-400 to-amber-400 rounded-full"
-                        style={{ width: `${data.budgeting.salesAchievedPct}%` }}
+                        className="h-full bg-linear-to-r from-amber-500 to-emerald-400 rounded-full transition-all duration-500"
+                        style={{
+                          width: `${Math.min(100, data.budgeting.salesAchievedPct)}%`,
+                        }}
                       />
+                    </div>
+                    <div className="flex justify-between text-[10px] text-slate-400">
+                      <span>
+                        Real: Rp {data.revenue.netSales.toLocaleString()}
+                      </span>
+                      <span>
+                        Target: Rp{" "}
+                        {(data.budgeting.targetSales || 0).toLocaleString()}
+                      </span>
                     </div>
                   </div>
 
-                  <div
-                    className={`p-2 rounded-lg border ${isDark ? "bg-slate-700/50 border-slate-600/50" : "bg-white/50 border-slate-200/70"}`}
-                  >
-                    <div
-                      className={`flex justify-between text-[10px] font-bold ${isDark ? "text-slate-200" : "text-slate-700"}`}
-                    >
-                      <span>Belanja Dapur (CoGS):</span>
+                  {/* Kuota Belanja Dapur */}
+                  <div className="p-3 rounded-xl bg-white/2 border border-white/6 space-y-1.5">
+                    <div className="flex justify-between text-xs font-bold">
+                      <span className="text-slate-300">
+                        Batas Kuota Belanja Dapur:
+                      </span>
                       <span
-                        className={`font-mono font-black ${
+                        className={`font-mono ${
                           data.budgeting.cogsUsedPct > 100
-                            ? isDark
-                              ? "text-rose-400"
-                              : "text-rose-600"
-                            : isDark
-                              ? "text-emerald-400"
-                              : "text-emerald-600"
+                            ? "text-rose-400 font-black"
+                            : "text-emerald-400 font-bold"
                         }`}
                       >
-                        {data.budgeting.cogsUsedPct}%
+                        {data.budgeting.cogsUsedPct}%{" "}
+                        {data.budgeting.cogsUsedPct > 100 ? "(OVER)" : "(AMAN)"}
                       </span>
                     </div>
-                    <div
-                      className={`h-1.5 rounded-full overflow-hidden mt-1 ${isDark ? "bg-slate-500" : "bg-slate-200"}`}
-                    >
+                    <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
                       <div
-                        className={`h-full rounded-full ${
+                        className={`h-full rounded-full transition-all duration-500 ${
                           data.budgeting.cogsUsedPct > 100
                             ? "bg-rose-500"
                             : "bg-emerald-500"
@@ -1352,34 +964,38 @@ export const DesktopDashboard: React.FC<{
                         }}
                       />
                     </div>
-                  </div>
-
-                  <div
-                    className={`p-2 rounded-lg border ${isDark ? "bg-slate-700/50 border-slate-600/50" : "bg-white/50 border-slate-200/70"}`}
-                  >
-                    <div
-                      className={`flex justify-between text-[10px] font-bold ${isDark ? "text-slate-200" : "text-slate-700"}`}
-                    >
-                      <span>Pendukung (OPEX):</span>
-                      <span
-                        className={`font-mono font-black ${
-                          data.budgeting.opexUsedPct > 100
-                            ? isDark
-                              ? "text-rose-400"
-                              : "text-rose-600"
-                            : isDark
-                              ? "text-emerald-400"
-                              : "text-emerald-600"
-                        }`}
-                      >
-                        {data.budgeting.opexUsedPct}%
+                    <div className="flex justify-between text-[10px] text-slate-400">
+                      <span>
+                        Terpakai: Rp{" "}
+                        {data.cogs.totalBelanjaDapur.toLocaleString()}
+                      </span>
+                      <span>
+                        Plafon: Rp{" "}
+                        {(data.budgeting.cogsLimit || 0).toLocaleString()}
                       </span>
                     </div>
-                    <div
-                      className={`h-1.5 rounded-full overflow-hidden mt-1 ${isDark ? "bg-slate-500" : "bg-slate-200"}`}
-                    >
+                  </div>
+
+                  {/* Kuota OPEX Pendukung */}
+                  <div className="p-3 rounded-xl bg-white/2 border border-white/6 space-y-1.5">
+                    <div className="flex justify-between text-xs font-bold">
+                      <span className="text-slate-300">
+                        Batas Operasional Toko (OPEX):
+                      </span>
+                      <span
+                        className={`font-mono ${
+                          data.budgeting.opexUsedPct > 100
+                            ? "text-rose-400 font-black"
+                            : "text-emerald-400 font-bold"
+                        }`}
+                      >
+                        {data.budgeting.opexUsedPct}%{" "}
+                        {data.budgeting.opexUsedPct > 100 ? "(OVER)" : "(AMAN)"}
+                      </span>
+                    </div>
+                    <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
                       <div
-                        className={`h-full rounded-full ${
+                        className={`h-full rounded-full transition-all duration-500 ${
                           data.budgeting.opexUsedPct > 100
                             ? "bg-rose-500"
                             : "bg-emerald-500"
@@ -1389,22 +1005,155 @@ export const DesktopDashboard: React.FC<{
                         }}
                       />
                     </div>
+                    <div className="flex justify-between text-[10px] text-slate-400">
+                      <span>
+                        Terpakai: Rp{" "}
+                        {data.pendukung.totalBelanjaPendukung.toLocaleString()}
+                      </span>
+                      <span>
+                        Plafon: Rp{" "}
+                        {(data.budgeting.opexLimit || 0).toLocaleString()}
+                      </span>
+                    </div>
                   </div>
                 </div>
-              </LiquidGlass>
+              </ExecutiveCard>
+
+              {/* PERFORMA OUTLET: CHART + RANKING */}
+              <ExecutiveCard isDark={isDark} className="p-5">
+                <div className="flex items-center justify-between pb-3 border-b border-white/8 mb-3">
+                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-200">
+                    PERFORMA OMSET ANTAR CABANG
+                  </h3>
+                  <span className="text-[10px] text-slate-400">
+                    Peringkat Kontribusi
+                  </span>
+                </div>
+
+                {/* Area Chart yang Elegan & Halus */}
+                <div className="h-36 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart
+                      data={chartData}
+                      margin={{ top: 5, right: 10, left: -10, bottom: 0 }}
+                    >
+                      <defs>
+                        <linearGradient
+                          id="execGoldGradient"
+                          x1="0"
+                          y1="0"
+                          x2="0"
+                          y2="1"
+                        >
+                          <stop
+                            offset="5%"
+                            stopColor="#F59E0B"
+                            stopOpacity={0.4}
+                          />
+                          <stop
+                            offset="95%"
+                            stopColor="#F59E0B"
+                            stopOpacity={0.0}
+                          />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid
+                        strokeDasharray="3 3"
+                        stroke="rgba(255,255,255,0.05)"
+                      />
+                      <XAxis
+                        dataKey="name"
+                        stroke="#64748B"
+                        fontSize={9}
+                        tickLine={false}
+                        axisLine={false}
+                      />
+                      <YAxis
+                        stroke="#64748B"
+                        fontSize={9}
+                        tickLine={false}
+                        axisLine={false}
+                        tickFormatter={(v) => `${(v / 1000000).toFixed(0)}Jt`}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "#0F172A",
+                          borderColor: "rgba(255,255,255,0.1)",
+                          borderRadius: "12px",
+                          color: "#F8FAFC",
+                          fontSize: "11px",
+                          boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
+                        }}
+                        formatter={(val: any) => [
+                          `Rp ${Number(val || 0).toLocaleString()}`,
+                          "Nett Sales",
+                        ]}
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="netSales"
+                        stroke="#F59E0B"
+                        strokeWidth={2}
+                        fill="url(#execGoldGradient)"
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* List Ranking Cabang */}
+                <div className="mt-3 space-y-1.5 max-h-44 overflow-y-auto custom-scrollbar pr-1">
+                  {data.outletPerformance.map((out: any, idx: number) => {
+                    const pctOfTotal =
+                      netSalesNominal > 0
+                        ? ((out.netSales / netSalesNominal) * 100).toFixed(1)
+                        : "0";
+                    return (
+                      <div
+                        key={out.outletId}
+                        className="p-2 rounded-xl bg-white/2 border border-white/4 flex items-center justify-between text-xs hover:bg-white/5 transition"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black ${
+                              idx === 0
+                                ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                                : "bg-slate-800 text-slate-400"
+                            }`}
+                          >
+                            {idx + 1}
+                          </span>
+                          <span className="font-bold text-slate-200">
+                            {out.outletName}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3 font-mono">
+                          <span className="text-[10px] text-slate-400">
+                            {pctOfTotal}%
+                          </span>
+                          <span className="font-black text-amber-300">
+                            Rp {(out.netSales / 1000000).toFixed(1)} Jt
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </ExecutiveCard>
             </div>
           </div>
         ) : (
-          <div>
+          /* TAB 2: HUTANG & PIUTANG */
+          <div className="pt-2">
             <DebtReceivableView
               receivingDocs={receivingDocs}
               regions={regions}
               outlets={outlets}
               vendors={vendors}
+              isDark={isDark}
             />
           </div>
         )}
-      </div>
+      </main>
     </div>
   );
 };

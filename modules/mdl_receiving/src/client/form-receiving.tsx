@@ -1062,27 +1062,50 @@ export const ReceivingForm: React.FC<{
           : p.isActive !== undefined
             ? Boolean(p.isActive)
             : Boolean(p.is_active);
+
+      // 1. Abaikan barang non-aktif, ditolak, atau hasil merge alias
       if (
         !isAct ||
         p.approvalStatus === "REJECTED" ||
         p.approvalStatus === "MERGED"
-      )
+      ) {
         return false;
+      }
 
-      // Filter jenis Barang vs Jasa
+      // 2. Filter jenis Barang vs Jasa
       const matchExpense = isExpense ? p.isExpense === true : !p.isExpense;
       if (!matchExpense) return false;
 
-      if (localCompanyId && p.companyId && p.companyId !== localCompanyId)
+      // 3. Filter Perusahaan
+      if (localCompanyId && p.companyId && p.companyId !== localCompanyId) {
         return false;
-      if (localRegionId && p.regionId && p.regionId !== localRegionId)
-        return false;
-
-      // Penyekatan Spasial: Region/Pusat dipakai bersama, outlet spesifik hanya di outlet bersangkutan
-      if (localOutletId) {
-        return !p.outletId || p.outletId === localOutletId;
       }
-      return true;
+
+      // 4. Filter Wilayah Region
+      if (localRegionId && p.regionId && p.regionId !== localRegionId) {
+        return false;
+      }
+
+      // 5. Penyekatan Spasial Steril (Outlet vs Region):
+      if (localOutletId) {
+        // DI MESIN OUTLET:
+        // A. Jika barang milik outlet lain -> BLOK MUTLAK!
+        if (p.outletId && p.outletId !== localOutletId) return false;
+
+        // B. Jika barang milik bersama (Region/Holding tanpa outletId),
+        //    WAJIB sudah APPROVED oleh Pusat sebelum boleh ditransaksikan cabang!
+        if (!p.outletId && p.approvalStatus !== "APPROVED") return false;
+
+        // C. Loloskan jika barang milik outlet ini sendiri ATAU barang bersama yang sudah APPROVED
+        return true;
+      } else {
+        // DI MESIN REGION / PUSAT:
+        // Region HANYA mengelola barang level Region dan Holding.
+        // BLOK MUTLAK semua barang yang terikat ke cabang outlet!
+        if (p.outletId) return false;
+
+        return true;
+      }
     })
     .map((p) => ({ value: p.id, label: p.name }));
 

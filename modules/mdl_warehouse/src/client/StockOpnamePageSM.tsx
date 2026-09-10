@@ -1,5 +1,5 @@
 // File: modules/mdl_warehouse/src/client/StockOpnamePageSM.tsx
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   Scale,
   Plus,
@@ -15,6 +15,8 @@ import {
   RotateCcw,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Layers,
 } from "lucide-react";
 import { useWarehouseStore } from "./store";
@@ -29,6 +31,11 @@ import {
   printStockOpnameReportPdf,
 } from "./features/pdf-warehouse";
 import { exportExcelStockOpname } from "./features/excel-warehouse";
+
+// =========================================================================
+// KONSTANTA PAGINASI (MAKSIMAL 50 BARIS / HALAMAN)
+// =========================================================================
+const ROWS_PER_PAGE = 50;
 
 // Modal Set Saldo Stok Awal Cepat
 const InitialStockModalSM: React.FC<{
@@ -103,6 +110,53 @@ const InitialStockModalSM: React.FC<{
   );
 };
 
+// =========================================================================
+// KOMPONEN PAGINASI MOBILE (COMPACT)
+// =========================================================================
+const MobilePagination: React.FC<{
+  currentPage: number;
+  totalItems: number;
+  onPageChange: (page: number) => void;
+  label?: string;
+}> = ({ currentPage, totalItems, onPageChange, label = "item" }) => {
+  const totalPages = Math.max(1, Math.ceil(totalItems / ROWS_PER_PAGE));
+  if (totalItems <= ROWS_PER_PAGE) return null;
+
+  const startRow = (currentPage - 1) * ROWS_PER_PAGE + 1;
+  const endRow = Math.min(currentPage * ROWS_PER_PAGE, totalItems);
+
+  return (
+    <div className="flex items-center justify-between gap-2 mt-3 p-2 bg-(--surface-hover) border border-(--border-color) rounded-xl">
+      <button
+        type="button"
+        disabled={currentPage === 1}
+        onClick={() => onPageChange(currentPage - 1)}
+        className="flex items-center gap-1 px-3 py-2 text-[10px] font-black rounded-lg border border-(--border-color) bg-(--bg-card) text-(--text-primary) disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 shrink-0"
+      >
+        <ChevronLeft className="w-3.5 h-3.5" /> PREV
+      </button>
+
+      <div className="flex flex-col items-center min-w-0 flex-1">
+        <span className="text-[9px] font-black uppercase text-(--text-secondary) tracking-wide truncate">
+          Hal {currentPage} / {totalPages}
+        </span>
+        <span className="text-[8px] font-bold text-(--text-secondary) truncate">
+          {startRow}–{endRow} dari {totalItems} {label}
+        </span>
+      </div>
+
+      <button
+        type="button"
+        disabled={currentPage >= totalPages}
+        onClick={() => onPageChange(currentPage + 1)}
+        className="flex items-center gap-1 px-3 py-2 text-[10px] font-black rounded-lg border border-(--border-color) bg-(--bg-card) text-(--text-primary) disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 shrink-0"
+      >
+        NEXT <ChevronRight className="w-3.5 h-3.5" />
+      </button>
+    </div>
+  );
+};
+
 export function StockOpnamePageSM() {
   const { distributions, initialStocks, opnames, spoilWastes } =
     useWarehouseStore();
@@ -118,6 +172,9 @@ export function StockOpnamePageSM() {
     new Date().toISOString().split("T")[0],
   );
   const [searchTerm, setSearchTerm] = useState("");
+
+  // === [STATE & HANDLER SELEKSI MOBILE] ===
+  const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
 
   const localCompanyId = localStorage.getItem("__unv_companyId") || "";
   const localRegionId = localStorage.getItem("__unv_regionId") || "";
@@ -140,16 +197,9 @@ export function StockOpnamePageSM() {
   );
   const [itemNotes, setItemNotes] = useState<Record<string, string>>({});
 
-  // Cek apakah hari ini sudah pernah dilakukan closing opname di unit ini
-  const isAlreadyAdjustedToday = useMemo(() => {
-    return opnames.some(
-      (o) =>
-        (!activeOutletId || o.outletId === activeOutletId) &&
-        (!localCompanyId || o.companyId === localCompanyId) &&
-        o.date.startsWith(opnameDate) &&
-        o.isActive !== false,
-    );
-  }, [opnames, activeOutletId, localCompanyId, opnameDate]);
+  // State Paginasi (maks 50 baris per halaman)
+  const [activePage, setActivePage] = useState(1);
+  const [historyPage, setHistoryPage] = useState(1);
 
   // =========================================================================
   // KALKULASI OTOMATIS MATRIKS INVENTORI PER ITEM (TERISOLASI CABANG)
@@ -304,6 +354,7 @@ export function StockOpnamePageSM() {
     physicalCounts,
     itemNotes,
   ]);
+
   const filteredMatrix = useMemo(() => {
     return opnameMatrix.filter(
       (item) =>
@@ -329,6 +380,35 @@ export function StockOpnamePageSM() {
     });
   }, [opnames, localOutletId, localRegionId, localCompanyId]);
 
+  // =========================================================================
+  // PAGINASI: potong data maksimal 50 baris per halaman
+  // =========================================================================
+  const totalActivePages = Math.max(
+    1,
+    Math.ceil(filteredMatrix.length / ROWS_PER_PAGE),
+  );
+  const pagedMatrix = useMemo(
+    () =>
+      filteredMatrix.slice(
+        (activePage - 1) * ROWS_PER_PAGE,
+        activePage * ROWS_PER_PAGE,
+      ),
+    [filteredMatrix, activePage],
+  );
+
+  const totalHistoryPages = Math.max(
+    1,
+    Math.ceil(filteredOpnames.length / ROWS_PER_PAGE),
+  );
+  const pagedOpnames = useMemo(
+    () =>
+      filteredOpnames.slice(
+        (historyPage - 1) * ROWS_PER_PAGE,
+        historyPage * ROWS_PER_PAGE,
+      ),
+    [filteredOpnames, historyPage],
+  );
+
   const totalVarianceCost = useMemo(() => {
     return filteredMatrix.reduce((sum, it) => sum + it.varianceCost, 0);
   }, [filteredMatrix]);
@@ -338,6 +418,80 @@ export function StockOpnamePageSM() {
       filteredMatrix.reduce((sum, it) => sum + it.varianceQty, 0).toFixed(4),
     );
   }, [filteredMatrix]);
+
+  // Cek apakah hari ini sudah pernah dilakukan closing opname di unit ini
+  const isAlreadyAdjustedToday = useMemo(() => {
+    return opnames.some(
+      (o) =>
+        (!activeOutletId || o.outletId === activeOutletId) &&
+        (!localCompanyId || o.companyId === localCompanyId) &&
+        o.date.startsWith(opnameDate) &&
+        o.isActive !== false,
+    );
+  }, [opnames, activeOutletId, localCompanyId, opnameDate]);
+
+  // =========================================================================
+  // RESET & CLAMP: seleksi item, halaman aktif, halaman riwayat
+  // (dipindah ke sini agar activeOutletId & filteredMatrix sudah terdefinisi)
+  // =========================================================================
+  useEffect(() => {
+    setSelectedItemIds([]);
+  }, [activeTab, opnameDate, activeOutletId]);
+
+  useEffect(() => {
+    setActivePage(1);
+  }, [searchTerm, activeOutletId, opnameDate, activeTab]);
+
+  useEffect(() => {
+    setHistoryPage(1);
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activePage > totalActivePages) setActivePage(totalActivePages);
+  }, [activePage, totalActivePages]);
+
+  useEffect(() => {
+    if (historyPage > totalHistoryPages) setHistoryPage(totalHistoryPages);
+  }, [historyPage, totalHistoryPages]);
+
+  // === [HANDLER SELEKSI MOBILE] ===
+  const toggleSelectOne = (id: string) => {
+    setSelectedItemIds((prev) =>
+      prev.includes(id)
+        ? prev.filter((itemId) => itemId !== id)
+        : [...prev, id],
+    );
+  };
+
+  const toggleSelectAll = () => {
+    const isAll =
+      filteredMatrix.length > 0 &&
+      filteredMatrix.every((it) => selectedItemIds.includes(it.id));
+    if (isAll) {
+      setSelectedItemIds([]);
+    } else {
+      setSelectedItemIds(filteredMatrix.map((it) => it.id));
+    }
+  };
+
+  const handleExportExcel = () => {
+    const itemsToExport =
+      selectedItemIds.length > 0
+        ? opnameMatrix.filter((it) => selectedItemIds.includes(it.id))
+        : filteredMatrix;
+
+    if (itemsToExport.length === 0) {
+      return sysToast.warn("Kosong", "Tidak ada barang untuk diekspor.");
+    }
+
+    exportExcelStockOpname(itemsToExport, opnameDate);
+    sysToast.success(
+      "Export Selesai",
+      `Berhasil mengekspor ${itemsToExport.length} barang ${
+        selectedItemIds.length > 0 ? "terpilih " : ""
+      }ke Excel.`,
+    );
+  };
 
   const handlePhysicalCountChange = (itemId: string, val: string) => {
     const num = val === "" ? 0 : Number(val);
@@ -436,11 +590,20 @@ export function StockOpnamePageSM() {
               <Printer className="w-4 h-4" />
             </button>
             <button
-              onClick={() => exportExcelStockOpname(opnameMatrix, opnameDate)}
-              className="p-1.5 rounded-lg border border-emerald-500/30 text-emerald-500 bg-emerald-500/10"
+              onClick={handleExportExcel}
+              className={`p-1.5 rounded-lg border flex items-center gap-1 cursor-pointer ${
+                selectedItemIds.length > 0
+                  ? "border-emerald-500 bg-emerald-500 text-white shadow-xs"
+                  : "border-emerald-500/30 text-emerald-500 bg-emerald-500/10"
+              }`}
               title="Export Excel"
             >
               <FileSpreadsheet className="w-4 h-4" />
+              {selectedItemIds.length > 0 && (
+                <span className="text-[10px] font-black">
+                  {selectedItemIds.length}
+                </span>
+              )}
             </button>
           </div>
         </div>
@@ -588,20 +751,31 @@ export function StockOpnamePageSM() {
         {activeTab === "ACTIVE_OPNAME" ? (
           /* TAB 1: KARTU HITUNG OPNAME MOBILE */
           <>
-            {filteredMatrix.map((item) => {
+            {pagedMatrix.map((item) => {
               const currentPhysical = item.physicalStock;
               const hasDiff = item.varianceQty !== 0;
               const isPriceUp = item.currentPrice > item.previousPrice;
               const isPriceDown = item.currentPrice < item.previousPrice;
 
+              const isSelected = selectedItemIds.includes(item.id);
               return (
                 <div
                   key={item.id}
-                  className="bg-(--bg-card) border border-(--border-color) rounded-xl p-3 shadow-xs space-y-2"
+                  className={`border rounded-xl p-3 shadow-xs space-y-2 transition ${
+                    isSelected
+                      ? "bg-orange-500/5 border-orange-500 ring-1 ring-orange-500/30"
+                      : "bg-(--bg-card) border-(--border-color)"
+                  }`}
                 >
-                  {/* Header Item */}
-                  <div className="flex items-start justify-between">
-                    <div>
+                  {/* Header Item dengan Checkbox */}
+                  <div className="flex items-start gap-2.5">
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleSelectOne(item.id)}
+                      className="mt-0.5 w-4 h-4 rounded border-(--border-color) text-orange-500 focus:ring-orange-500 cursor-pointer shrink-0"
+                    />
+                    <div className="flex-1 min-w-0">
                       <div className="font-bold text-xs text-(--text-primary)">
                         {item.itemName}
                       </div>
@@ -612,8 +786,7 @@ export function StockOpnamePageSM() {
                         </span>
                       </div>
                     </div>
-
-                    <div className="text-right">
+                    <div className="text-right shrink-0">
                       <span className="text-[9px] text-(--text-secondary) block">
                         Sistem:
                       </span>
@@ -787,11 +960,19 @@ export function StockOpnamePageSM() {
                 Tidak ada barang yang cocok dengan pencarian.
               </div>
             )}
+
+            {/* PAGINASI LEMBAR OPNAME */}
+            <MobilePagination
+              currentPage={activePage}
+              totalItems={filteredMatrix.length}
+              onPageChange={setActivePage}
+              label="barang"
+            />
           </>
         ) : (
           /* TAB 2: RIWAYAT BERITA ACARA */
           <>
-            {filteredOpnames.map((doc) => (
+            {pagedOpnames.map((doc) => (
               <div
                 key={doc.id}
                 className="bg-(--bg-card) border border-(--border-color) rounded-xl p-3 shadow-xs space-y-2"
@@ -846,6 +1027,14 @@ export function StockOpnamePageSM() {
                 Belum ada riwayat dokumen stok opname tersimpan.
               </div>
             )}
+
+            {/* PAGINASI RIWAYAT */}
+            <MobilePagination
+              currentPage={historyPage}
+              totalItems={filteredOpnames.length}
+              onPageChange={setHistoryPage}
+              label="berita acara"
+            />
           </>
         )}
       </div>
