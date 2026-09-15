@@ -126,6 +126,7 @@ export const receivingCommandHandlers: CommandHandler[] = [
           supplierId: cmd.payload.vendorId || null,
           dueDate: isTempo ? cmd.payload.dueDate : null,
           documentType: cmd.payload.documentType || "HUTANG",
+          vendorSource: cmd.payload.vendorSource || "EXTERNAL",
         },
         quantity: {
           ordered: totalQty,
@@ -288,6 +289,8 @@ export const receivingCommandHandlers: CommandHandler[] = [
         invoiceNumber,
         vendorId,
         paymentMethod,
+        documentType,
+        vendorSource,
       } = cmd.payload;
 
       const nextVer = (await globalLedger.getAggregateVersion(documentId)) + 1;
@@ -357,6 +360,8 @@ export const receivingCommandHandlers: CommandHandler[] = [
           invoiceNumber,
           supplierId: vendorId || null,
           dueDate: isTempo ? dueDate : null,
+          documentType: documentType || "HUTANG",
+          vendorSource: vendorSource || "EXTERNAL",
         },
         quantity: {
           ordered: totalQty,

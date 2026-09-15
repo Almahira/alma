@@ -16,25 +16,24 @@ function safeDate(val) {
  * secara dinamis di region / outlet tempat transaksi receiving terjadi.
  */
 async function updateProductPricingFromReceiving(tx, p, items) {
-    const documentType = p.reference?.documentType || p.documentType;
-    const supplierId = p.reference?.supplierId || p.vendorId;
+    // 1. Ekstraksi fleksibel (Support Payload Event & DB Row)
+    const documentType = p.reference?.documentType || p.documentType || p.type;
+    const supplierId = p.reference?.supplierId || p.vendorId || p.supplierId;
     const regionId = p.location?.regionId || p.regionId;
-    const vendorSource = p.data?.vendorSource;
-    // 1. Lewati jika transaksi PIUTANG
+    const outletId = p.location?.outletId || p.outletId;
+    const vendorSource = p.data?.vendorSource || p.reference?.vendorSource || p.vendorSource;
+    // 2. PENGETATAN LOGIKA INTERNAL (Anti-Bypass)
+    // Cegah mutlak jika ini transaksi Piutang (Distribusi)
     if (documentType === "PIUTANG")
         return;
-    // 2. Lewati jika suplai dari GUDANG INTERNAL
-    if (vendorSource === "INTERNAL" ||
-        (supplierId && regionId && supplierId === regionId)) {
+    // Cegah mutlak jika ini Vendor Internal ATAU Outlet berhutang ke Regionnya sendiri
+    const isInternal = vendorSource === "INTERNAL" ||
+        (supplierId && regionId && supplierId === regionId);
+    if (isInternal)
         return;
-    }
-    const scopeKey = p.location?.outletId ||
-        p.outletId ||
-        p.location?.regionId ||
-        p.regionId ||
-        p.organization?.companyId ||
-        p.companyId ||
-        "DEFAULT";
+    // 3. KUNCI SCOPE (Mencegah Kebocoran Harga Outlet ke Region)
+    // Jika transaksi memiliki outletId, HANYA ubah scope Outlet tersebut!
+    const scopeKey = outletId ? outletId : regionId ? regionId : "DEFAULT";
     for (const item of items) {
         if (item.isExpense)
             continue;
@@ -59,11 +58,13 @@ async function updateProductPricingFromReceiving(tx, p, items) {
                     scopePricing.sellingPrice > newBasePrice
                     ? scopePricing.sellingPrice
                     : newBasePrice;
+            // 4. Update tepat sasaran pada scopeKey
             currentPricing[scopeKey] = {
                 basePrice: newBasePrice,
                 marginPercentage: margin,
                 sellingPrice: newSellingPrice,
             };
+            // Opsional: Hanya inisiasi DEFAULT jika benar-benar kosong, jangan ditimpa terus
             if (!currentPricing["DEFAULT"]) {
                 currentPricing["DEFAULT"] = currentPricing[scopeKey];
             }
@@ -268,15 +269,25 @@ export const receivingHandlers = {
             lastEventId: event.id,
         })
             .where(eq(schema.receivingDocuments.id, event.aggregateId));
-        const p = event.payload;
-        const documentType = p.reference?.documentType || p.documentType;
-        if (documentType !== "PIUTANG") {
-            const docItems = await tx
-                .select()
-                .from(schema.receivingItems)
-                .where(eq(schema.receivingItems.documentId, event.aggregateId));
-            if (docItems.length > 0) {
-                await updateProductPricingFromReceiving(tx, p, docItems);
+        // Validasi langsung ke dokumen induk di database:
+        const existingDocs = await tx
+            .select()
+            .from(schema.receivingDocuments)
+            .where(eq(schema.receivingDocuments.id, event.aggregateId))
+            .limit(1);
+        if (existingDocs.length > 0) {
+            const doc = existingDocs[0];
+            // HANYA update HPP jika ini transaksi HUTANG, level REGION murni (tanpa outletId), dan bukan internal
+            if (doc.documentType === "HUTANG" &&
+                !doc.outletId &&
+                doc.vendorId !== doc.regionId) {
+                const docItems = await tx
+                    .select()
+                    .from(schema.receivingItems)
+                    .where(eq(schema.receivingItems.documentId, event.aggregateId));
+                if (docItems.length > 0) {
+                    await updateProductPricingFromReceiving(tx, doc, docItems);
+                }
             }
         }
     },

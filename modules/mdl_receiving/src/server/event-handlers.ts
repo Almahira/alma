@@ -21,34 +21,28 @@ async function updateProductPricingFromReceiving(
   p: any,
   items: any[],
 ) {
-  const documentType = p.reference?.documentType || p.documentType;
-  const supplierId = p.reference?.supplierId || p.vendorId;
+  // 1. Ekstraksi fleksibel (Support Payload Event & DB Row)
+  const documentType = p.reference?.documentType || p.documentType || p.type;
+  const supplierId = p.reference?.supplierId || p.vendorId || p.supplierId;
   const regionId = p.location?.regionId || p.regionId;
   const outletId = p.location?.outletId || p.outletId;
-  const vendorSource = p.data?.vendorSource || p.reference?.vendorSource;
+  const vendorSource =
+    p.data?.vendorSource || p.reference?.vendorSource || p.vendorSource;
 
-  // 1. Lewati jika transaksi PIUTANG
+  // 2. PENGETATAN LOGIKA INTERNAL (Anti-Bypass)
+  // Cegah mutlak jika ini transaksi Piutang (Distribusi)
   if (documentType === "PIUTANG") return;
 
-  // 2. Lewati jika transaksi milik OUTLET (Jangan ubah harga induk Region!)
-  if (outletId) return;
-
-  // 3. Lewati jika suplai dari GUDANG INTERNAL
-  if (
+  // Cegah mutlak jika ini Vendor Internal ATAU Outlet berhutang ke Regionnya sendiri
+  const isInternal =
     vendorSource === "INTERNAL" ||
-    (supplierId && regionId && supplierId === regionId)
-  ) {
-    return;
-  }
+    (supplierId && regionId && supplierId === regionId);
 
-  const scopeKey =
-    p.location?.outletId ||
-    p.outletId ||
-    p.location?.regionId ||
-    p.regionId ||
-    p.organization?.companyId ||
-    p.companyId ||
-    "DEFAULT";
+  if (isInternal) return;
+
+  // 3. KUNCI SCOPE (Mencegah Kebocoran Harga Outlet ke Region)
+  // Jika transaksi memiliki outletId, HANYA ubah scope Outlet tersebut!
+  const scopeKey = outletId ? outletId : regionId ? regionId : "DEFAULT";
 
   for (const item of items) {
     if (item.isExpense) continue;
@@ -78,12 +72,14 @@ async function updateProductPricingFromReceiving(
             ? scopePricing.sellingPrice
             : newBasePrice;
 
+      // 4. Update tepat sasaran pada scopeKey
       currentPricing[scopeKey] = {
         basePrice: newBasePrice,
         marginPercentage: margin,
         sellingPrice: newSellingPrice,
       };
 
+      // Opsional: Hanya inisiasi DEFAULT jika benar-benar kosong, jangan ditimpa terus
       if (!currentPricing["DEFAULT"]) {
         currentPricing["DEFAULT"] = currentPricing[scopeKey];
       }

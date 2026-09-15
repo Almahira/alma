@@ -117,37 +117,36 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
       // ---> 2. RESPONS DINAMIS HARGA FLUKTUATIF DARI BELANJA RECEIVING <---
       // =====================================================================
       case "RECEIVING_CREATED":
-      case "RECEIVING_UPDATED":
-      case "RECEIVING_COMPLETED": {
+      case "RECEIVING_UPDATED": {
+        // <--- HAPUS RECEIVING_COMPLETED DARI SINI
         const p = payload;
-        const documentType = p.reference?.documentType || p.documentType;
-        const supplierId = p.reference?.supplierId || p.vendorId;
+        const documentType =
+          p.reference?.documentType || p.documentType || p.type;
+        const supplierId =
+          p.reference?.supplierId || p.vendorId || p.supplierId;
         const regionId = p.location?.regionId || p.regionId;
         const outletId = p.location?.outletId || p.outletId;
-        const vendorSource = p.data?.vendorSource || p.reference?.vendorSource;
+        const vendorSource =
+          p.data?.vendorSource || p.reference?.vendorSource || p.vendorSource;
 
         // =====================================================================
-        // ATURAN MUTLAK HARGA FLUKTUATIF REGION (ANTI-COMPOUNDING)
+        // ATURAN MUTLAK HARGA FLUKTUATIF (ANTI-COMPOUNDING & ANTI-BYPASS)
         // =====================================================================
-        // 1. Lewati jika transaksi PIUTANG (Distribusi Region ke Cabang)
+
+        // 1. BLOKIR MUTLAK jika transaksi PIUTANG (Distribusi)
         if (documentType === "PIUTANG") break;
 
-        // 2. Lewati jika transaksi dilakukan oleh CABANG OUTLET (outletId terisi)
-        //    Cabang belanja dari gudang/pasar lokal TIDAK BOLEH merusak HPP induk Region!
-        if (outletId) break;
-
-        // 3. Lewati jika supplier adalah GUDANG INTERNAL / REGIONAL
-        if (
+        // 2. BLOKIR MUTLAK jika transaksi dari Vendor Internal / Gudang Induk
+        const isInternal =
           vendorSource === "INTERNAL" ||
-          (supplierId && regionId && supplierId === regionId)
-        ) {
-          break;
-        }
+          (supplierId && regionId && supplierId === regionId);
 
-        // HANYA VENDOR EKSTERNAL DI TINGKAT REGION YANG BERHAK MENGUBAH HPP INDUK:
+        if (isInternal) break;
+
+        // 3. KUNCI SCOPE LEVEL (Pemisahan Tegas Region vs Outlet)
+        // Jika outletId ada, ubah HANYA harga Outlet. Jika tidak, ubah Region.
+        const scopeKey = outletId ? outletId : regionId ? regionId : "DEFAULT";
         const items = p.data?.items || p.items || [];
-        const scopeKey =
-          regionId || p.organization?.companyId || p.companyId || "DEFAULT";
 
         items.forEach((item: any) => {
           if (item.isExpense) return;
@@ -172,6 +171,7 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
                   ? scopePricing.sellingPrice
                   : newBasePrice;
 
+            // 4. Injeksi Harga TEPAT SASARAN
             currentPricing[scopeKey] = {
               basePrice: newBasePrice,
               marginPercentage: margin,
@@ -186,6 +186,11 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
             this.products.set(item.itemId, { ...product });
           }
         });
+        break;
+      }
+
+      // Biarkan COMPLETED numpang lewat tanpa memodifikasi produk
+      case "RECEIVING_COMPLETED": {
         break;
       }
     }
