@@ -426,6 +426,9 @@ export const organizationHandlers: Record<
   // 8. USER ACCOUNTS
   USER_ACCOUNT_CREATED: async (tx, event) => {
     const validRole = event.payload.role || "STAFF";
+    const allowedOutlets = Array.isArray(event.payload.allowedOutletIds)
+      ? event.payload.allowedOutletIds
+      : [];
     await tx
       .insert(schema.userAccounts)
       .values({
@@ -439,6 +442,7 @@ export const organizationHandlers: Record<
         pin: event.payload.pin || null,
         role: validRole,
         positionId: event.payload.positionId || null,
+        allowedOutletIds: allowedOutlets,
         isActive: true,
         aggregateVersion: event.aggregateVersion,
         lastEventId: event.id,
@@ -451,6 +455,10 @@ export const organizationHandlers: Record<
           passwordHash:
             event.payload.passwordHash || event.payload.password || undefined,
           pin: event.payload.pin || undefined,
+          allowedOutletIds:
+            event.payload.allowedOutletIds !== undefined
+              ? allowedOutlets
+              : undefined,
           aggregateVersion: event.aggregateVersion,
           lastEventId: event.id,
           updatedAt: new Date(),
@@ -461,12 +469,19 @@ export const organizationHandlers: Record<
     await tx
       .update(schema.userAccounts)
       .set({
-        role: event.payload.role,
+        role: event.payload.role || undefined,
         positionId: event.payload.positionId || null,
         passwordHash: event.payload.passwordHash || undefined,
-        pin: event.payload.pin !== undefined ? event.payload.pin : undefined, // <-- UPDATE PIN
+        pin: event.payload.pin !== undefined ? event.payload.pin : undefined,
+        allowedOutletIds:
+          event.payload.allowedOutletIds !== undefined
+            ? Array.isArray(event.payload.allowedOutletIds)
+              ? event.payload.allowedOutletIds
+              : []
+            : undefined,
         aggregateVersion: event.aggregateVersion,
         lastEventId: event.id,
+        updatedAt: new Date(),
       })
       .where(eq(schema.userAccounts.id, event.aggregateId));
   },

@@ -8,6 +8,7 @@ import {
   txEventJournal,
   quarantineEventJournal,
   deviceRegistry,
+  systemSnapshots,
 } from "../../../../packages/db-schema/index.js";
 import { telemetryMetrics } from "../../../../packages/db-schema/schema/telemetry.js";
 
@@ -383,30 +384,134 @@ router.get("/devices", async (_req: Request, res: Response) => {
 });
 
 // =========================================================================
-// 7. POST /api/system-health/broadcast-resync
-//    Menembakkan sinyal WebSocket ke seluruh klien untuk memicu resync lokal
+// 7. STEMPEL UNIVERSAL: PENYIMPANAN EPOCH & BROADCAST RESYNC MASAL
 // =========================================================================
+
+// Variabel penyimpan nomor versi stempel server (Dimulai dari timestamp saat server boot)
+let serverSyncEpoch = Date.now();
+
+// Endpoint ringan untuk diperiksa oleh tablet/HP saat pertama kali buka / online
+router.get("/sync-epoch", (_req: Request, res: Response) => {
+  res.status(200).json({
+    status: "SUCCESS",
+    epoch: serverSyncEpoch,
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// Endpoint pemicu Reset & Penyelarasan Masal dari Dashboard SRE
 router.post("/broadcast-resync", async (req: Request, res: Response) => {
   try {
-    const { reason = "Penyelarasan Skema & Data Server Pusat" } = req.body;
-    const io = req.app.get("io");
+    const { reason = "Penyelarasan Masal & Reset Data Pusat" } = req.body;
 
+    // 1. Terbitkan stempel epoch baru (angka selalu lebih besar)
+    serverSyncEpoch = Date.now();
+
+    // 2. Siarkan ke seluruh perangkat yang sedang online saat ini
+    const io = req.app.get("io");
     if (io) {
       io.emit("REMOTE_RESYNC_TRIGGER", {
-        timestamp: Date.now(),
+        epoch: serverSyncEpoch,
+        timestamp: serverSyncEpoch,
         reason,
       });
       console.log(
-        `[OTA BROADCAST] Sinyal penyelarasan ditembakkan ke seluruh perangkat.`,
+        `[STEMPEL UNIVERSAL] Epoch baru diterbitkan: ${serverSyncEpoch}. Menembakkan sinyal ke seluruh cabang...`,
       );
     }
 
     res.status(200).json({
       status: "SUCCESS",
-      message:
-        "Sinyal penyelarasan OTA berhasil dikirim ke seluruh perangkat yang terhubung.",
+      epoch: serverSyncEpoch,
+      message: `Sinyal reset masal (Epoch: ${serverSyncEpoch}) berhasil diterbitkan ke seluruh cabang.`,
     });
   } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// =========================================================================
+// 8. BRANKAS SNAPSHOT MASTER DATA PUSAT
+// =========================================================================
+
+// Endpoint untuk Klien Baru / Klien Resync menarik data jadi (Instant Hydration)
+router.get("/snapshot/system/latest", async (req: Request, res: Response) => {
+  try {
+    const companyId = req.query.companyId as string | undefined;
+
+    const query = db
+      .select()
+      .from(systemSnapshots)
+      .orderBy(desc(systemSnapshots.updatedAt))
+      .limit(1);
+
+    const rows = await query;
+
+    if (rows.length === 0) {
+      return res.status(200).json({ hasSnapshot: false });
+    }
+
+    const snap = rows[0];
+    res.status(200).json({
+      hasSnapshot: true,
+      snapshot: {
+        id: snap.id,
+        companyId: snap.companyId,
+        lastSeq: snap.lastSeq,
+        lastEventId: snap.lastEventId,
+        data: typeof snap.data === "string" ? JSON.parse(snap.data) : snap.data,
+        updatedAt: snap.updatedAt
+          ? new Date(snap.updatedAt).getTime()
+          : Date.now(),
+      },
+    });
+  } catch (err: any) {
+    console.error("[SNAPSHOT SERVER ERROR]:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Endpoint untuk memperbarui / menitipkan Snapshot kondisi terkini ke Server
+router.post("/snapshot/system/save", async (req: Request, res: Response) => {
+  try {
+    const { companyId, lastSeq, lastEventId, data, updatedAt } = req.body;
+
+    if (!data || typeof lastSeq !== "number") {
+      return res
+        .status(400)
+        .json({ error: "Data snapshot atau lastSeq tidak valid." });
+    }
+
+    const snapId = companyId ? `SNAP_${companyId}` : "SNAP_GLOBAL_SYSTEM";
+    const jsonString = typeof data === "string" ? data : JSON.stringify(data);
+
+    // Simpan atau perbarui snapshot di PostgreSQL
+    await db
+      .insert(systemSnapshots)
+      .values({
+        id: snapId,
+        companyId: companyId || null,
+        lastSeq,
+        lastEventId: lastEventId || null,
+        data: jsonString,
+        updatedAt: updatedAt ? new Date(updatedAt) : new Date(),
+      })
+      .onConflictDoUpdate({
+        target: systemSnapshots.id,
+        set: {
+          lastSeq,
+          lastEventId: lastEventId || null,
+          data: jsonString,
+          updatedAt: new Date(),
+        },
+      });
+
+    res.status(200).json({
+      status: "SUCCESS",
+      message: `Snapshot Sequence #${lastSeq} berhasil disimpan di brankas server.`,
+    });
+  } catch (err: any) {
+    console.error("[SNAPSHOT SAVE ERROR]:", err);
     res.status(500).json({ error: err.message });
   }
 });

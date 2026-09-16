@@ -10,10 +10,192 @@ import {
   Lock,
   User,
   Users,
+  Store,
+  CheckCircle2,
 } from "lucide-react";
+import { sysToast } from "../../../../apps/client_unv/src/shared-ui/useToastStore";
 import { useOrgStore, useHasWriteAccess } from "./store";
 import { globalCommandBus } from "../../../../packages/core_unv/src/cqrs/CommandBus";
 import { useUniversalModal } from "../../../../apps/client_unv/src/shared-ui/UniversalLayout";
+
+// =========================================================================
+// MODAL: CHECKLIST AKSES CABANG / OUTLET UNTUK USER
+// =========================================================================
+const UserOutletAccessModal: React.FC<{
+  user: any;
+  employeeName: string;
+  onClose: () => void;
+}> = ({ user, employeeName, onClose }) => {
+  const { outlets, regions } = useOrgStore();
+  const localCompanyId = localStorage.getItem("__unv_companyId") || "";
+
+  // Ambil seluruh cabang aktif milik perusahaan
+  const activeOutlets = useMemo(() => {
+    return outlets.filter(
+      (o) =>
+        o.status === "Aktif" &&
+        (!localCompanyId || o.companyId === localCompanyId),
+    );
+  }, [outlets, localCompanyId]);
+
+  // Kumpulan ID cabang terpilih
+  const [selectedIds, setSelectedIds] = useState<string[]>(() => {
+    if (Array.isArray(user.allowedOutletIds)) {
+      return user.allowedOutletIds;
+    }
+    return [];
+  });
+
+  const [isSaving, setIsSaving] = useState(false);
+
+  const toggleOutlet = (id: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
+    );
+  };
+
+  const selectAll = () => {
+    if (selectedIds.length === activeOutlets.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(activeOutlets.map((o) => o.id));
+    }
+  };
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      await globalCommandBus.execute({
+        type: "ASSIGN_USER_OUTLETS",
+        payload: {
+          userId: user.id,
+          allowedOutletIds: selectedIds,
+        },
+      });
+      sysToast.success(
+        "Akses Disimpan",
+        `Hak akses ${selectedIds.length} cabang berhasil ditautkan ke akun @${user.username}.`,
+      );
+      onClose();
+    } catch (err: any) {
+      sysToast.error("Gagal Menyimpan", err.message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className="p-4 space-y-4 max-w-lg bg-(--bg-card) text-(--text-primary)">
+      <div className="border-b border-(--border-color) pb-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h4 className="font-black text-sm text-(--text-primary) uppercase flex items-center gap-2">
+              <Store className="w-4 h-4 text-orange-500" /> Tautkan Hak Akses
+              Cabang
+            </h4>
+            <p className="text-xs text-(--text-secondary) mt-0.5 font-bold">
+              Akun:{" "}
+              <span className="text-orange-500 font-mono">
+                @{user.username}
+              </span>{" "}
+              ({employeeName})
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={selectAll}
+            className="text-[10px] font-black uppercase text-orange-500 hover:underline cursor-pointer"
+          >
+            {selectedIds.length === activeOutlets.length
+              ? "Batal Semua"
+              : "Pilih Semua"}
+          </button>
+        </div>
+
+        {user.role === "SUPER_ADMIN" && (
+          <div className="mt-2 p-2 bg-rose-500/10 border border-rose-500/20 rounded-lg text-[10px] text-rose-500 font-bold">
+            Catatan: Akun SUPER_ADMIN otomatis berhak atas seluruh cabang.
+            Pilihan ini akan disimpan sebagai daftar cabang resmi akun.
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar pr-1">
+        {activeOutlets.map((outlet) => {
+          const isChecked = selectedIds.includes(outlet.id);
+          const reg = regions.find((r) => r.id === outlet.regionId);
+
+          return (
+            <div
+              key={outlet.id}
+              onClick={() => toggleOutlet(outlet.id)}
+              className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer transition select-none ${
+                isChecked
+                  ? "bg-orange-500/10 border-orange-500 text-(--text-primary) shadow-xs"
+                  : "bg-(--bg-input) border-(--border-color) text-(--text-secondary) hover:bg-(--surface-hover)"
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <div
+                  className={`w-5 h-5 rounded flex items-center justify-center border transition ${
+                    isChecked
+                      ? "bg-orange-500 border-orange-500 text-white"
+                      : "border-slate-400 bg-transparent"
+                  }`}
+                >
+                  {isChecked && (
+                    <CheckCircle2 className="w-3.5 h-3.5 text-white" />
+                  )}
+                </div>
+                <div>
+                  <span className="font-bold text-xs block text-(--text-primary)">
+                    {outlet.name}
+                  </span>
+                  <span className="text-[10px] text-(--text-secondary)">
+                    Wilayah: {reg?.name || "Pusat"}{" "}
+                    {outlet.industry ? `• ${outlet.industry}` : ""}
+                  </span>
+                </div>
+              </div>
+              <span className="text-[9px] font-mono font-bold text-(--text-secondary)">
+                {outlet.code || ""}
+              </span>
+            </div>
+          );
+        })}
+
+        {activeOutlets.length === 0 && (
+          <div className="p-6 text-center text-xs font-bold text-(--text-secondary) italic">
+            Belum ada outlet cabang aktif yang terdaftar.
+          </div>
+        )}
+      </div>
+
+      <div className="pt-3 border-t border-(--border-color) flex items-center justify-between">
+        <span className="text-[11px] font-bold text-(--text-secondary)">
+          {selectedIds.length} dari {activeOutlets.length} cabang dipilih
+        </span>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 text-xs font-bold text-(--text-secondary) hover:bg-(--surface-hover) rounded-lg cursor-pointer"
+          >
+            BATAL
+          </button>
+          <button
+            type="button"
+            disabled={isSaving}
+            onClick={handleSave}
+            className="px-5 py-2 text-xs font-black text-white bg-orange-500 hover:bg-orange-600 rounded-lg shadow-md cursor-pointer disabled:opacity-50"
+          >
+            {isSaving ? "MENYIMPAN..." : "SIMPAN AKSES"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const UserAccountForm: React.FC<{
   isEditMode: boolean;
@@ -184,7 +366,13 @@ const UserAccountForm: React.FC<{
 };
 
 export const AccountPage: React.FC = () => {
-  const { openSideOver, closeSideOver, openAlert } = useUniversalModal();
+  const {
+    openSideOver,
+    closeSideOver,
+    openCenterModal,
+    closeCenterModal,
+    openAlert,
+  } = useUniversalModal();
   const { userAccounts, employees, positions, employmentAssignments } =
     useOrgStore();
   const hasWriteAccess = useHasWriteAccess();
@@ -372,6 +560,28 @@ export const AccountPage: React.FC = () => {
                     <td className="px-6 py-4 text-right space-x-2">
                       {viewStatus === "AKTIF" ? (
                         <>
+                          {hasWriteAccess && (
+                            <button
+                              onClick={() =>
+                                openCenterModal({
+                                  title: `TAUTKAN AKSES CABANG: @${user.username}`,
+                                  content: (
+                                    <UserOutletAccessModal
+                                      user={user}
+                                      employeeName={
+                                        emp?.fullName || user.username
+                                      }
+                                      onClose={closeCenterModal}
+                                    />
+                                  ),
+                                })
+                              }
+                              className="p-1.5 text-(--text-secondary) hover:text-orange-500 rounded cursor-pointer"
+                              title="Tautkan Hak Akses Cabang"
+                            >
+                              <Store className="w-3.5 h-3.5 text-orange-500" />
+                            </button>
+                          )}
                           {hasWriteAccess && (
                             <button
                               onClick={() =>

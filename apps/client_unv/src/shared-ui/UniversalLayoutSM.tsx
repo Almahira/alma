@@ -726,12 +726,72 @@ export function UniversalLayoutSM({
   const navigate = useNavigate();
   const location = useLocation();
 
-  const { outlets } = useOrgStore();
+  const { outlets, userAccounts } = useOrgStore();
+  const [isOutletModalOpen, setIsOutletModalOpen] = useState(false);
+  const activeOutletId = localStorage.getItem("__unv_outletId") || "";
+
   const currentOutletName = useMemo(() => {
-    const outId = localStorage.getItem("__unv_outletId");
-    if (!outId) return "Holding Pusat";
-    return outlets.find((o) => o.id === outId)?.name || "Cabang Outlet";
-  }, [outlets]);
+    if (!activeOutletId) return "Holding Pusat";
+    return (
+      outlets.find((o) => o.id === activeOutletId)?.name || "Cabang Outlet"
+    );
+  }, [outlets, activeOutletId]);
+
+  // Deteksi akun yang sedang aktif bertugas
+  const activeUser = useMemo(() => {
+    try {
+      const raw = localStorage.getItem("__unv_activeUser");
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const currentAccount = useMemo(() => {
+    if (!activeUser) return null;
+    return userAccounts.find(
+      (u) =>
+        u.id === activeUser.id ||
+        u.employeeId === activeUser.employeeId ||
+        u.username === activeUser.username,
+    );
+  }, [userAccounts, activeUser]);
+
+  const accessibleOutlets = useMemo(() => {
+    const localCompId = localStorage.getItem("__unv_companyId");
+    const companyOutlets = outlets.filter(
+      (o) =>
+        o.status === "Aktif" && (!localCompId || o.companyId === localCompId),
+    );
+
+    if (
+      activeUser?.role === "SUPER_ADMIN" ||
+      currentAccount?.role === "SUPER_ADMIN"
+    ) {
+      return companyOutlets;
+    }
+
+    if (
+      Array.isArray(currentAccount?.allowedOutletIds) &&
+      currentAccount.allowedOutletIds.length > 0
+    ) {
+      return companyOutlets.filter((o) =>
+        currentAccount.allowedOutletIds.includes(o.id),
+      );
+    }
+
+    const single = companyOutlets.filter((o) => o.id === activeOutletId);
+    return single.length > 0 ? single : companyOutlets.slice(0, 1);
+  }, [outlets, activeUser, currentAccount, activeOutletId]);
+
+  const handleSwitchOutlet = (newId: string, newName: string) => {
+    localStorage.setItem("__unv_outletId", newId);
+    setIsOutletModalOpen(false);
+    sysToast.success("Pindah Cabang", `Beralih ke ${newName}.`);
+    setTimeout(() => {
+      window.location.reload();
+    }, 250);
+  };
 
   // Modal states
   const [alertState, setAlertState] = useState<AlertConfig | null>(null);
@@ -812,8 +872,8 @@ export function UniversalLayoutSM({
     setDrawerOpen(false);
   };
 
-  // Profil aktif
-  let activeUser = {
+  // Profil tampilan pengguna di menu samping
+  let userProfile = {
     fullName: "Rendi Faizal",
     role: "Superadmin",
     initials: "RF",
@@ -828,7 +888,7 @@ export function UniversalLayoutSM({
         parts.length > 1
           ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
           : name.slice(0, 2).toUpperCase();
-      activeUser = {
+      userProfile = {
         fullName: name,
         role: parsed.role || "STAFF",
         initials,
@@ -851,13 +911,25 @@ export function UniversalLayoutSM({
             >
               <Menu className="w-6 h-6" />
             </button>
-            <div className="flex items-center gap-2 min-w-0">
+            <div className="flex items-center gap-1.5 min-w-0">
               <span className="font-['Syne',sans-serif] font-extrabold text-lg bg-linear-to-r from-orange-400 via-orange-500 to-yellow-400 bg-clip-text text-transparent whitespace-nowrap">
                 AlmaAPP
               </span>
-              <span className="hidden xs:inline text-[10px] font-bold text-(--text-secondary) uppercase truncate max-w-30">
-                {currentOutletName}
-              </span>
+              {accessibleOutlets.length > 1 ? (
+                <button
+                  type="button"
+                  onClick={() => setIsOutletModalOpen(true)}
+                  className="px-2 py-0.5 rounded-lg bg-orange-500/10 border border-orange-500/30 text-orange-400 text-[10px] font-black uppercase flex items-center gap-1 truncate max-w-28"
+                  title="Pindah Ruang Kerja Cabang"
+                >
+                  <span className="truncate">{currentOutletName}</span>
+                  <ChevronDown className="w-3 h-3 shrink-0" />
+                </button>
+              ) : (
+                <span className="hidden xs:inline text-[10px] font-bold text-(--text-secondary) uppercase truncate max-w-28">
+                  {currentOutletName}
+                </span>
+              )}
             </div>
           </div>
 
@@ -925,14 +997,14 @@ export function UniversalLayoutSM({
               <div className="p-4 border-b border-(--border-color) flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-full bg-linear-to-br from-orange-500 to-teal-500 flex items-center justify-center text-white font-bold">
-                    {activeUser.initials}
+                    {userProfile.initials}
                   </div>
                   <div>
                     <div className="text-sm font-semibold text-(--text-primary)">
-                      {activeUser.fullName}
+                      {userProfile.fullName}
                     </div>
                     <div className="text-[10px] text-(--text-secondary) uppercase">
-                      {activeUser.role}
+                      {userProfile.role}
                     </div>
                   </div>
                 </div>
@@ -1055,6 +1127,44 @@ export function UniversalLayoutSM({
           onClose={() => setIsActivityOpen(false)}
         />
       </div>
+      {/* MODAL PEMILIH CABANG KHUSUS SMARTPHONE */}
+      {isOutletModalOpen && (
+        <div className="fixed inset-0 z-100 flex items-end sm:items-center justify-center p-3 bg-black/70 backdrop-blur-sm">
+          <div className="bg-(--bg-card) border border-(--border-color) rounded-2xl w-full max-w-sm p-4 space-y-3 animate-in slide-in-from-bottom">
+            <div className="flex justify-between items-center border-b border-(--border-color) pb-2">
+              <span className="font-black text-xs uppercase text-orange-500 flex items-center gap-1.5">
+                <Store className="w-4 h-4" /> Pilih Ruang Kerja Cabang
+              </span>
+              <button
+                onClick={() => setIsOutletModalOpen(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-1.5 max-h-60 overflow-y-auto custom-scrollbar">
+              {accessibleOutlets.map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  onClick={() => handleSwitchOutlet(o.id, o.name)}
+                  className={`w-full text-left p-2.5 rounded-xl border text-xs font-bold flex items-center justify-between transition ${
+                    o.id === activeOutletId
+                      ? "bg-orange-500/10 border-orange-500 text-orange-400"
+                      : "bg-(--bg-input) border-(--border-color) text-(--text-primary)"
+                  }`}
+                >
+                  <span>{o.name}</span>
+                  {o.id === activeOutletId && (
+                    <span className="w-2 h-2 rounded-full bg-orange-500" />
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </UniversalModalContext.Provider>
   );
 }

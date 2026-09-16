@@ -1,6 +1,7 @@
 // File: packages/core_unv/src/ledger/SnapshotEngine.ts
 import { globalLedger } from "./UniversalLedger";
 import { globalRegistry } from "../cqrs/UniversalRegistry";
+import { getApiUrl } from "../config/env";
 
 export class SnapshotEngine {
   public static async takeSnapshot(): Promise<void> {
@@ -17,16 +18,34 @@ export class SnapshotEngine {
         return;
       }
 
-      await rxdb.collections.snapshots.upsert({
+      const now = Date.now();
+      const snapshotPayload = {
         id: "GLOBAL_SNAPSHOT",
         lastSeq: currentSeq,
         data: currentState,
-        updatedAt: Date.now(),
-      });
+        updatedAt: now,
+      };
 
+      // 1. Simpan potret di database lokal browser
+      await rxdb.collections.snapshots.upsert(snapshotPayload);
       console.log(
-        `[SNAPSHOT] Berhasil menyimpan potret pada Sequence ke-${currentSeq}.`,
+        `[SNAPSHOT] Berhasil menyimpan potret lokal pada Sequence ke-${currentSeq}.`,
       );
+
+      // 2. Titipkan salinan ke Server secara senyap di latar belakang (Fire-and-Forget)
+      if (typeof navigator !== "undefined" && navigator.onLine) {
+        const companyId = localStorage.getItem("__unv_companyId") || null;
+        fetch(getApiUrl("/api/system-health/snapshot/system/save"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            companyId,
+            lastSeq: currentSeq,
+            data: currentState,
+            updatedAt: now,
+          }),
+        }).catch(() => {}); // Abaikan jika server sibuk, tidak mengganggu klien
+      }
     } catch (error) {
       console.error("[SNAPSHOT] Gagal menyimpan potret:", error);
     }

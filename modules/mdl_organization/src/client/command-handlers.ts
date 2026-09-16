@@ -578,6 +578,22 @@ export const organizationCommandHandlers: CommandHandler[] = [
       );
     },
   },
+  {
+    commandType: "ASSIGN_USER_OUTLETS",
+    execute: async (cmd: Command) => {
+      validateWriteAccess();
+      const { userId, allowedOutletIds } = cmd.payload;
+      const nextVer = (await globalLedger.getAggregateVersion(userId)) + 1;
+      await globalLedger.appendEvent(
+        "USER_ACCOUNT_UPDATED",
+        userId,
+        "USER_ACCOUNT",
+        nextVer,
+        { allowedOutletIds },
+        getActiveActor(),
+      );
+    },
+  },
 
   // ==========================================
   // 9. GLOBAL ARCHIVE & RESTORE

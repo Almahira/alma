@@ -955,13 +955,93 @@ export function UniversalLayout({
   const [radialPosition, setRadialPosition] = useState({ x: 0, y: 0 });
   const [darkMode, setDarkMode] = useState(false);
 
-  // 1. DETEKSI NAMA OUTLET & CABANG AKTIF DARI STORAGE & MASTER
-  const { outlets, companies } = useOrgStore();
+  // 1. DETEKSI NAMA OUTLET, AKUN USER & HAK AKSES MULTI-CABANG
+  const { outlets, companies, userAccounts } = useOrgStore();
+  const [isOutletSwitcherOpen, setIsOutletSwitcherOpen] = useState(false);
+  const outletSwitcherRef = useRef<HTMLDivElement>(null);
+
+  const activeOutletId = localStorage.getItem("__unv_outletId") || "";
   const currentOutletName = React.useMemo(() => {
-    const outId = localStorage.getItem("__unv_outletId");
-    if (!outId) return "Holding Pusat";
-    return outlets.find((o) => o.id === outId)?.name || "Cabang Outlet";
-  }, [outlets]);
+    if (!activeOutletId) return "Holding Pusat";
+    return (
+      outlets.find((o) => o.id === activeOutletId)?.name || "Cabang Outlet"
+    );
+  }, [outlets, activeOutletId]);
+
+  // Deteksi akun yang sedang aktif bertugas
+  const activeUser = React.useMemo(() => {
+    try {
+      const raw = localStorage.getItem("__unv_activeUser");
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const currentAccount = React.useMemo(() => {
+    if (!activeUser) return null;
+    return userAccounts.find(
+      (u) =>
+        u.id === activeUser.id ||
+        u.employeeId === activeUser.employeeId ||
+        u.username === activeUser.username,
+    );
+  }, [userAccounts, activeUser]);
+
+  // Daftar cabang yang boleh diakses oleh user ini
+  const accessibleOutlets = React.useMemo(() => {
+    const localCompId = localStorage.getItem("__unv_companyId");
+    const companyOutlets = outlets.filter(
+      (o) =>
+        o.status === "Aktif" && (!localCompId || o.companyId === localCompId),
+    );
+
+    // A. Super Admin berhak atas seluruh cabang
+    if (
+      activeUser?.role === "SUPER_ADMIN" ||
+      currentAccount?.role === "SUPER_ADMIN"
+    ) {
+      return companyOutlets;
+    }
+
+    // B. User dengan checklist cabang khusus (allowedOutletIds)
+    if (
+      Array.isArray(currentAccount?.allowedOutletIds) &&
+      currentAccount.allowedOutletIds.length > 0
+    ) {
+      return companyOutlets.filter((o) =>
+        currentAccount.allowedOutletIds.includes(o.id),
+      );
+    }
+
+    // C. User biasa (hanya 1 cabang)
+    const single = companyOutlets.filter((o) => o.id === activeOutletId);
+    return single.length > 0 ? single : companyOutlets.slice(0, 1);
+  }, [outlets, activeUser, currentAccount, activeOutletId]);
+
+  // Handler Pindah Cabang Instan
+  const handleSwitchOutlet = (newId: string, newName: string) => {
+    localStorage.setItem("__unv_outletId", newId);
+    setIsOutletSwitcherOpen(false);
+    sysToast.success("Pindah Cabang", `Ruang kerja beralih ke ${newName}.`);
+    setTimeout(() => {
+      window.location.reload();
+    }, 250);
+  };
+
+  // Auto-close dropdown saat klik di luar
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        outletSwitcherRef.current &&
+        !outletSwitcherRef.current.contains(e.target as Node)
+      ) {
+        setIsOutletSwitcherOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   // 3. FITUR KIOSK / FULLSCREEN LAYAR PENUH UNTUK KASIR
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -1236,15 +1316,65 @@ export function UniversalLayout({
             </span>
           </div>
 
-          <div
-            className={`hidden md:flex items-center gap-2 ml-4 px-3 py-1.5 rounded-xl ${glassInputStyle} border-orange-500/20 shrink-0`}
-            title="Lokasi Operasional Perangkat Ini"
-          >
-            <Store className="w-4 h-4 text-orange-500 shrink-0" />
-            <span className="text-xs font-black text-(--text-primary) uppercase tracking-wide">
-              {currentOutletName}
-            </span>
-          </div>
+          {/* PEMILIH CABANG OTOMATIS: Dropdown muncul HANYA jika akun memiliki wewenang > 1 cabang */}
+          {accessibleOutlets.length > 1 ? (
+            <div className="relative" ref={outletSwitcherRef}>
+              <button
+                type="button"
+                onClick={() => setIsOutletSwitcherOpen(!isOutletSwitcherOpen)}
+                className={`hidden md:flex items-center gap-2 ml-4 px-3 py-1.5 rounded-xl ${glassInputStyle} border-orange-500/40 hover:border-orange-500 transition cursor-pointer shrink-0`}
+                title="Klik untuk berpindah ruang kerja cabang"
+              >
+                <Store className="w-4 h-4 text-orange-500 shrink-0" />
+                <span className="text-xs font-black text-(--text-primary) uppercase tracking-wide">
+                  {currentOutletName}
+                </span>
+                <ChevronDown
+                  className={`w-3.5 h-3.5 text-orange-500 transition-transform duration-200 ${
+                    isOutletSwitcherOpen ? "rotate-180" : ""
+                  }`}
+                />
+              </button>
+
+              {isOutletSwitcherOpen && (
+                <div className="absolute left-4 top-full mt-1.5 w-60 bg-(--bg-card) border border-(--border-color) rounded-xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
+                  <div className="px-3 py-1 text-[9px] font-black uppercase text-(--text-secondary) border-b border-(--border-color) mb-1">
+                    PILIH RUANG KERJA CABANG:
+                  </div>
+                  <div className="max-h-56 overflow-y-auto custom-scrollbar">
+                    {accessibleOutlets.map((o) => (
+                      <button
+                        key={o.id}
+                        type="button"
+                        onClick={() => handleSwitchOutlet(o.id, o.name)}
+                        className={`w-full text-left px-3 py-2 text-xs font-bold transition flex items-center justify-between cursor-pointer ${
+                          o.id === activeOutletId
+                            ? "bg-orange-500/10 text-orange-500 font-black"
+                            : "text-(--text-primary) hover:bg-(--surface-hover)"
+                        }`}
+                      >
+                        <span className="truncate">{o.name}</span>
+                        {o.id === activeOutletId && (
+                          <span className="w-2 h-2 rounded-full bg-orange-500 shrink-0 ml-2" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* JIKA HANYA 1 CABANG: TAMPILKAN SEBAGAI LABEL STATIS BIASA TANPA TOMBOL */
+            <div
+              className={`hidden md:flex items-center gap-2 ml-4 px-3 py-1.5 rounded-xl ${glassInputStyle} border-orange-500/20 shrink-0`}
+              title="Lokasi Operasional Cabang"
+            >
+              <Store className="w-4 h-4 text-orange-500 shrink-0" />
+              <span className="text-xs font-black text-(--text-primary) uppercase tracking-wide">
+                {currentOutletName}
+              </span>
+            </div>
+          )}
 
           <div className="flex-1 max-w-xl mx-4 relative">
             <div

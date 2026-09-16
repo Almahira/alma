@@ -10,14 +10,163 @@ import {
   Lock,
   User,
   Users,
-  X,
+  Store,
   CheckCircle2,
+  X,
 } from "lucide-react";
+import { sysToast } from "../../../../apps/client_unv/src/shared-ui/useToastStore";
 import { useOrgStore, useHasWriteAccess } from "./store";
 import { globalCommandBus } from "../../../../packages/core_unv/src/cqrs/CommandBus";
 import { useUniversalModal } from "../../../../apps/client_unv/src/shared-ui/UniversalLayoutSM";
-import { sysToast } from "../../../../apps/client_unv/src/shared-ui/useToastStore";
 
+// =========================================================================
+// MODAL CHECKLIST AKSES OUTLET (MOBILE)
+// =========================================================================
+const UserOutletAccessModalSM: React.FC<{
+  user: any;
+  employeeName: string;
+  onClose: () => void;
+}> = ({ user, employeeName, onClose }) => {
+  const { outlets, regions } = useOrgStore();
+  const localCompanyId = localStorage.getItem("__unv_companyId") || "";
+
+  const activeOutlets = useMemo(() => {
+    return outlets.filter(
+      (o) =>
+        o.status === "Aktif" &&
+        (!localCompanyId || o.companyId === localCompanyId),
+    );
+  }, [outlets, localCompanyId]);
+
+  const [selectedIds, setSelectedIds] = useState<string[]>(() => {
+    return Array.isArray(user.allowedOutletIds) ? user.allowedOutletIds : [];
+  });
+
+  const [isSaving, setIsSaving] = useState(false);
+
+  const toggleOutlet = (id: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
+    );
+  };
+
+  const selectAll = () => {
+    if (selectedIds.length === activeOutlets.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(activeOutlets.map((o) => o.id));
+    }
+  };
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      await globalCommandBus.execute({
+        type: "ASSIGN_USER_OUTLETS",
+        payload: {
+          userId: user.id,
+          allowedOutletIds: selectedIds,
+        },
+      });
+      sysToast.success(
+        "Akses Disimpan",
+        `${selectedIds.length} cabang ditautkan ke akun @${user.username}.`,
+      );
+      onClose();
+    } catch (err: any) {
+      sysToast.error("Gagal Menyimpan", err.message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className="p-3 space-y-3 bg-(--bg-card) text-(--text-primary)">
+      <div className="border-b border-(--border-color) pb-2 flex items-center justify-between">
+        <div>
+          <h4 className="font-black text-xs text-(--text-primary) uppercase flex items-center gap-1.5">
+            <Store className="w-4 h-4 text-orange-500" /> Akses Cabang
+          </h4>
+          <span className="text-[10px] text-(--text-secondary) font-bold">
+            @{user.username} ({employeeName})
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={selectAll}
+          className="text-[10px] font-black uppercase text-orange-500"
+        >
+          {selectedIds.length === activeOutlets.length ? "Batal" : "Semua"}
+        </button>
+      </div>
+
+      <div className="space-y-1.5 max-h-56 overflow-y-auto custom-scrollbar pr-1">
+        {activeOutlets.map((outlet) => {
+          const isChecked = selectedIds.includes(outlet.id);
+          const reg = regions.find((r) => r.id === outlet.regionId);
+
+          return (
+            <div
+              key={outlet.id}
+              onClick={() => toggleOutlet(outlet.id)}
+              className={`p-2.5 rounded-xl border flex items-center justify-between cursor-pointer transition ${
+                isChecked
+                  ? "bg-orange-500/10 border-orange-500 text-(--text-primary)"
+                  : "bg-(--bg-input) border-(--border-color) text-(--text-secondary)"
+              }`}
+            >
+              <div className="flex items-center gap-2.5">
+                <div
+                  className={`w-4 h-4 rounded flex items-center justify-center border ${
+                    isChecked
+                      ? "bg-orange-500 border-orange-500 text-white"
+                      : "border-slate-400"
+                  }`}
+                >
+                  {isChecked && <CheckCircle2 className="w-3 h-3 text-white" />}
+                </div>
+                <div>
+                  <span className="font-bold text-xs block text-(--text-primary)">
+                    {outlet.name}
+                  </span>
+                  <span className="text-[9px] text-(--text-secondary)">
+                    {reg?.name || "Pusat"}
+                  </span>
+                </div>
+              </div>
+              <span className="text-[9px] font-mono text-(--text-secondary)">
+                {outlet.code}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="pt-2 border-t border-(--border-color) flex items-center justify-between">
+        <span className="text-[10px] font-bold text-(--text-secondary)">
+          {selectedIds.length} cabang dipilih
+        </span>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-3 py-1.5 text-xs font-bold text-(--text-secondary)"
+          >
+            Batal
+          </button>
+          <button
+            type="button"
+            disabled={isSaving}
+            onClick={handleSave}
+            className="px-4 py-1.5 text-xs font-black text-white bg-orange-500 rounded-lg shadow-sm"
+          >
+            {isSaving ? "..." : "Simpan"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 // =========================================================================
 // 1. FORM USER ACCOUNT MOBILE
 // =========================================================================
@@ -231,7 +380,7 @@ export function AccountPageSM() {
   const { userAccounts, employees, positions, employmentAssignments } =
     useOrgStore();
   const hasWriteAccess = useHasWriteAccess();
-  const { openAlert } = useUniversalModal();
+  const { openCenterModal, closeCenterModal, openAlert } = useUniversalModal();
 
   const [viewStatus, setViewStatus] = useState<"AKTIF" | "ARSIP">("AKTIF");
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -421,6 +570,24 @@ export function AccountPageSM() {
                   <div className="flex items-center gap-1.5">
                     {viewStatus === "AKTIF" ? (
                       <>
+                        <button
+                          onClick={() =>
+                            openCenterModal({
+                              title: `AKSES CABANG: @${user.username}`,
+                              content: (
+                                <UserOutletAccessModalSM
+                                  user={user}
+                                  employeeName={emp?.fullName || user.username}
+                                  onClose={closeCenterModal}
+                                />
+                              ),
+                            })
+                          }
+                          className="p-1.5 text-orange-500 bg-orange-500/10 border border-orange-500/20 rounded-lg"
+                          title="Tautkan Akses Cabang"
+                        >
+                          <Store className="w-3.5 h-3.5" />
+                        </button>
                         <button
                           onClick={() => {
                             setEditUser(user);

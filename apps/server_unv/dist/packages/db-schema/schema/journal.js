@@ -25,3 +25,13 @@ export const quarantineEventJournal = pgTable("quarantine_event_journal", {
     errorReason: text("error_reason").notNull(), // Alasan kenapa ditolak (misal: "JSON cacat" atau "Konflik tidak bisa di-merge")
     quarantinedAt: timestamp("quarantined_at").defaultNow(),
 });
+// Tabel Penyimpan Snapshot Master Data Terkompresi di Server Pusat
+export const systemSnapshots = pgTable("system_snapshots", {
+    id: text("id").primaryKey(), // Format: SNAP_SYSTEM atau SNAP_{companyId}
+    companyId: text("company_id"),
+    lastEventId: text("last_event_id"),
+    lastSeq: integer("last_seq").notNull().default(0),
+    data: text("data").notNull(), // Disimpan sebagai JSON string ringkas
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+});

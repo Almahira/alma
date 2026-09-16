@@ -27,6 +27,7 @@ import {
   Gauge,
   HardDrive,
 } from "lucide-react";
+import { getApiUrl } from "../../../../../packages/core_unv/src/config/env";
 
 export const DesktopMaintenanceDashboard: React.FC<{
   overview: any;
@@ -65,30 +66,29 @@ export const DesktopMaintenanceDashboard: React.FC<{
   const handleBroadcastResync = async () => {
     if (
       !window.confirm(
-        "Kirim sinyal penyelarasan data (OTA) ke seluruh perangkat kasir/cabang yang sedang online?",
+        "PERINGATAN: Perintah ini akan menerbitkan Stempel Epoch Baru. Seluruh perangkat cabang (baik yang sedang ONLINE maupun yang nanti dinyalakan setelah OFFLINE) akan otomatis me-reset database lokalnya dan menarik data segar dari server.\n\nLanjutkan reset masal?",
       )
     ) {
       return;
     }
     setIsBroadcasting(true);
     try {
-      const serverUrl =
-        localStorage.getItem("__unv_serverUrl") || "https://api.almazain.my.id";
       const res = await fetch(
-        `${serverUrl.replace(/\/+$/, "")}/api/system-health/broadcast-resync`,
+        getApiUrl("/api/system-health/broadcast-resync"),
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            reason: "Penyelarasan Skema Desimal & Update Sistem",
+            reason: "Reset & Penyelarasan Masal Database Pusat",
           }),
         },
       );
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      alert("Sukses! " + data.message);
+      alert("SUKSES!\n" + data.message);
+      onRefresh();
     } catch (err: any) {
-      alert("Gagal mengirim sinyal: " + err.message);
+      alert("Gagal menerbitkan sinyal reset masal: " + err.message);
     } finally {
       setIsBroadcasting(false);
     }

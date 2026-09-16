@@ -209,13 +209,75 @@ export class UniversalLedger {
       const regionId = localStorage.getItem("__unv_regionId");
       const outletId = localStorage.getItem("__unv_outletId");
 
-      // Siapkan Query Params Spasial yang Ketat
+      // Siapkan Query Params Spasial yang Menghargai Wewenang Akun Login
       const queryParams = new URLSearchParams({
         deviceId: this.nodeId,
       });
       if (companyId) queryParams.append("companyId", companyId);
       if (regionId) queryParams.append("regionId", regionId);
-      if (outletId) queryParams.append("outletId", outletId);
+
+      // Cek apakah akun yang login adalah SUPER_ADMIN atau memiliki izin multi-cabang
+      let activeRole = "";
+      try {
+        const rawUser = localStorage.getItem("__unv_activeUser");
+        if (rawUser) activeRole = JSON.parse(rawUser).role || "";
+      } catch {}
+
+      // Jika BUKAN Super Admin, kirimkan filter cabang yang menjadi haknya
+      if (activeRole !== "SUPER_ADMIN") {
+        let multiOutlets: string[] = [];
+        try {
+          const rawAllowed = localStorage.getItem("__unv_user_allowed_outlets");
+          if (rawAllowed) multiOutlets = JSON.parse(rawAllowed);
+        } catch {}
+
+        if (multiOutlets.length > 1) {
+          queryParams.append("outletIds", multiOutlets.join(","));
+        } else if (outletId) {
+          queryParams.append("outletId", outletId);
+        }
+      }
+      // Catatan: Jika SUPER_ADMIN, tidak ada outletId yang dikirim sehingga server memberikan data seluruh cabang
+
+      // ---> OPTIMASI SNAPSHOT PUSAT: Jika database lokal masih kosong (Klien Baru / Habis Reset) <---
+      const localEventCount = await this.db.collections.events.count().exec();
+      if (localEventCount === 0) {
+        try {
+          const snapRes = await fetch(
+            getApiUrl(
+              `/api/system-health/snapshot/system/latest?companyId=${companyId || ""}`,
+            ),
+          ).catch(() => null);
+
+          if (snapRes && snapRes.ok) {
+            const snapJson = await snapRes.json();
+            if (snapJson.hasSnapshot && snapJson.snapshot) {
+              const s = snapJson.snapshot;
+              console.log(
+                `[COLD-START INSTAN] Menerima Snapshot Master Data dari Server (Sequence #${s.lastSeq}). Memulihkan tanpa download 8.000 event...`,
+              );
+              // Simpan snapshot ke database lokal & rehidrasi UI seketika
+              await this.db.collections.snapshots.upsert({
+                id: "GLOBAL_SNAPSHOT",
+                lastSeq: s.lastSeq,
+                data: s.data,
+                updatedAt: s.updatedAt,
+              });
+              // Pasang sequence dasar
+              this.memCurrentSeq = s.lastSeq;
+              // Minta server hanya mengirim event yang terjadi setelah snapshot ini dibuat!
+              if (s.updatedAt) {
+                queryParams.append("since", String(s.updatedAt));
+              }
+            }
+          }
+        } catch (snapErr) {
+          console.warn(
+            "[COLD-START] Gagal memuat snapshot server, beralih ke sinkronisasi biasa.",
+            snapErr,
+          );
+        }
+      }
 
       const serverEvents = await globalCircuitBreaker.fire(async () => {
         const [resSystem, resTx] = await Promise.all([
@@ -470,6 +532,19 @@ export class UniversalLedger {
 
   public getCurrentSeq(): number {
     return this.memCurrentSeq;
+  }
+
+  /**
+   * Reset Memori RAM Kriptografi (Mencegah Sequence Rusak / Database Corrupted saat Reset)
+   */
+  public resetMemoryChain(): void {
+    this.memCurrentSeq = 0;
+    this.memCurrentHash = "0";
+    this.memAggregateVersions.clear();
+    this.isSyncing = false;
+    console.log(
+      "[UNIVERSAL LEDGER] Memori sequence & hash chain berhasil di-reset ke 0 (Clean State).",
+    );
   }
 }
 

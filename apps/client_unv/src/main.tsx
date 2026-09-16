@@ -238,30 +238,49 @@ function SystemBootstrapper() {
         IntegrityChecker.verifyChain();
 
         // ============================================================
-        // 4. AUTO-RESYNC JIKA ADA PERUBAHAN SKEMA (SCHEMA EPOCH)
+        // 4. SENSOR STEMPEL UNIVERSAL (SYNC EPOCH) OTOMATIS SAAT BOOT
         // ============================================================
-        const CURRENT_SCHEMA_EPOCH = "2.1.1_double_precision";
-        const savedEpoch = localStorage.getItem("__unv_schema_epoch");
         const hasDevice = !!localStorage.getItem("__unv_deviceToken");
+        const isDemoMode = localStorage.getItem("__unv_is_demo") === "true";
 
-        // HANYA jalankan jika online dan perangkat sudah terdaftar
-        if (
-          hasDevice &&
-          savedEpoch !== CURRENT_SCHEMA_EPOCH &&
-          navigator.onLine
-        ) {
-          console.log(
-            `[BOOT ENGINE] Terdeteksi update sistem (${savedEpoch || "legacy"} -> ${CURRENT_SCHEMA_EPOCH}). Menjalankan Auto-Resync...`,
-          );
+        // Hanya periksa jika bukan mode demo, perangkat sudah terdaftar, dan ada koneksi
+        if (hasDevice && !isDemoMode && navigator.onLine) {
           try {
-            await EventBus.executeSafeLocalResync();
-            localStorage.setItem("__unv_schema_epoch", CURRENT_SCHEMA_EPOCH);
-            console.log("[BOOT ENGINE] Auto-Resync berhasil diselesaikan.");
-          } catch (resyncErr) {
-            // Jika koneksi server lambat/gagal, jangan hentikan boot kasir
-            console.warn(
-              "[BOOT ENGINE] Auto-Resync tertunda karena jaringan, melanjutkan mode offline biasa.",
-              resyncErr,
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 3500);
+
+            const epochRes = await fetch(
+              getApiUrl("/api/system-health/sync-epoch"),
+              {
+                signal: controller.signal,
+              },
+            );
+            clearTimeout(timeoutId);
+
+            if (epochRes.ok) {
+              const epochData = await epochRes.json();
+              const serverEpoch = Number(epochData.epoch || 0);
+              const localEpoch = Number(
+                localStorage.getItem("__unv_sync_epoch") || 0,
+              );
+
+              // Jika perangkat belum memiliki stempel atau stempel server lebih baru:
+              // Otomatis reset total database lokal dan tarik data baru yang sah!
+              if (serverEpoch > 0 && serverEpoch > localEpoch) {
+                console.log(
+                  `[STEMPEL UNIVERSAL] Terdeteksi versi server (${serverEpoch}) lebih baru dari lokal (${localEpoch}). Melakukan sinkronisasi masal otomatis...`,
+                );
+                await EventBus.executeSafeLocalResync();
+                localStorage.setItem("__unv_sync_epoch", String(serverEpoch));
+                console.log(
+                  "[STEMPEL UNIVERSAL] Database lokal berhasil diperbarui & stempel tersimpan.",
+                );
+              }
+            }
+          } catch (epochErr) {
+            // Jika koneksi timeout / server offline, jangan hentikan operasional kasir (Offline-First)
+            console.info(
+              "[STEMPEL UNIVERSAL] Server tidak dapat dihubungi, kasir tetap berjalan dengan data lokal.",
             );
           }
         }

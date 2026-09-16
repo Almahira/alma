@@ -48,20 +48,52 @@ export class EventBus {
   public static async rebuildState(): Promise<void> {
     const rxdb = globalLedger.getRxDatabase();
     if (!rxdb || !rxdb.collections.events) return;
-    console.log("[EVENT BUS] Memulai Rehidrasi State dari Sequence 1...");
+
     globalRegistry.hardReset();
-    const allEvents = await rxdb.collections.events
-      .find({ sort: [{ seq: "asc" }] })
+
+    // 1. CEK APAKAH ADA FOTO SNAPSHOT TERAKHIR DI DATABASE LOKAL
+    let startSeq = 0;
+    if (rxdb.collections.snapshots) {
+      const snapDoc = await rxdb.collections.snapshots
+        .findOne("GLOBAL_SNAPSHOT")
+        .exec();
+
+      if (snapDoc) {
+        const snap = snapDoc.toJSON();
+        if (snap.data && snap.lastSeq > 0) {
+          console.log(
+            `[EVENT BUS] Snapshot ditemukan (Sequence #${snap.lastSeq}). Memulihkan memori secara instan...`,
+          );
+          globalRegistry.restoreAllStates(snap.data);
+          startSeq = snap.lastSeq;
+        }
+      }
+    }
+
+    // 2. HANYA PUTAR EVENT YANG TERJADI SETELAH SNAPSHOT (DELTA EVENT)
+    // Jika startSeq = 0 (belum ada snapshot), sistem memutar dari seq 1
+    const querySelector = startSeq > 0 ? { seq: { $gt: startSeq } } : {};
+
+    const deltaEvents = await rxdb.collections.events
+      .find({
+        selector: querySelector,
+        sort: [{ seq: "asc" }],
+      })
       .exec();
-    for (const doc of allEvents) {
+
+    for (const doc of deltaEvents) {
       globalRegistry.processEvent(doc.toJSON());
     }
+
     console.log(
-      `[EVENT BUS] Sukses merehidrasi ${allEvents.length} event ke dalam memori UI.`,
+      `[EVENT BUS] Rehidrasi selesai. Snapshot Sequence: #${startSeq} + ${deltaEvents.length} delta event baru.`,
     );
-    if (allEvents.length > 0) {
+
+    // 3. Ambil potret baru jika ada event delta yang baru diproses
+    if (deltaEvents.length > 0 || startSeq === 0) {
       await SnapshotEngine.takeSnapshot();
     }
+
     notifyStateUpdated();
   }
 
@@ -73,12 +105,21 @@ export class EventBus {
    * Hanya membuang event lokal usang/korup lalu menarik data sah dari server.
    */
   public static async executeSafeLocalResync(): Promise<void> {
-    console.log("[RESYNC ENGINE] Memulai penyelarasan bersih dengan server...");
+    console.log(
+      "[RESYNC ENGINE] Memulai penyelarasan bersih total dengan server...",
+    );
     const rxdb = globalLedger.getRxDatabase();
     if (!rxdb) return;
-
     try {
-      // 1. Bersihkan snapshots lokal usang
+      // 1. Bersihkan antrean Inbox lama agar tidak ada event pending yang tabrakan
+      if (rxdb.collections.inbox) {
+        const allInbox = await rxdb.collections.inbox.find().exec();
+        for (const doc of allInbox) {
+          await doc.remove();
+        }
+      }
+
+      // 2. Bersihkan snapshots lokal usang
       if (rxdb.collections.snapshots) {
         const allSnaps = await rxdb.collections.snapshots.find().exec();
         for (const doc of allSnaps) {
@@ -86,7 +127,7 @@ export class EventBus {
         }
       }
 
-      // 2. Bersihkan event lokal usang
+      // 3. Bersihkan event lokal lama
       if (rxdb.collections.events) {
         const allEvents = await rxdb.collections.events.find().exec();
         for (const doc of allEvents) {
@@ -94,17 +135,20 @@ export class EventBus {
         }
       }
 
-      // 3. Reset state memori UI
+      // 4. KUNCI ANTI-KORUP: Reset memori internal sequence & hash di RAM
+      globalLedger.resetMemoryChain();
+
+      // 5. Kosongkan state tampilan UI
       globalRegistry.hardReset();
 
-      // 4. Tarik data segar dari Server PostgreSQL (Master Data & Transaksi)
+      // 6. Tarik data segar dari Server (Master Data & Transaksi)
       await globalLedger.syncInitial();
 
-      // 5. Putar ulang proyeksi dengan data server yang valid
+      // 7. Putar ulang proyeksi dari sequence 1 yang sah dan urut
       await this.rebuildState();
 
       console.log(
-        "[RESYNC ENGINE] Penyelarasan sukses. Database lokal 100% sinkron!",
+        "[RESYNC ENGINE] Penyelarasan sukses 100%. Database lokal identik dengan server!",
       );
       notifyStateUpdated();
     } catch (error) {
@@ -118,12 +162,20 @@ export class EventBus {
   }
 }
 
-// Pasang Listener Global untuk Sinyal OTA Remote
+// Pasang Listener Global untuk Sinyal OTA Remote (Penyelarasan Real-Time)
 if (typeof window !== "undefined") {
   window.addEventListener("UNV_REMOTE_RESYNC", async (e: any) => {
     try {
-      console.log("[OTA SINKRON] Menjalankan penyelarasan otomatis...");
+      const serverEpoch = e.detail?.epoch;
+      console.log(
+        `[OTA SINKRON] Menerima instruksi reset masal seketika (Epoch: ${serverEpoch || "N/A"})...`,
+      );
       await EventBus.executeSafeLocalResync();
+
+      // Simpan stempel epoch baru ke saku perangkat
+      if (serverEpoch) {
+        localStorage.setItem("__unv_sync_epoch", String(serverEpoch));
+      }
     } catch (err) {
       console.error("[OTA SINKRON ERROR]:", err);
     }

@@ -319,14 +319,24 @@ export class OrganizationProjection implements ProjectionHandler<OrgState> {
         this.userAccounts.set(aggregateId, {
           id: aggregateId,
           ...payload,
+          allowedOutletIds: Array.isArray(payload.allowedOutletIds)
+            ? payload.allowedOutletIds
+            : [],
           status: "Aktif",
         });
         break;
       case "USER_ACCOUNT_UPDATED":
         if (this.userAccounts.has(aggregateId)) {
+          const existing = this.userAccounts.get(aggregateId);
           this.userAccounts.set(aggregateId, {
-            ...this.userAccounts.get(aggregateId),
+            ...existing,
             ...payload,
+            allowedOutletIds:
+              payload.allowedOutletIds !== undefined
+                ? Array.isArray(payload.allowedOutletIds)
+                  ? payload.allowedOutletIds
+                  : []
+                : existing.allowedOutletIds || [],
           });
         }
         break;
@@ -407,7 +417,12 @@ export class OrganizationProjection implements ProjectionHandler<OrgState> {
       this.employeeDocuments.set(ed.id || ed.documentId, normalize(ed)),
     );
     state.userAccounts?.forEach((u) =>
-      this.userAccounts.set(u.id, normalize(u)),
+      this.userAccounts.set(u.id, {
+        ...normalize(u),
+        allowedOutletIds: Array.isArray(u.allowedOutletIds)
+          ? u.allowedOutletIds
+          : [],
+      }),
     );
   }
 }

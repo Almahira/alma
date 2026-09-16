@@ -156,6 +156,7 @@ app.get("/api/health", async (_req, res) => {
 app.get("/api/events/pull/system", async (req, res) => {
     try {
         const deviceId = req.query.deviceId || "UNKNOWN";
+        const sinceParam = req.query.since;
         // Cek status keaktifan perangkat (Kill Switch)
         if (deviceId && deviceId !== "UNKNOWN" && deviceId !== "SERVER") {
             const devCheck = await db
@@ -166,15 +167,26 @@ app.get("/api/events/pull/system", async (req, res) => {
             if (devCheck.length > 0 &&
                 (devCheck[0].status === "REPLACED" ||
                     devCheck[0].status === "SUSPENDED")) {
-                console.warn(`[KILL SWITCH] Menolak PULL System dari perangkat ${deviceId} (Status: ${devCheck[0].status})`);
                 return res.status(403).json({
                     error: "DEVICE_DEACTIVATED",
                     message: "Perangkat ini telah dinonaktifkan atau digantikan oleh perangkat lain.",
                 });
             }
         }
-        console.log(`[HTTP] PULL System Events (Master Data) dari device: ${deviceId}`);
-        const systemEventsRaw = await db.select().from(systemEventJournal);
+        // Jika klien mengirim parameter `since` (waktu snapshot), ambil hanya event setelah waktu tersebut!
+        let systemEventsRaw;
+        if (sinceParam && !isNaN(Number(sinceParam))) {
+            const sinceDate = new Date(Number(sinceParam));
+            console.log(`[HTTP] PULL System Delta dari device ${deviceId} sejak waktu: ${sinceDate.toISOString()}`);
+            systemEventsRaw = await db
+                .select()
+                .from(systemEventJournal)
+                .where(sql `${systemEventJournal.createdAt} > ${sinceDate}`);
+        }
+        else {
+            console.log(`[HTTP] PULL Full System Events dari device: ${deviceId}`);
+            systemEventsRaw = await db.select().from(systemEventJournal);
+        }
         const formattedEvents = systemEventsRaw.map((ev) => ({
             ...ev,
             payload: typeof ev.payload === "string" ? JSON.parse(ev.payload) : ev.payload,

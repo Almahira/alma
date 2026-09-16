@@ -204,6 +204,7 @@ app.get("/api/health", async (_req, res) => {
 app.get("/api/events/pull/system", async (req, res) => {
   try {
     const deviceId = (req.query.deviceId as string) || "UNKNOWN";
+    const sinceParam = req.query.since as string | undefined;
 
     // Cek status keaktifan perangkat (Kill Switch)
     if (deviceId && deviceId !== "UNKNOWN" && deviceId !== "SERVER") {
@@ -212,15 +213,11 @@ app.get("/api/events/pull/system", async (req, res) => {
         .from(deviceRegistry)
         .where(eq(deviceRegistry.id, deviceId))
         .limit(1);
-
       if (
         devCheck.length > 0 &&
         (devCheck[0].status === "REPLACED" ||
           devCheck[0].status === "SUSPENDED")
       ) {
-        console.warn(
-          `[KILL SWITCH] Menolak PULL System dari perangkat ${deviceId} (Status: ${devCheck[0].status})`,
-        );
         return res.status(403).json({
           error: "DEVICE_DEACTIVATED",
           message:
@@ -229,17 +226,27 @@ app.get("/api/events/pull/system", async (req, res) => {
       }
     }
 
-    console.log(
-      `[HTTP] PULL System Events (Master Data) dari device: ${deviceId}`,
-    );
-    const systemEventsRaw = await db.select().from(systemEventJournal);
+    // Jika klien mengirim parameter `since` (waktu snapshot), ambil hanya event setelah waktu tersebut!
+    let systemEventsRaw: any[];
+    if (sinceParam && !isNaN(Number(sinceParam))) {
+      const sinceDate = new Date(Number(sinceParam));
+      console.log(
+        `[HTTP] PULL System Delta dari device ${deviceId} sejak waktu: ${sinceDate.toISOString()}`,
+      );
+      systemEventsRaw = await db
+        .select()
+        .from(systemEventJournal)
+        .where(sql`${systemEventJournal.createdAt} > ${sinceDate}`);
+    } else {
+      console.log(`[HTTP] PULL Full System Events dari device: ${deviceId}`);
+      systemEventsRaw = await db.select().from(systemEventJournal);
+    }
 
     const formattedEvents = systemEventsRaw.map((ev) => ({
       ...ev,
       payload:
         typeof ev.payload === "string" ? JSON.parse(ev.payload) : ev.payload,
     }));
-
     res.status(200).json(formattedEvents);
   } catch (error: any) {
     console.error("[HTTP PULL SYSTEM ERROR]:", error);
@@ -282,6 +289,7 @@ app.get("/api/events/pull/tx", async (req, res) => {
     const filterCompanyId = req.query.companyId as string | undefined;
     const filterRegionId = req.query.regionId as string | undefined;
     const filterOutletId = req.query.outletId as string | undefined;
+    const filterOutletIds = req.query.outletIds as string | undefined; // <--- DUKUNGAN MULTI-OUTLET
 
     console.log(
       `[HTTP] PULL Tx Events dari device: ${deviceId} (Outlet: ${filterOutletId || "ALL"}, Region: ${filterRegionId || "ALL"}, Window: ${windowMode || "MONTHLY"})`,
@@ -314,10 +322,15 @@ app.get("/api/events/pull/tx", async (req, res) => {
         } catch {}
       }
 
-      // 2. JIKA PERANGKAT ADALAH CABANG OUTLET (Paling Ketat)
-      if (filterOutletId) {
-        // Outlet HANYA berhak menarik event miliknya sendiri!
-        // Event Gudang Region (outletId null) atau Outlet lain DITOLAK MUTLAK.
+      // 2. JIKA PERANGKAT ADALAH CABANG OUTLET (Single Outlet maupun Multi-Outlet)
+      if (filterOutletIds) {
+        const allowedList = filterOutletIds.split(",");
+        // Loloskan transaksi jika outletId event termasuk dalam daftar cabang user!
+        if (!evt.outletId || !allowedList.includes(evt.outletId)) {
+          return;
+        }
+      } else if (filterOutletId) {
+        // Mode tunggal: HANYA berhak menarik event miliknya sendiri
         if (evt.outletId !== filterOutletId) {
           return;
         }
