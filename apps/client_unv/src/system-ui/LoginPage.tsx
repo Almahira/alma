@@ -16,6 +16,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { UniversalCombobox } from "../shared-ui/UniversalCombobox";
 import { useOrgStore } from "../../../../modules/mdl_organization/src/client/store";
 import { sysToast } from "../shared-ui/useToastStore";
+import { RuntimeSession } from "../../../../packages/core_unv/src/config/session";
 
 interface RecentUser {
   employeeId: string;
@@ -106,40 +107,50 @@ export const LoginPage: React.FC<{ onLoginSuccess?: () => void }> = ({
   };
 
   // 4. Eksekusi Autentikasi PIN
+  // 4. Eksekusi Autentikasi PIN
   const handleLogin = () => {
     if (!selectedEmployeeId) {
       sysToast.warn("Perhatian", "Pilih nama karyawan terlebih dahulu.");
       return;
     }
-
     if (!pin) {
       sysToast.warn("Perhatian", "Masukkan PIN akses Anda.");
       return;
     }
-
-    // Cari akun terkait karyawan
-    const account = (userAccounts || []).find(
+    // Ambil data akun paling mutakhir langsung dari store terbaru
+    const freshAccounts = useOrgStore.getState().userAccounts || [];
+    const account = freshAccounts.find(
       (u) => u.employeeId === selectedEmployeeId,
     );
-
     // Cocokkan PIN (Default fallback 123456 jika belum disetel)
     const validPin = account?.pin || "123456";
     const empName = selectedEmployee?.fullName || "Karyawan";
     const empRole = account?.role || "STAFF";
+    const allowedOutlets = Array.isArray(account?.allowedOutletIds)
+      ? account.allowedOutletIds
+      : [];
 
     if (
       pin === validPin ||
       (account?.passwordHash && pin === account.passwordHash)
     ) {
-      // Simpan Sesi Aktor Aktif
+      // Simpan Sesi Aktor Aktif lengkap dengan Role dan Daftar Cabang Izin
       const activeUserData = {
         id: account?.id || `USR_${selectedEmployeeId}`,
         employeeId: selectedEmployeeId,
         username: account?.username || empName,
         fullName: empName,
         role: empRole,
+        allowedOutletIds: allowedOutlets,
       };
       localStorage.setItem("__unv_activeUser", JSON.stringify(activeUserData));
+      // Sinkronkan filter cabang untuk UniversalLedger
+      localStorage.setItem(
+        "__unv_user_allowed_outlets",
+        JSON.stringify(allowedOutlets),
+      );
+      // Segarkan cache memori RAM
+      RuntimeSession.refresh();
 
       // Perbarui Daftar 10 Karyawan Terakhir (Deduplikasi & Paling Baru di Depan)
       const newRecent: RecentUser = {
@@ -149,19 +160,15 @@ export const LoginPage: React.FC<{ onLoginSuccess?: () => void }> = ({
         initials: getInitials(empName),
         lastLogin: Date.now(),
       };
-
       const updatedRecent = [
         newRecent,
         ...recentUsers.filter((u) => u.employeeId !== selectedEmployeeId),
       ].slice(0, 10);
-
       localStorage.setItem(
         "__unv_recent_logins",
         JSON.stringify(updatedRecent),
       );
-
       sysToast.success("Login Berhasil", `Selamat bertugas, ${empName}!`);
-
       if (onLoginSuccess) {
         onLoginSuccess();
       } else {

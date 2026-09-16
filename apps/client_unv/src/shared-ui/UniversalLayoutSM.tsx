@@ -25,6 +25,7 @@ import {
   Key,
   Download,
   Store,
+  Building2,
   LayoutDashboard,
   Menu,
   Database,
@@ -726,9 +727,10 @@ export function UniversalLayoutSM({
   const navigate = useNavigate();
   const location = useLocation();
 
-  const { outlets, userAccounts } = useOrgStore();
+  const { outlets, userAccounts, regions } = useOrgStore();
   const [isOutletModalOpen, setIsOutletModalOpen] = useState(false);
   const activeOutletId = localStorage.getItem("__unv_outletId") || "";
+  const localRegionId = localStorage.getItem("__unv_regionId") || "";
 
   const currentOutletName = useMemo(() => {
     if (!activeOutletId) return "Holding Pusat";
@@ -757,37 +759,96 @@ export function UniversalLayoutSM({
     );
   }, [userAccounts, activeUser]);
 
-  const accessibleOutlets = useMemo(() => {
+  // Daftar ruang kerja dinamis (Region Dashboard + Cabang/Outlet yang diizinkan)
+  const availableWorkspaces = useMemo(() => {
+    const workspaces: {
+      id: string;
+      name: string;
+      type: "REGION" | "OUTLET";
+    }[] = [];
     const localCompId = localStorage.getItem("__unv_companyId");
+
+    // 1. Jika user memiliki ikatan Region, masukkan opsi kembali ke Dashboard Region
+    if (localRegionId) {
+      const userRegion = regions.find((r) => r.id === localRegionId);
+      if (userRegion) {
+        workspaces.push({
+          id: userRegion.id,
+          name: `🏢 DASHBOARD ${userRegion.name}`,
+          type: "REGION",
+        });
+      }
+    }
+
+    // 2. Filter outlet aktif di perusahaan yang sama
     const companyOutlets = outlets.filter(
       (o) =>
         o.status === "Aktif" && (!localCompId || o.companyId === localCompId),
     );
 
+    // 3. Batasi outlet sesuai hak akses user (RBAC)
+    let permittedOutlets: typeof companyOutlets = [];
     if (
       activeUser?.role === "SUPER_ADMIN" ||
       currentAccount?.role === "SUPER_ADMIN"
     ) {
-      return companyOutlets;
-    }
-
-    if (
+      permittedOutlets = companyOutlets;
+    } else if (
       Array.isArray(currentAccount?.allowedOutletIds) &&
       currentAccount.allowedOutletIds.length > 0
     ) {
-      return companyOutlets.filter((o) =>
+      permittedOutlets = companyOutlets.filter((o) =>
         currentAccount.allowedOutletIds.includes(o.id),
+      );
+    } else {
+      const single = companyOutlets.filter((o) => o.id === activeOutletId);
+      permittedOutlets =
+        single.length > 0 ? single : companyOutlets.slice(0, 1);
+    }
+
+    permittedOutlets.forEach((o) => {
+      workspaces.push({
+        id: o.id,
+        name: `🏪 ${o.name}`,
+        type: "OUTLET",
+      });
+    });
+
+    return workspaces;
+  }, [
+    regions,
+    outlets,
+    activeUser,
+    currentAccount,
+    activeOutletId,
+    localRegionId,
+  ]);
+
+  // Handler Pindah Ruang Kerja (Region atau Outlet) — sama dengan desktop
+  const handleSwitchWorkspace = (workspace: {
+    id: string;
+    name: string;
+    type: "REGION" | "OUTLET";
+  }) => {
+    // Guard: kalau pilih REGION tapi sekarang sudah di region → abaikan
+    if (workspace.type === "REGION" && !activeOutletId) return;
+    // Guard: kalau pilih OUTLET yang sama → abaikan
+    if (workspace.type === "OUTLET" && activeOutletId === workspace.id) return;
+
+    if (workspace.type === "REGION") {
+      localStorage.removeItem("__unv_outletId");
+      localStorage.setItem("__unv_deviceScope", "REGION");
+      sysToast.success("Pindah Ruang Kerja", `Kembali ke ${workspace.name}`);
+    } else {
+      localStorage.setItem("__unv_outletId", workspace.id);
+      localStorage.setItem("__unv_deviceScope", "OUTLET");
+      sysToast.success(
+        "Pindah Cabang",
+        `Ruang kerja beralih ke ${workspace.name}.`,
       );
     }
 
-    const single = companyOutlets.filter((o) => o.id === activeOutletId);
-    return single.length > 0 ? single : companyOutlets.slice(0, 1);
-  }, [outlets, activeUser, currentAccount, activeOutletId]);
-
-  const handleSwitchOutlet = (newId: string, newName: string) => {
-    localStorage.setItem("__unv_outletId", newId);
     setIsOutletModalOpen(false);
-    sysToast.success("Pindah Cabang", `Beralih ke ${newName}.`);
     setTimeout(() => {
       window.location.reload();
     }, 250);
@@ -915,14 +976,16 @@ export function UniversalLayoutSM({
               <span className="font-['Syne',sans-serif] font-extrabold text-lg bg-linear-to-r from-orange-400 via-orange-500 to-yellow-400 bg-clip-text text-transparent whitespace-nowrap">
                 AlmaAPP
               </span>
-              {accessibleOutlets.length > 1 ? (
+              {availableWorkspaces.length > 1 ? (
                 <button
                   type="button"
                   onClick={() => setIsOutletModalOpen(true)}
-                  className="px-2 py-0.5 rounded-lg bg-orange-500/10 border border-orange-500/30 text-orange-400 text-[10px] font-black uppercase flex items-center gap-1 truncate max-w-28"
-                  title="Pindah Ruang Kerja Cabang"
+                  className="px-2 py-0.5 rounded-lg bg-orange-500/10 border border-orange-500/30 text-orange-400 text-[10px] font-black uppercase flex items-center gap-1 truncate max-w-32"
+                  title="Pindah Ruang Kerja (Region / Cabang)"
                 >
-                  <span className="truncate">{currentOutletName}</span>
+                  <span className="truncate">
+                    {activeOutletId ? currentOutletName : `🏢 Dashboard Region`}
+                  </span>
                   <ChevronDown className="w-3 h-3 shrink-0" />
                 </button>
               ) : (
@@ -1127,13 +1190,13 @@ export function UniversalLayoutSM({
           onClose={() => setIsActivityOpen(false)}
         />
       </div>
-      {/* MODAL PEMILIH CABANG KHUSUS SMARTPHONE */}
+      {/* MODAL PEMILIH RUANG KERJA KHUSUS SMARTPHONE (REGION + OUTLET) */}
       {isOutletModalOpen && (
         <div className="fixed inset-0 z-100 flex items-end sm:items-center justify-center p-3 bg-black/70 backdrop-blur-sm">
           <div className="bg-(--bg-card) border border-(--border-color) rounded-2xl w-full max-w-sm p-4 space-y-3 animate-in slide-in-from-bottom">
             <div className="flex justify-between items-center border-b border-(--border-color) pb-2">
               <span className="font-black text-xs uppercase text-orange-500 flex items-center gap-1.5">
-                <Store className="w-4 h-4" /> Pilih Ruang Kerja Cabang
+                <Store className="w-4 h-4" /> Pilih Ruang Kerja
               </span>
               <button
                 onClick={() => setIsOutletModalOpen(false)}
@@ -1144,23 +1207,37 @@ export function UniversalLayoutSM({
             </div>
 
             <div className="space-y-1.5 max-h-60 overflow-y-auto custom-scrollbar">
-              {accessibleOutlets.map((o) => (
-                <button
-                  key={o.id}
-                  type="button"
-                  onClick={() => handleSwitchOutlet(o.id, o.name)}
-                  className={`w-full text-left p-2.5 rounded-xl border text-xs font-bold flex items-center justify-between transition ${
-                    o.id === activeOutletId
-                      ? "bg-orange-500/10 border-orange-500 text-orange-400"
-                      : "bg-(--bg-input) border-(--border-color) text-(--text-primary)"
-                  }`}
-                >
-                  <span>{o.name}</span>
-                  {o.id === activeOutletId && (
-                    <span className="w-2 h-2 rounded-full bg-orange-500" />
-                  )}
-                </button>
-              ))}
+              {availableWorkspaces.map((workspace) => {
+                const isSelected =
+                  (workspace.type === "OUTLET" &&
+                    workspace.id === activeOutletId) ||
+                  (workspace.type === "REGION" && !activeOutletId);
+
+                return (
+                  <button
+                    key={`${workspace.type}-${workspace.id}`}
+                    type="button"
+                    onClick={() => handleSwitchWorkspace(workspace)}
+                    className={`w-full text-left p-2.5 rounded-xl border text-xs font-bold flex items-center justify-between transition ${
+                      isSelected
+                        ? "bg-orange-500/10 border-orange-500 text-orange-400"
+                        : "bg-(--bg-input) border-(--border-color) text-(--text-primary)"
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 truncate">
+                      {workspace.type === "REGION" ? (
+                        <Building2 className="w-3.5 h-3.5 shrink-0" />
+                      ) : (
+                        <Store className="w-3.5 h-3.5 shrink-0" />
+                      )}
+                      <span className="truncate">{workspace.name}</span>
+                    </span>
+                    {isSelected && (
+                      <span className="w-2 h-2 rounded-full bg-orange-500 shrink-0 ml-2" />
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>

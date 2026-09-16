@@ -2,6 +2,7 @@
 import { globalLedger } from "../ledger/UniversalLedger";
 import { globalRegistry } from "./UniversalRegistry";
 import { SnapshotEngine } from "../ledger/SnapshotEngine";
+import { RuntimeSession } from "../config/session";
 
 // Microtask Debouncer: Menggabungkan puluhan event sinkronisasi menjadi 1 sinyal UI render
 let isNotifyScheduled = false;
@@ -71,7 +72,6 @@ export class EventBus {
     }
 
     // 2. HANYA PUTAR EVENT YANG TERJADI SETELAH SNAPSHOT (DELTA EVENT)
-    // Jika startSeq = 0 (belum ada snapshot), sistem memutar dari seq 1
     const querySelector = startSeq > 0 ? { seq: { $gt: startSeq } } : {};
 
     const deltaEvents = await rxdb.collections.events
@@ -101,8 +101,8 @@ export class EventBus {
    * =========================================================================
    * PILAR 1 & 2: PEMBERSIHAN PINTAR & PENYELARASAN 100% IDENTIK DENGAN SERVER
    * =========================================================================
-   * Aman: Menjaga token perangkat, kredensial login, dan lisensi.
-   * Hanya membuang event lokal usang/korup lalu menarik data sah dari server.
+   * Aman: Menjaga identitas perangkat, token lisensi, dan konfigurasi mesin.
+   * Hanya membuang event lokal usang lalu menarik data sah dari server.
    */
   public static async executeSafeLocalResync(): Promise<void> {
     console.log(
@@ -111,7 +111,7 @@ export class EventBus {
     const rxdb = globalLedger.getRxDatabase();
     if (!rxdb) return;
     try {
-      // 1. Bersihkan antrean Inbox lama agar tidak ada event pending yang tabrakan
+      // 1. Bersihkan antrean Inbox lama
       if (rxdb.collections.inbox) {
         const allInbox = await rxdb.collections.inbox.find().exec();
         for (const doc of allInbox) {
@@ -135,7 +135,7 @@ export class EventBus {
         }
       }
 
-      // 4. KUNCI ANTI-KORUP: Reset memori internal sequence & hash di RAM
+      // 4. KUNCI ANTI-KORUP: Reset memori sequence & hash chain di RAM
       globalLedger.resetMemoryChain();
 
       // 5. Kosongkan state tampilan UI
@@ -144,16 +144,71 @@ export class EventBus {
       // 6. Tarik data segar dari Server (Master Data & Transaksi)
       await globalLedger.syncInitial();
 
-      // 7. Putar ulang proyeksi dari sequence 1 yang sah dan urut
+      // 7. Putar ulang proyeksi dari sequence 1 yang sah
       await this.rebuildState();
 
       console.log(
         "[RESYNC ENGINE] Penyelarasan sukses 100%. Database lokal identik dengan server!",
       );
       notifyStateUpdated();
+
+      // =====================================================================
+      // 8. PEMBERSIHAN SESI USER & LEMPAR KE HALAMAN LOGIN
+      // =====================================================================
+      this.clearUserSession();
     } catch (error) {
       console.error("[RESYNC ENGINE] Gagal melakukan safe resync:", error);
       throw error;
+    }
+  }
+
+  /**
+   * =========================================================================
+   * PEMBERSIHAN SESI USER TERARAH (TARGETED & NON-DESTRUCTIVE)
+   * =========================================================================
+   * Menghapus sesi user aktif agar aplikasi kembali ke halaman login.
+   * Tetap MELINDUNGI:
+   *  - __unv_deviceToken      (Identitas mesin di server)
+   *  - __unv_nodeId           (ID node perangkat)
+   *  - __unv_secretKey        (Kunci privat kriptografi Ed25519)
+   *  - __unv_license_tier     (Paket lisensi)
+   *  - __unv_license_token    (Kunci lisensi sah Ed25519)
+   *  - __unv_allowed_modules  (Daftar modul yang diaktifkan)
+   *  - __unv_companyId/regionId/outletId (Hierarki spasial mesin)
+   */
+  private static clearUserSession(): void {
+    if (typeof window === "undefined") return;
+
+    try {
+      // 1. Hapus kredensial sesi user spesifik ALMA
+      localStorage.removeItem("__unv_activeUser");
+      localStorage.removeItem("__unv_user_allowed_outlets");
+
+      // 2. Bersihkan token generik (jika ada) dari localStorage & sessionStorage
+      const GENERIC_SESSION_KEYS = [
+        "token",
+        "authToken",
+        "accessToken",
+        "refreshToken",
+        "user",
+        "userSession",
+      ];
+      GENERIC_SESSION_KEYS.forEach((k) => {
+        localStorage.removeItem(k);
+        sessionStorage.removeItem(k);
+      });
+
+      // 3. Segarkan cache RAM sesi
+      RuntimeSession.refresh();
+
+      console.log(
+        "[RESYNC ENGINE] Sesi user dibersihkan. Identitas mesin & lisensi tetap aman.",
+      );
+
+      // 4. Paksa reload browser ke halaman login agar React me-remount WorkspaceWrapper
+      window.location.reload();
+    } catch (e) {
+      console.warn("[RESYNC] Gagal membersihkan sesi user:", e);
     }
   }
 
@@ -170,12 +225,14 @@ if (typeof window !== "undefined") {
       console.log(
         `[OTA SINKRON] Menerima instruksi reset masal seketika (Epoch: ${serverEpoch || "N/A"})...`,
       );
-      await EventBus.executeSafeLocalResync();
 
-      // Simpan stempel epoch baru ke saku perangkat
+      // Simpan stempel epoch TERLEBIH DAHULU sebelum resync & reload
+      // agar saat reload tidak terjadi resync ganda
       if (serverEpoch) {
         localStorage.setItem("__unv_sync_epoch", String(serverEpoch));
       }
+
+      await EventBus.executeSafeLocalResync();
     } catch (err) {
       console.error("[OTA SINKRON ERROR]:", err);
     }

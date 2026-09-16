@@ -989,41 +989,91 @@ export function UniversalLayout({
   }, [userAccounts, activeUser]);
 
   // Daftar cabang yang boleh diakses oleh user ini
-  const accessibleOutlets = React.useMemo(() => {
+  // Ambil data regional dari store organisasi
+  const { regions } = useOrgStore();
+  const localRegionId = localStorage.getItem("__unv_regionId") || "";
+
+  // Daftar ruang kerja dinamis (Region Dashboard + Cabang/Outlet yang diizinkan)
+  const availableWorkspaces = React.useMemo(() => {
+    const workspaces = [];
     const localCompId = localStorage.getItem("__unv_companyId");
+
+    // 1. Jika user memiliki ikatan Region, masukkan opsi kembali ke Dashboard Region
+    if (localRegionId) {
+      const userRegion = regions.find((r) => r.id === localRegionId);
+      if (userRegion) {
+        workspaces.push({
+          id: userRegion.id,
+          name: `🏢 DASHBOARD ${userRegion.name}`,
+          type: "REGION",
+        });
+      }
+    }
+
     const companyOutlets = outlets.filter(
       (o) =>
         o.status === "Aktif" && (!localCompId || o.companyId === localCompId),
     );
 
-    // A. Super Admin berhak atas seluruh cabang
+    let permittedOutlets = [];
     if (
       activeUser?.role === "SUPER_ADMIN" ||
       currentAccount?.role === "SUPER_ADMIN"
     ) {
-      return companyOutlets;
-    }
-
-    // B. User dengan checklist cabang khusus (allowedOutletIds)
-    if (
+      permittedOutlets = companyOutlets;
+    } else if (
       Array.isArray(currentAccount?.allowedOutletIds) &&
       currentAccount.allowedOutletIds.length > 0
     ) {
-      return companyOutlets.filter((o) =>
+      permittedOutlets = companyOutlets.filter((o) =>
         currentAccount.allowedOutletIds.includes(o.id),
+      );
+    } else {
+      const single = companyOutlets.filter((o) => o.id === activeOutletId);
+      permittedOutlets =
+        single.length > 0 ? single : companyOutlets.slice(0, 1);
+    }
+
+    permittedOutlets.forEach((o) => {
+      workspaces.push({
+        id: o.id,
+        name: `🏪 ${o.name}`,
+        type: "OUTLET",
+      });
+    });
+
+    return workspaces;
+  }, [
+    regions,
+    outlets,
+    activeUser,
+    currentAccount,
+    activeOutletId,
+    localRegionId,
+  ]);
+  // Handler Pindah Ruang Kerja (Region atau Outlet)
+  const handleSwitchWorkspace = (workspace: {
+    id: string;
+    name: string;
+    type: string;
+  }) => {
+    if (workspace.type === "REGION" && !activeOutletId) return;
+    if (workspace.type === "OUTLET" && activeOutletId === workspace.id) return;
+
+    if (workspace.type === "REGION") {
+      localStorage.removeItem("__unv_outletId");
+      localStorage.setItem("__unv_deviceScope", "REGION");
+      sysToast.success("Pindah Ruang Kerja", `Kembali ke ${workspace.name}`);
+    } else {
+      localStorage.setItem("__unv_outletId", workspace.id);
+      localStorage.setItem("__unv_deviceScope", "OUTLET");
+      sysToast.success(
+        "Pindah Cabang",
+        `Ruang kerja beralih ke ${workspace.name}.`,
       );
     }
 
-    // C. User biasa (hanya 1 cabang)
-    const single = companyOutlets.filter((o) => o.id === activeOutletId);
-    return single.length > 0 ? single : companyOutlets.slice(0, 1);
-  }, [outlets, activeUser, currentAccount, activeOutletId]);
-
-  // Handler Pindah Cabang Instan
-  const handleSwitchOutlet = (newId: string, newName: string) => {
-    localStorage.setItem("__unv_outletId", newId);
     setIsOutletSwitcherOpen(false);
-    sysToast.success("Pindah Cabang", `Ruang kerja beralih ke ${newName}.`);
     setTimeout(() => {
       window.location.reload();
     }, 250);
@@ -1316,18 +1366,18 @@ export function UniversalLayout({
             </span>
           </div>
 
-          {/* PEMILIH CABANG OTOMATIS: Dropdown muncul HANYA jika akun memiliki wewenang > 1 cabang */}
-          {accessibleOutlets.length > 1 ? (
+          {/* PEMILIH RUANG KERJA OTOMATIS: Muncul jika ada opsi lebih dari 1 (Region + Outlet) */}
+          {availableWorkspaces.length > 1 ? (
             <div className="relative" ref={outletSwitcherRef}>
               <button
                 type="button"
                 onClick={() => setIsOutletSwitcherOpen(!isOutletSwitcherOpen)}
                 className={`hidden md:flex items-center gap-2 ml-4 px-3 py-1.5 rounded-xl ${glassInputStyle} border-orange-500/40 hover:border-orange-500 transition cursor-pointer shrink-0`}
-                title="Klik untuk berpindah ruang kerja cabang"
+                title="Klik untuk berpindah ruang kerja"
               >
                 <Store className="w-4 h-4 text-orange-500 shrink-0" />
                 <span className="text-xs font-black text-(--text-primary) uppercase tracking-wide">
-                  {currentOutletName}
+                  {activeOutletId ? currentOutletName : `🏢 Dashboard Region`}
                 </span>
                 <ChevronDown
                   className={`w-3.5 h-3.5 text-orange-500 transition-transform duration-200 ${
@@ -1337,37 +1387,43 @@ export function UniversalLayout({
               </button>
 
               {isOutletSwitcherOpen && (
-                <div className="absolute left-4 top-full mt-1.5 w-60 bg-(--bg-card) border border-(--border-color) rounded-xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
+                <div className="absolute left-4 top-full mt-1.5 w-64 bg-(--bg-card) border border-(--border-color) rounded-xl shadow-2xl py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150">
                   <div className="px-3 py-1 text-[9px] font-black uppercase text-(--text-secondary) border-b border-(--border-color) mb-1">
-                    PILIH RUANG KERJA CABANG:
+                    PILIH RUANG KERJA:
                   </div>
                   <div className="max-h-56 overflow-y-auto custom-scrollbar">
-                    {accessibleOutlets.map((o) => (
-                      <button
-                        key={o.id}
-                        type="button"
-                        onClick={() => handleSwitchOutlet(o.id, o.name)}
-                        className={`w-full text-left px-3 py-2 text-xs font-bold transition flex items-center justify-between cursor-pointer ${
-                          o.id === activeOutletId
-                            ? "bg-orange-500/10 text-orange-500 font-black"
-                            : "text-(--text-primary) hover:bg-(--surface-hover)"
-                        }`}
-                      >
-                        <span className="truncate">{o.name}</span>
-                        {o.id === activeOutletId && (
-                          <span className="w-2 h-2 rounded-full bg-orange-500 shrink-0 ml-2" />
-                        )}
-                      </button>
-                    ))}
+                    {availableWorkspaces.map((workspace) => {
+                      const isSelected =
+                        (workspace.type === "OUTLET" &&
+                          workspace.id === activeOutletId) ||
+                        (workspace.type === "REGION" && !activeOutletId);
+
+                      return (
+                        <button
+                          key={workspace.id}
+                          type="button"
+                          onClick={() => handleSwitchWorkspace(workspace)}
+                          className={`w-full text-left px-3 py-2 text-xs font-bold transition flex items-center justify-between cursor-pointer ${
+                            isSelected
+                              ? "bg-orange-500/10 text-orange-500 font-black"
+                              : "text-(--text-primary) hover:bg-(--surface-hover)"
+                          }`}
+                        >
+                          <span className="truncate">{workspace.name}</span>
+                          {isSelected && (
+                            <span className="w-2 h-2 rounded-full bg-orange-500 shrink-0 ml-2" />
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               )}
             </div>
           ) : (
-            /* JIKA HANYA 1 CABANG: TAMPILKAN SEBAGAI LABEL STATIS BIASA TANPA TOMBOL */
             <div
               className={`hidden md:flex items-center gap-2 ml-4 px-3 py-1.5 rounded-xl ${glassInputStyle} border-orange-500/20 shrink-0`}
-              title="Lokasi Operasional Cabang"
+              title="Lokasi Operasional"
             >
               <Store className="w-4 h-4 text-orange-500 shrink-0" />
               <span className="text-xs font-black text-(--text-primary) uppercase tracking-wide">

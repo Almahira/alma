@@ -48,6 +48,8 @@ import { LandingPage } from "./system-ui/LandingPage";
 import { SetupWizard } from "./system-ui/SetupWizard";
 import { LoginPage } from "./system-ui/LoginPage";
 import SystemMaintenanceDashboard from "./system-ui/maintenance/SystemMaintenanceDashboard";
+import { useOrgStore } from "../../../modules/mdl_organization/src/client/store";
+import { RuntimeSession } from "../../../packages/core_unv/src/config/session";
 
 function getAllowedModules(): string[] {
   try {
@@ -100,12 +102,68 @@ function WorkspaceWrapper() {
     typeof window !== "undefined" ? window.innerWidth < 640 : false,
   );
 
+  // Auto-Sync Hak Akses & Status User secara Real-Time saat Super Admin mengubah data
   useEffect(() => {
-    const handleResize = () => {
-      setIsMobile(window.innerWidth < 640);
+    const handleStateUpdated = () => {
+      try {
+        const rawUser = localStorage.getItem("__unv_activeUser");
+        if (!rawUser) return;
+        const currentUser = JSON.parse(rawUser);
+        const freshAccounts = useOrgStore.getState().userAccounts || [];
+        const matchedAccount = freshAccounts.find(
+          (u) =>
+            u.id === currentUser.id ||
+            u.employeeId === currentUser.employeeId ||
+            u.username === currentUser.username,
+        );
+
+        if (matchedAccount) {
+          // Jika akun diarsipkan/dinonaktifkan oleh Super Admin, langsung logout otomatis
+          if (
+            matchedAccount.status === "Arsip" ||
+            matchedAccount.isActive === false
+          ) {
+            localStorage.removeItem("__unv_activeUser");
+            localStorage.removeItem("__unv_user_allowed_outlets");
+            RuntimeSession.refresh();
+            window.location.reload();
+            return;
+          }
+
+          // Deteksi perubahan Role atau Izin Cabang
+          const isRoleChanged = matchedAccount.role !== currentUser.role;
+          const isOutletsChanged =
+            JSON.stringify(matchedAccount.allowedOutletIds || []) !==
+            JSON.stringify(currentUser.allowedOutletIds || []);
+
+          if (isRoleChanged || isOutletsChanged) {
+            const updatedUserData = {
+              ...currentUser,
+              role: matchedAccount.role,
+              allowedOutletIds: matchedAccount.allowedOutletIds || [],
+            };
+            localStorage.setItem(
+              "__unv_activeUser",
+              JSON.stringify(updatedUserData),
+            );
+            localStorage.setItem(
+              "__unv_user_allowed_outlets",
+              JSON.stringify(matchedAccount.allowedOutletIds || []),
+            );
+            RuntimeSession.refresh();
+            console.log(
+              "[SECURITY] Hak akses user berhasil diperbarui secara otomatis tanpa reload.",
+            );
+          }
+        }
+      } catch (err) {
+        console.error("Gagal sinkronisasi sesi user:", err);
+      }
     };
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
+
+    window.addEventListener("UNV_STATE_UPDATED", handleStateUpdated);
+    return () =>
+      window.removeEventListener("UNV_STATE_UPDATED", handleStateUpdated);
   }, []);
 
   // 1. Jika mesin belum terdaftar, arahkan ke Setup Wizard

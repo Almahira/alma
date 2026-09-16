@@ -15,6 +15,7 @@ import {
 import { UniversalCombobox } from "../shared-ui/UniversalCombobox";
 import { useOrgStore } from "../../../../modules/mdl_organization/src/client/store";
 import { sysToast } from "../shared-ui/useToastStore";
+import { RuntimeSession } from "../../../../packages/core_unv/src/config/session";
 
 interface RecentUser {
   employeeId: string;
@@ -60,7 +61,9 @@ export const LoginPageSM: React.FC<{ onLoginSuccess?: () => void }> = ({
   // 3. Opsi Dropdown Karyawan
   const employeeOptions = useMemo(() => {
     return (employees || [])
-      .filter((emp) => emp.systemStatus !== "ARCHIVED" && emp.status !== "Arsip")
+      .filter(
+        (emp) => emp.systemStatus !== "ARCHIVED" && emp.status !== "Arsip",
+      )
       .map((emp) => {
         const user = (userAccounts || []).find((u) => u.employeeId === emp.id);
         const roleLabel = user?.role || emp.employmentStatus || "STAFF";
@@ -97,6 +100,7 @@ export const LoginPageSM: React.FC<{ onLoginSuccess?: () => void }> = ({
   };
 
   // 4. Eksekusi Autentikasi PIN
+  // 4. Eksekusi Autentikasi PIN
   const handleLogin = () => {
     if (!selectedEmployeeId) {
       sysToast.warn("Perhatian", "Pilih nama karyawan terlebih dahulu.");
@@ -106,14 +110,17 @@ export const LoginPageSM: React.FC<{ onLoginSuccess?: () => void }> = ({
       sysToast.warn("Perhatian", "Masukkan PIN akses Anda.");
       return;
     }
-
-    const account = (userAccounts || []).find(
+    // Ambil data akun paling mutakhir langsung dari store terbaru
+    const freshAccounts = useOrgStore.getState().userAccounts || [];
+    const account = freshAccounts.find(
       (u) => u.employeeId === selectedEmployeeId,
     );
-
     const validPin = account?.pin || "123456";
     const empName = selectedEmployee?.fullName || "Karyawan";
     const empRole = account?.role || "STAFF";
+    const allowedOutlets = Array.isArray(account?.allowedOutletIds)
+      ? account.allowedOutletIds
+      : [];
 
     if (
       pin === validPin ||
@@ -125,9 +132,14 @@ export const LoginPageSM: React.FC<{ onLoginSuccess?: () => void }> = ({
         username: account?.username || empName,
         fullName: empName,
         role: empRole,
+        allowedOutletIds: allowedOutlets,
       };
-
       localStorage.setItem("__unv_activeUser", JSON.stringify(activeUserData));
+      localStorage.setItem(
+        "__unv_user_allowed_outlets",
+        JSON.stringify(allowedOutlets),
+      );
+      RuntimeSession.refresh();
 
       const newRecent: RecentUser = {
         employeeId: selectedEmployeeId,
@@ -136,14 +148,14 @@ export const LoginPageSM: React.FC<{ onLoginSuccess?: () => void }> = ({
         initials: getInitials(empName),
         lastLogin: Date.now(),
       };
-
       const updatedRecent = [
         newRecent,
         ...recentUsers.filter((u) => u.employeeId !== selectedEmployeeId),
       ].slice(0, 10);
-
-      localStorage.setItem("__unv_recent_logins", JSON.stringify(updatedRecent));
-
+      localStorage.setItem(
+        "__unv_recent_logins",
+        JSON.stringify(updatedRecent),
+      );
       sysToast.success("Login Berhasil", `Selamat bertugas, ${empName}!`);
       if (onLoginSuccess) {
         onLoginSuccess();
@@ -204,7 +216,9 @@ export const LoginPageSM: React.FC<{ onLoginSuccess?: () => void }> = ({
                   >
                     <div
                       className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-[9px] ${
-                        isSelected ? "bg-orange-500 text-white" : "bg-slate-800 text-slate-300"
+                        isSelected
+                          ? "bg-orange-500 text-white"
+                          : "bg-slate-800 text-slate-300"
                       }`}
                     >
                       {user.initials}
