@@ -1065,6 +1065,15 @@ export function ItemPage() {
   const [sortBy, setSortBy] = useState<SortKey>("NAME_ASC");
   const [page, setPage] = useState(1);
   const deferredSearch = useDeferredValue(searchQuery);
+  // === STATE FILTER PEMBUAT (REGION & OUTLET) ===
+  const [selectedRegionId, setSelectedRegionId] = useState<string>("");
+  const [selectedOutletId, setSelectedOutletId] = useState<string>("");
+
+  // Daftar outlet dinamis sesuai region yang dipilih
+  const availableOutlets = useMemo(() => {
+    if (!selectedRegionId || selectedRegionId === "HOLDING") return outlets;
+    return outlets.filter((o: any) => o.regionId === selectedRegionId);
+  }, [outlets, selectedRegionId]);
 
   // === [STATE BATCH VALIDASI] ===
   const [selectedValidateIds, setSelectedValidateIds] = useState<string[]>([]);
@@ -1208,6 +1217,24 @@ export function ItemPage() {
         return false;
       }
 
+      // Filter kepemilikan / pembuat:
+      if (selectedRegionId === "HOLDING") {
+        // Hanya item level Pusat/Holding (tanpa regionId dan tanpa outletId)
+        if (p.regionId || p.outletId) return false;
+      } else if (selectedRegionId) {
+        if (selectedOutletId) {
+          // Jika outlet terisi, tampilkan spesifik milik outlet tersebut
+          if (p.outletId !== selectedOutletId) return false;
+        } else {
+          // Sesuai aturan: Region terisi & outlet kosong/null -> HANYA milik region sendiri
+          if (p.regionId !== selectedRegionId || Boolean(p.outletId))
+            return false;
+        }
+      } else if (selectedOutletId) {
+        // Jika region kosong namun outlet dipilih
+        if (p.outletId !== selectedOutletId) return false;
+      }
+
       if (p.approvalStatus === "APPROVED") {
         if (p.regionId && localRegionId && p.regionId !== localRegionId)
           return false;
@@ -1264,6 +1291,8 @@ export function ItemPage() {
     viewStatus,
     deferredSearch,
     sortBy,
+    selectedRegionId,
+    selectedOutletId,
     categoryMap,
     uomMap,
     getPriceDisplay,
@@ -1335,7 +1364,14 @@ export function ItemPage() {
   // Reset halaman ke 1 setiap filter / sort / tab berubah
   useEffect(() => {
     setPage(1);
-  }, [deferredSearch, sortBy, activeTab, viewStatus]);
+  }, [
+    deferredSearch,
+    sortBy,
+    activeTab,
+    viewStatus,
+    selectedRegionId,
+    selectedOutletId,
+  ]);
 
   // PAGINATION
   const activeList =
@@ -1568,7 +1604,7 @@ export function ItemPage() {
             ? [
                 {
                   id: `UOMC_${ulid()}`,
-                  value: convUom,
+                  value: convValue,
                   uom: convUom,
                   label: `${convValue} ${convUom}`,
                   isDefault: true,
@@ -1887,6 +1923,45 @@ export function ItemPage() {
             </select>
           </div>
 
+          {/* Dropdown Filter Pembuat: Region */}
+          <div className="flex items-center gap-1.5">
+            <select
+              value={selectedRegionId}
+              onChange={(e) => {
+                setSelectedRegionId(e.target.value);
+                setSelectedOutletId(""); // Reset outlet saat ganti region
+              }}
+              className="text-xs font-bold py-2 px-3 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none focus:border-orange-500 cursor-pointer"
+            >
+              <option value="">SEMUA REGION</option>
+              <option value="HOLDING">PUSAT (HOLDING)</option>
+              {regions.map((r: any) => (
+                <option key={r.id} value={r.id}>
+                  REGIONAL: {r.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Dropdown Filter Pembuat: Outlet */}
+          <div className="flex items-center gap-1.5">
+            <select
+              value={selectedOutletId}
+              onChange={(e) => setSelectedOutletId(e.target.value)}
+              disabled={selectedRegionId === "HOLDING"}
+              className="text-xs font-bold py-2 px-3 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none focus:border-orange-500 cursor-pointer disabled:opacity-40"
+            >
+              <option value="">
+                {selectedRegionId ? "-- HANYA MILIK REGION --" : "SEMUA OUTLET"}
+              </option>
+              {availableOutlets.map((o: any) => (
+                <option key={o.id} value={o.id}>
+                  OUTLET: {o.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div className="text-[10px] font-bold text-(--text-secondary) ml-auto">
             {activeList.length} data ditemukan
           </div>
@@ -1953,6 +2028,23 @@ export function ItemPage() {
                           <td className="px-4 py-3">
                             <div className="font-bold text-(--text-primary) flex items-center gap-2">
                               {p.name}
+                              {/* Badge Kepemilikan Item */}
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[9px] font-black tracking-tight ${
+                                  p.outletId
+                                    ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"
+                                    : p.regionId
+                                      ? "bg-blue-500/10 text-blue-500 border border-blue-500/20"
+                                      : "bg-orange-500/10 text-orange-500 border border-orange-500/20"
+                                }`}
+                              >
+                                {p.outletId
+                                  ? outletMap.get(p.outletId)?.name || "OUTLET"
+                                  : p.regionId
+                                    ? regionMap.get(p.regionId)?.name ||
+                                      "REGION"
+                                    : "PUSAT"}
+                              </span>
                               {Array.isArray(p.uomConversions) &&
                                 p.uomConversions.length > 0 && (
                                   <div className="flex gap-1 mt-1 flex-wrap">

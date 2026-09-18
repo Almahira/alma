@@ -1017,6 +1017,14 @@ export function ItemPageSM() {
   const [page, setPage] = useState(1);
   const deferredSearch = useDeferredValue(searchQuery);
 
+  const [selectedRegionId, setSelectedRegionId] = useState<string>("");
+  const [selectedOutletId, setSelectedOutletId] = useState<string>("");
+
+  const availableOutlets = useMemo(() => {
+    if (!selectedRegionId || selectedRegionId === "HOLDING") return outlets;
+    return outlets.filter((o: any) => o.regionId === selectedRegionId);
+  }, [outlets, selectedRegionId]);
+
   // === [STATE BATCH VALIDASI] ===
   const [selectedValidateIds, setSelectedValidateIds] = useState<string[]>([]);
   const [isBatchProcessing, setIsBatchProcessing] = useState(false);
@@ -1792,6 +1800,38 @@ export function ItemPageSM() {
         {/* [BARU] TOOLKIT: SEARCH + SORT BY (mobile) */}
         {showToolbar && (
           <div className="px-3 py-2 bg-(--bg-card) border-b border-(--border-color) flex items-center gap-2">
+            <select
+              value={selectedRegionId}
+              onChange={(e) => {
+                setSelectedRegionId(e.target.value);
+                setSelectedOutletId("");
+              }}
+              className="text-[11px] font-black py-2 px-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none focus:border-orange-500 cursor-pointer"
+            >
+              <option value="">SEMUA REGION</option>
+              <option value="HOLDING">PUSAT</option>
+              {regions.map((r: any) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={selectedOutletId}
+              onChange={(e) => setSelectedOutletId(e.target.value)}
+              disabled={selectedRegionId === "HOLDING"}
+              className="text-[11px] font-black py-2 px-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none focus:border-orange-500 cursor-pointer disabled:opacity-40"
+            >
+              <option value="">
+                {selectedRegionId ? "MILIK REGION" : "SEMUA OUTLET"}
+              </option>
+              {availableOutlets.map((o: any) => (
+                <option key={o.id} value={o.id}>
+                  {o.name}
+                </option>
+              ))}
+            </select>
             <div className="relative flex-1 min-w-0">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-(--text-secondary) pointer-events-none" />
               <input
