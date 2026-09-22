@@ -20,8 +20,8 @@ export interface InvoicePrintContext {
 
 /**
  * 1. CETAK INVOICE DARI BARIS AKSI (ICON PRINT)
- * Menghasilkan tampilan Invoice elegan persis template HTML/CSS heksagon merah-hitam.
- * SEKARANG MENDUKUNG MULTI-HALAMAN (AUTO PAGE-BREAK)
+ * Diperbarui: Menggunakan struktur Native Table Header/Footer 
+ * agar desain Heksagonal dan Teks aman di multi-halaman tanpa terpotong.
  */
 export const printSingleInvoicePdf = (context: InvoicePrintContext) => {
   const {
@@ -37,8 +37,6 @@ export const printSingleInvoicePdf = (context: InvoicePrintContext) => {
   } = context;
 
   const isPiutang = doc.documentType === "PIUTANG";
-  
-  // FIX BUG 1: Logika penamaan dokumen diperbaiki
   const invoiceTitle = isPiutang ? "SURAT JALAN" : "INVOICE";
   
   const items = doc.items || [];
@@ -49,7 +47,6 @@ export const printSingleInvoicePdf = (context: InvoicePrintContext) => {
   });
   const totalAmountNum = Math.round(Number(doc.totalAmount || 0));
 
-  // Render baris tabel HTML
   const itemsHtml = items
     .map((it: any) => {
       const price = Math.round(Number(it.price) || 0);
@@ -69,7 +66,7 @@ export const printSingleInvoicePdf = (context: InvoicePrintContext) => {
   const bankAccountText = bankInfo?.bankAccount || "-";
   const bankOwnerText = bankInfo?.bankAccountName || "-";
 
-  // HTML Template - DIRESTRUKTURISASI UNTUK MULTI-HALAMAN
+  // Template HTML Baru menggunakan trik 'table-header-group'
   const fullHtml = `<!doctype html>
 <html lang="id">
   <head>
@@ -83,68 +80,78 @@ export const printSingleInvoicePdf = (context: InvoicePrintContext) => {
         --light-bg: #f8fafc;
         --text-color: #1e293b;
       }
-      * { box-sizing: border-box; }
+      
+      * { 
+        box-sizing: border-box; 
+        /* Paksa print engine untuk merender warna background */
+        -webkit-print-color-adjust: exact !important; 
+        print-color-adjust: exact !important; 
+      }
+      
       body {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-        background: #e2e8f0;
+        background: white;
         margin: 0;
         padding: 0;
         color: var(--text-color);
       }
 
-      /* 
-       * STRUKTUR MULTI-HALAMAN 
-       * Header dan Footer di-set Fixed agar ter-print berulang di setiap lembar PDF.
-       */
-      .print-header {
-        position: fixed; top: 0; left: 0; right: 0; height: 160px; z-index: 50;
-      }
-      .print-footer {
-        position: fixed; bottom: 0; left: 0; right: 0; height: 120px; z-index: 50;
-      }
+      /* KUNCI MULTI-HALAMAN: Main Layout Table */
+      .main-layout-table { width: 100%; border-collapse: collapse; border: none; }
+      .main-layout-table > thead { display: table-header-group; }
+      .main-layout-table > tfoot { display: table-footer-group; }
+      .main-layout-table > tbody > tr > td { padding: 0; border: none; }
 
-      /* Komponen Desain Heksagonal - Relative terhadap Container Fixed-nya */
+      /* HEADER & FOOTER WRAPPERS */
+      .header-wrapper { position: relative; height: 160px; width: 100%; overflow: hidden; }
+      .footer-wrapper { position: relative; height: 120px; width: 100%; overflow: hidden; }
+
+      /* BENTUK HEKSAGONAL HEADER */
       .bg-header-red {
-        position: absolute; top: 0; left: 0; width: 35%; height: 160px;
-        background: var(--primary);
+        position: absolute; top: 0; left: 0; width: 35%; height: 100%;
+        background-color: var(--primary);
+        -webkit-clip-path: polygon(0 0, 80% 0, 100% 50%, 80% 100%, 0 100%);
         clip-path: polygon(0 0, 80% 0, 100% 50%, 80% 100%, 0 100%);
         z-index: 1;
       }
       .bg-header-dark {
         position: absolute; top: 40px; left: 24%; width: 12%; height: 80px;
-        background: var(--gray);
+        background-color: var(--gray);
+        -webkit-clip-path: polygon(0 0, 70% 0, 100% 50%, 70% 100%, 0 100%, 30% 50%);
         clip-path: polygon(0 0, 70% 0, 100% 50%, 70% 100%, 0 100%, 30% 50%);
         z-index: 3; display: flex; align-items: center; justify-content: center;
       }
       .bg-header-black {
         position: absolute; top: 40px; right: 0; width: 70%; height: 80px;
-        background: var(--dark); z-index: 2;
+        background-color: var(--dark); z-index: 2;
         display: flex; align-items: center; justify-content: space-between;
         padding-left: 90px; padding-right: 40px;
       }
 
-      /* FIX BUG 2: Footer teks tertimpa desain */
+      /* BENTUK HEKSAGONAL FOOTER */
       .bg-footer-black {
-        position: absolute; bottom: 40px; left: 0; width: 100%; height: 60px;
-        background: var(--dark); z-index: 1;
-        display: flex; align-items: center; 
-        justify-content: flex-start; /* Geser ke kiri */
-        padding-left: 18%; /* Beri ruang agar bebas dari irisan polygon dark di kiri */
+        position: absolute; bottom: 40px; right: 0; width: 100%; height: 60px;
+        background-color: var(--dark); z-index: 1;
+        display: flex; align-items: center; justify-content: flex-start;
+        /* Menggeser teks ke kanan agar tidak tertimpa abu-abu */
+        padding-left: 20%; 
       }
       .bg-footer-dark {
         position: absolute; bottom: 40px; left: 0; width: 15%; height: 60px;
-        background: var(--gray);
+        background-color: var(--gray);
+        -webkit-clip-path: polygon(0 0, 100% 0, 60% 50%, 100% 100%, 0 100%);
         clip-path: polygon(0 0, 100% 0, 60% 50%, 100% 100%, 0 100%);
         z-index: 2;
       }
       .bg-footer-red {
         position: absolute; bottom: 0; right: 0; width: 35%; height: 120px;
-        background: var(--primary);
+        background-color: var(--primary);
+        -webkit-clip-path: polygon(20% 0, 100% 0, 100% 100%, 20% 100%, 0 50%);
         clip-path: polygon(20% 0, 100% 0, 100% 100%, 20% 100%, 0 50%);
         z-index: 2;
       }
       .thank-you { 
-        color: #f1f5f9; font-size: 11px; letter-spacing: 0.5px; font-weight: 500; 
+        color: #f1f5f9; font-size: 11px; letter-spacing: 0.5px; font-weight: bold; 
         z-index: 10; position: relative; 
       }
 
@@ -153,34 +160,35 @@ export const printSingleInvoicePdf = (context: InvoicePrintContext) => {
       .company-tagline { font-size: 9px; color: #cbd5e1; letter-spacing: 0.5px; margin-top: 2px; }
       .invoice-title { font-size: 28px; font-weight: 900; color: white; letter-spacing: 2px; }
 
-      /* Tabel Pengatur Layout Multi-Halaman */
-      .layout-table { width: 100%; border-collapse: collapse; position: relative; z-index: 60; }
-      .layout-table th, .layout-table td { border: none; padding: 0; }
-      .content-cell { padding: 0 40px; background: transparent; }
+      /* CONTENT UTAMA */
+      .content-area { padding: 10px 40px; }
 
-      .billing-section { display: flex; justify-content: space-between; margin-bottom: 20px; margin-top: 20px; }
+      .billing-section { display: flex; justify-content: space-between; margin-bottom: 20px; }
       .billing-to h4 { margin: 0 0 6px 0; font-size: 11px; color: #64748b; font-weight: bold; text-transform: uppercase; }
       .billing-to h2 { margin: 0 0 4px 0; font-size: 18px; color: var(--primary); font-weight: 800; }
+      
       .meta-table { width: 240px; border-collapse: collapse; font-size: 11px; }
       .meta-table td { padding: 5px 0; border-bottom: 1px solid #e2e8f0; font-weight: 600; }
       .meta-table td:last-child { text-align: right; color: var(--dark); font-weight: bold; }
 
+      /* TABEL ITEM (Anti-Potong) */
       .invoice-table { width: 100%; border-collapse: collapse; font-size: 11px; text-align: center; margin-bottom: 15px; }
-      .invoice-table th { background: var(--primary); color: white; padding: 10px; font-weight: bold; text-transform: uppercase; font-size: 10px; }
+      .invoice-table th { background-color: var(--primary); color: white; padding: 10px; font-weight: bold; text-transform: uppercase; font-size: 10px; }
       .invoice-table td { padding: 9px 10px; color: #334155; border-bottom: 1px solid #f1f5f9; }
-      .invoice-table tr:nth-child(even) td { background: var(--light-bg); }
+      .invoice-table tr:nth-child(even) td { background-color: var(--light-bg); }
       
-      /* FIX BUG 3: Mencegah tabel dan summary terbelah aneh (terpotong) antar halaman */
-      .invoice-table tr { page-break-inside: avoid; }
-      
-      .totals-section { display: flex; justify-content: flex-end; margin-bottom: 20px; page-break-inside: avoid; }
+      /* Mencegah baris terbelah di tengah halaman */
+      .invoice-table tr { page-break-inside: avoid; break-inside: avoid; }
+      .totals-section, .bottom-section { page-break-inside: avoid; break-inside: avoid; }
+
+      .totals-section { display: flex; justify-content: flex-end; margin-bottom: 20px; }
       .totals-box { width: 260px; }
       .totals-box table { width: 100%; border-collapse: collapse; font-size: 11px; }
       .totals-box td { padding: 6px 8px; text-align: right; }
       .totals-box td:first-child { text-align: left; font-weight: bold; color: #475569; }
-      .net-total-row td { background: var(--primary); color: white; font-weight: 900; font-size: 13px; }
+      .net-total-row td { background-color: var(--primary); color: white; font-weight: 900; font-size: 13px; }
 
-      .bottom-section { display: flex; justify-content: space-between; align-items: flex-end; margin-top: auto; margin-bottom: 20px; page-break-inside: avoid; }
+      .bottom-section { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 10px; }
       .left-info { display: flex; flex-direction: column; gap: 15px; width: 55%; }
       .payment-info h4, .deal-with-us h4 { margin: 0 0 6px 0; font-size: 11px; font-weight: bold; color: var(--dark); text-transform: uppercase; }
       .payment-info table { font-size: 10px; line-height: 1.6; color: #475569; }
@@ -191,50 +199,57 @@ export const printSingleInvoicePdf = (context: InvoicePrintContext) => {
       .signature-name { font-family: "Brush Script MT", "Segoe Script", cursive; font-size: 24px; margin-bottom: 5px; border-bottom: 1px solid #1e293b; padding: 0 15px; display: inline-block; color: #0f172a; }
 
       @media print {
-        body { background: white; margin: 0; padding: 0; }
-        @page { margin: 0; size: A4; }
-        /* Memastikan header/footer selalu diprint oleh browser */
-        .print-header, .print-footer { position: fixed; }
+        @page { margin: 0; size: A4 portrait; }
+        body { background: white; }
       }
     </style>
   </head>
   <body>
-    <!-- 1. LATAR BELAKANG FIXED (Otomatis tercetak di SEMUA halaman) -->
-    <div class="print-header">
-      <div class="bg-header-red"></div>
-      <div class="bg-header-dark">
-        <svg viewBox="0 0 40 40" width="34" height="34">
-          <polygon points="20,2 38,12 38,28 20,38 2,28 2,12" fill="none" stroke="#e60012" stroke-width="2.5" />
-          <polygon points="20,10 30,16 30,24 20,30 10,24 10,16" fill="none" stroke="#fff" stroke-width="2.5" />
-        </svg>
-      </div>
-      <div class="bg-header-black">
-        <div class="company-branding">
-          <div class="company-name">${companyName}</div>
-          <div class="company-tagline">${regionName}</div>
-        </div>
-        <div class="invoice-title">${invoiceTitle}</div>
-      </div>
-    </div>
-
-    <div class="print-footer">
-      <div class="bg-footer-dark"></div>
-      <div class="bg-footer-black">
-        <div class="thank-you">Dokumen ini diterbitkan otomatis oleh Sistem ALMA.</div>
-      </div>
-      <div class="bg-footer-red"></div>
-    </div>
-
-    <!-- 2. KONTEN UTAMA (Dibungkus Tabel Spacer untuk Auto-Pagination) -->
-    <table class="layout-table">
+    <!-- STRUKTUR TABEL INDUK -->
+    <table class="main-layout-table">
+      <!-- 1. HEADER (Diulang otomatis di atas setiap kertas) -->
       <thead>
-        <!-- Spacer Header: Mendorong konten agar tidak menabrak elemen desain atas -->
-        <tr><td><div style="height: 150px;"></div></td></tr>
+        <tr>
+          <td style="padding: 0; border: none;">
+            <div class="header-wrapper">
+              <div class="bg-header-red"></div>
+              <div class="bg-header-dark">
+                <svg viewBox="0 0 40 40" width="34" height="34">
+                  <polygon points="20,2 38,12 38,28 20,38 2,28 2,12" fill="none" stroke="#e60012" stroke-width="2.5" />
+                  <polygon points="20,10 30,16 30,24 20,30 10,24 10,16" fill="none" stroke="#fff" stroke-width="2.5" />
+                </svg>
+              </div>
+              <div class="bg-header-black">
+                <div class="company-branding">
+                  <div class="company-name">${companyName}</div>
+                  <div class="company-tagline">${regionName}</div>
+                </div>
+                <div class="invoice-title">${invoiceTitle}</div>
+              </div>
+            </div>
+          </td>
+        </tr>
       </thead>
-      
+
+      <!-- 2. FOOTER (Diulang otomatis di bawah setiap kertas) -->
+      <tfoot>
+        <tr>
+          <td style="padding: 0; border: none;">
+            <div class="footer-wrapper">
+              <div class="bg-footer-dark"></div>
+              <div class="bg-footer-black">
+                <div class="thank-you">Dokumen ini diterbitkan otomatis oleh Sistem ALMA.</div>
+              </div>
+              <div class="bg-footer-red"></div>
+            </div>
+          </td>
+        </tr>
+      </tfoot>
+
+      <!-- 3. KONTEN (Pecah halaman alami) -->
       <tbody>
         <tr>
-          <td class="content-cell">
+          <td class="content-area">
             
             <div class="billing-section">
               <div class="billing-to">
@@ -324,26 +339,21 @@ export const printSingleInvoicePdf = (context: InvoicePrintContext) => {
           </td>
         </tr>
       </tbody>
-      
-      <tfoot>
-        <!-- Spacer Footer: Mendorong konten agar tidak menabrak elemen desain bawah saat ganti halaman -->
-        <tr><td><div style="height: 120px;"></div></td></tr>
-      </tfoot>
     </table>
   </body>
 </html>`;
 
-  // Eksekusi Buka & Cetak (Dengan jeda diperpanjang agar browser sempat kalkulasi multi-halaman tabel HTML)
+  // Buka jendela cetak A4 langsung
   const printWindow = window.open("", "_blank", "width=900,height=1100");
   if (printWindow) {
     printWindow.document.write(fullHtml);
     printWindow.document.close();
     printWindow.focus();
+    // Diperpanjang ke 600ms agar browser selesai memecah multi-halaman
     setTimeout(() => {
       printWindow.print();
     }, 600);
   } else {
-    // Fallback iframe jika popup terblokir
     const iframe = document.createElement("iframe");
     iframe.style.position = "fixed";
     iframe.style.right = "0";
