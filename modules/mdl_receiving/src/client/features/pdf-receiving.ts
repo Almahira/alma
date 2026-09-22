@@ -21,6 +21,7 @@ export interface InvoicePrintContext {
 /**
  * 1. CETAK INVOICE DARI BARIS AKSI (ICON PRINT)
  * Menghasilkan tampilan Invoice elegan persis template HTML/CSS heksagon merah-hitam.
+ * SEKARANG MENDUKUNG MULTI-HALAMAN (AUTO PAGE-BREAK)
  */
 export const printSingleInvoicePdf = (context: InvoicePrintContext) => {
   const {
@@ -36,6 +37,10 @@ export const printSingleInvoicePdf = (context: InvoicePrintContext) => {
   } = context;
 
   const isPiutang = doc.documentType === "PIUTANG";
+  
+  // FIX BUG 1: Logika penamaan dokumen diperbaiki
+  const invoiceTitle = isPiutang ? "SURAT JALAN" : "INVOICE";
+  
   const items = doc.items || [];
   const formattedDate = new Date(doc.date).toLocaleDateString("id-ID", {
     day: "2-digit",
@@ -64,12 +69,12 @@ export const printSingleInvoicePdf = (context: InvoicePrintContext) => {
   const bankAccountText = bankInfo?.bankAccount || "-";
   const bankOwnerText = bankInfo?.bankAccountName || "-";
 
-  // HTML Template Sesuai Blueprint Rendi
+  // HTML Template - DIRESTRUKTURISASI UNTUK MULTI-HALAMAN
   const fullHtml = `<!doctype html>
 <html lang="id">
   <head>
     <meta charset="UTF-8" />
-    <title>Invoice - ${doc.invoiceNumber}</title>
+    <title>${invoiceTitle} - ${doc.invoiceNumber}</title>
     <style>
       :root {
         --primary: #e60012;
@@ -83,139 +88,119 @@ export const printSingleInvoicePdf = (context: InvoicePrintContext) => {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
         background: #e2e8f0;
         margin: 0;
-        padding: 20px;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
+        padding: 0;
+        color: var(--text-color);
       }
-      .invoice-container {
-        width: 210mm;
-        min-height: 297mm;
-        background: white;
-        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
-        position: relative;
-        overflow: hidden;
-        -webkit-print-color-adjust: exact !important;
-        print-color-adjust: exact !important;
+
+      /* 
+       * STRUKTUR MULTI-HALAMAN 
+       * Header dan Footer di-set Fixed agar ter-print berulang di setiap lembar PDF.
+       */
+      .print-header {
+        position: fixed; top: 0; left: 0; right: 0; height: 160px; z-index: 50;
       }
+      .print-footer {
+        position: fixed; bottom: 0; left: 0; right: 0; height: 120px; z-index: 50;
+      }
+
+      /* Komponen Desain Heksagonal - Relative terhadap Container Fixed-nya */
       .bg-header-red {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 35%;
-        height: 160px;
+        position: absolute; top: 0; left: 0; width: 35%; height: 160px;
         background: var(--primary);
         clip-path: polygon(0 0, 80% 0, 100% 50%, 80% 100%, 0 100%);
         z-index: 1;
       }
       .bg-header-dark {
-        position: absolute;
-        top: 40px;
-        left: 24%;
-        width: 12%;
-        height: 80px;
+        position: absolute; top: 40px; left: 24%; width: 12%; height: 80px;
         background: var(--gray);
         clip-path: polygon(0 0, 70% 0, 100% 50%, 70% 100%, 0 100%, 30% 50%);
-        z-index: 3;
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        z-index: 3; display: flex; align-items: center; justify-content: center;
       }
       .bg-header-black {
-        position: absolute;
-        top: 40px;
-        right: 0;
-        width: 70%;
-        height: 80px;
-        background: var(--dark);
-        z-index: 2;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding-left: 90px;
-        padding-right: 40px;
+        position: absolute; top: 40px; right: 0; width: 70%; height: 80px;
+        background: var(--dark); z-index: 2;
+        display: flex; align-items: center; justify-content: space-between;
+        padding-left: 90px; padding-right: 40px;
       }
-      .company-branding { color: white; display: flex; flex-direction: column; }
-      .company-name { font-size: 16px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
-      .company-tagline { font-size: 9px; color: #cbd5e1; letter-spacing: 0.5px; margin-top: 2px; }
-      .invoice-title { font-size: 28px; font-weight: 900; color: white; letter-spacing: 2px; }
+
+      /* FIX BUG 2: Footer teks tertimpa desain */
       .bg-footer-black {
-        position: absolute;
-        bottom: 40px;
-        right: 0;
-        width: 100%;
-        height: 60px;
-        background: var(--dark);
-        z-index: 1;
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        position: absolute; bottom: 40px; left: 0; width: 100%; height: 60px;
+        background: var(--dark); z-index: 1;
+        display: flex; align-items: center; 
+        justify-content: flex-start; /* Geser ke kiri */
+        padding-left: 18%; /* Beri ruang agar bebas dari irisan polygon dark di kiri */
       }
       .bg-footer-dark {
-        position: absolute;
-        bottom: 40px;
-        left: 0;
-        width: 15%;
-        height: 60px;
+        position: absolute; bottom: 40px; left: 0; width: 15%; height: 60px;
         background: var(--gray);
         clip-path: polygon(0 0, 100% 0, 60% 50%, 100% 100%, 0 100%);
         z-index: 2;
       }
       .bg-footer-red {
-        position: absolute;
-        bottom: 0;
-        right: 0;
-        width: 35%;
-        height: 120px;
+        position: absolute; bottom: 0; right: 0; width: 35%; height: 120px;
         background: var(--primary);
         clip-path: polygon(20% 0, 100% 0, 100% 100%, 20% 100%, 0 50%);
         z-index: 2;
       }
-      .thank-you { color: #f1f5f9; font-size: 11px; letter-spacing: 0.5px; font-weight: 500; z-index: 3; position: relative; }
-      .content {
-        position: absolute;
-        top: 170px;
-        left: 0;
-        right: 0;
-        bottom: 120px;
-        padding: 0 40px;
-        display: flex;
-        flex-direction: column;
-        z-index: 10;
+      .thank-you { 
+        color: #f1f5f9; font-size: 11px; letter-spacing: 0.5px; font-weight: 500; 
+        z-index: 10; position: relative; 
       }
-      .billing-section { display: flex; justify-content: space-between; margin-bottom: 20px; }
+
+      .company-branding { color: white; display: flex; flex-direction: column; }
+      .company-name { font-size: 16px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
+      .company-tagline { font-size: 9px; color: #cbd5e1; letter-spacing: 0.5px; margin-top: 2px; }
+      .invoice-title { font-size: 28px; font-weight: 900; color: white; letter-spacing: 2px; }
+
+      /* Tabel Pengatur Layout Multi-Halaman */
+      .layout-table { width: 100%; border-collapse: collapse; position: relative; z-index: 60; }
+      .layout-table th, .layout-table td { border: none; padding: 0; }
+      .content-cell { padding: 0 40px; background: transparent; }
+
+      .billing-section { display: flex; justify-content: space-between; margin-bottom: 20px; margin-top: 20px; }
       .billing-to h4 { margin: 0 0 6px 0; font-size: 11px; color: #64748b; font-weight: bold; text-transform: uppercase; }
       .billing-to h2 { margin: 0 0 4px 0; font-size: 18px; color: var(--primary); font-weight: 800; }
       .meta-table { width: 240px; border-collapse: collapse; font-size: 11px; }
       .meta-table td { padding: 5px 0; border-bottom: 1px solid #e2e8f0; font-weight: 600; }
       .meta-table td:last-child { text-align: right; color: var(--dark); font-weight: bold; }
+
       .invoice-table { width: 100%; border-collapse: collapse; font-size: 11px; text-align: center; margin-bottom: 15px; }
       .invoice-table th { background: var(--primary); color: white; padding: 10px; font-weight: bold; text-transform: uppercase; font-size: 10px; }
       .invoice-table td { padding: 9px 10px; color: #334155; border-bottom: 1px solid #f1f5f9; }
       .invoice-table tr:nth-child(even) td { background: var(--light-bg); }
-      .totals-section { display: flex; justify-content: flex-end; margin-bottom: 20px; }
+      
+      /* FIX BUG 3: Mencegah tabel dan summary terbelah aneh (terpotong) antar halaman */
+      .invoice-table tr { page-break-inside: avoid; }
+      
+      .totals-section { display: flex; justify-content: flex-end; margin-bottom: 20px; page-break-inside: avoid; }
       .totals-box { width: 260px; }
       .totals-box table { width: 100%; border-collapse: collapse; font-size: 11px; }
       .totals-box td { padding: 6px 8px; text-align: right; }
       .totals-box td:first-child { text-align: left; font-weight: bold; color: #475569; }
       .net-total-row td { background: var(--primary); color: white; font-weight: 900; font-size: 13px; }
-      .bottom-section { display: flex; justify-content: space-between; align-items: flex-end; margin-top: auto; margin-bottom: 15px; }
+
+      .bottom-section { display: flex; justify-content: space-between; align-items: flex-end; margin-top: auto; margin-bottom: 20px; page-break-inside: avoid; }
       .left-info { display: flex; flex-direction: column; gap: 15px; width: 55%; }
       .payment-info h4, .deal-with-us h4 { margin: 0 0 6px 0; font-size: 11px; font-weight: bold; color: var(--dark); text-transform: uppercase; }
       .payment-info table { font-size: 10px; line-height: 1.6; color: #475569; }
       .payment-info td:first-child { width: 120px; font-weight: bold; color: #1e293b; }
       .deal-with-us p { margin: 3px 0; font-size: 10px; color: #475569; display: flex; align-items: center; gap: 6px; }
+      
       .signature { text-align: center; font-size: 11px; color: var(--text-color); width: 180px; }
       .signature-name { font-family: "Brush Script MT", "Segoe Script", cursive; font-size: 24px; margin-bottom: 5px; border-bottom: 1px solid #1e293b; padding: 0 15px; display: inline-block; color: #0f172a; }
+
       @media print {
-        body { margin: 0; padding: 0; background: white; }
-        .invoice-container { box-shadow: none; border: none; }
+        body { background: white; margin: 0; padding: 0; }
         @page { margin: 0; size: A4; }
+        /* Memastikan header/footer selalu diprint oleh browser */
+        .print-header, .print-footer { position: fixed; }
       }
     </style>
   </head>
   <body>
-    <div class="invoice-container">
+    <!-- 1. LATAR BELAKANG FIXED (Otomatis tercetak di SEMUA halaman) -->
+    <div class="print-header">
       <div class="bg-header-red"></div>
       <div class="bg-header-dark">
         <svg viewBox="0 0 40 40" width="34" height="34">
@@ -228,106 +213,127 @@ export const printSingleInvoicePdf = (context: InvoicePrintContext) => {
           <div class="company-name">${companyName}</div>
           <div class="company-tagline">${regionName}</div>
         </div>
-        <div class="invoice-title">${isPiutang ? "INVOICE" : "INVOICE"}</div>
+        <div class="invoice-title">${invoiceTitle}</div>
       </div>
+    </div>
 
+    <div class="print-footer">
       <div class="bg-footer-dark"></div>
       <div class="bg-footer-black">
         <div class="thank-you">Dokumen ini diterbitkan otomatis oleh Sistem ALMA.</div>
       </div>
       <div class="bg-footer-red"></div>
-
-      <div class="content">
-        <div class="billing-section">
-          <div class="billing-to">
-            <h4>${isPiutang ? "DITAGIHKAN KEPADA (OUTLET):" : "DITAGIHKAN OLEH (VENDOR):"}</h4>
-            <h2>${vendorName.toUpperCase()}</h2>
-            <p>${isPiutang ? "Unit Cabang Operasional" : "Penyedia / Vendor Mitra"}</p>
-          </div>
-          <div>
-            <table class="meta-table">
-              <tr>
-                <td>No. Dokumen:</td>
-                <td>${doc.invoiceNumber}</td>
-              </tr>
-              <tr>
-                <td>Tanggal:</td>
-                <td>${formattedDate}</td>
-              </tr>
-              <tr>
-                <td>Jatuh Tempo:</td>
-                <td>${doc.dueDate ? new Date(doc.dueDate).toLocaleDateString("id-ID") : "CASH / LUNAS"}</td>
-              </tr>
-            </table>
-          </div>
-        </div>
-
-        <table class="invoice-table">
-          <thead>
-            <tr>
-              <th style="text-align: left;">Nama Barang / Item</th>
-              <th>Harga Unit</th>
-              <th>Kuantitas</th>
-              <th>Sub Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${itemsHtml || '<tr><td colspan="4" style="padding: 20px;">Tidak ada rincian barang</td></tr>'}
-          </tbody>
-        </table>
-
-        <div class="totals-section">
-          <div class="totals-box">
-            <table>
-              <tr>
-                <td>Sub Total:</td>
-                <td>Rp ${totalAmountNum.toLocaleString("id-ID")}</td>
-              </tr>
-              <tr class="net-total-row">
-                <td>Net Total:</td>
-                <td>Rp ${totalAmountNum.toLocaleString("id-ID")}</td>
-              </tr>
-            </table>
-          </div>
-        </div>
-
-        <div class="bottom-section">
-          <div class="left-info">
-            <div class="payment-info">
-              <h4>Informasi Pembayaran:</h4>
-              <table>
-                <tr>
-                  <td>No Rekening:</td>
-                  <td>${bankAccountText}</td>
-                </tr>
-                <tr>
-                  <td>Pemilik Rekening:</td>
-                  <td>${bankOwnerText}</td>
-                </tr>
-                <tr>
-                  <td>Bank:</td>
-                  <td>${bankNameText}</td>
-                </tr>
-              </table>
-            </div>
-            <div class="deal-with-us">
-              <h4>Hubungi Kami:</h4>
-              <p>📍 ${regionAddress}</p>
-              <p>📞 ${activeActorPhone}</p>
-            </div>
-          </div>
-
-          <div class="signature">
-            <div class="signature-name">${activeActorName}</div>
-            <p>${isPiutang ? "Petugas Gudang Pengirim" : "Penanggung Jawab"}</p>
-          </div>
-        </div>
-      </div>
     </div>
+
+    <!-- 2. KONTEN UTAMA (Dibungkus Tabel Spacer untuk Auto-Pagination) -->
+    <table class="layout-table">
+      <thead>
+        <!-- Spacer Header: Mendorong konten agar tidak menabrak elemen desain atas -->
+        <tr><td><div style="height: 150px;"></div></td></tr>
+      </thead>
+      
+      <tbody>
+        <tr>
+          <td class="content-cell">
+            
+            <div class="billing-section">
+              <div class="billing-to">
+                <h4>${isPiutang ? "DITAGIHKAN KEPADA (OUTLET):" : "DITAGIHKAN OLEH (VENDOR):"}</h4>
+                <h2>${vendorName.toUpperCase()}</h2>
+                <p>${isPiutang ? "Unit Cabang Operasional" : "Penyedia / Vendor Mitra"}</p>
+              </div>
+              <div>
+                <table class="meta-table">
+                  <tr>
+                    <td>No. Dokumen:</td>
+                    <td>${doc.invoiceNumber}</td>
+                  </tr>
+                  <tr>
+                    <td>Tanggal:</td>
+                    <td>${formattedDate}</td>
+                  </tr>
+                  <tr>
+                    <td>Jatuh Tempo:</td>
+                    <td>${doc.dueDate ? new Date(doc.dueDate).toLocaleDateString("id-ID") : "CASH / LUNAS"}</td>
+                  </tr>
+                </table>
+              </div>
+            </div>
+
+            <table class="invoice-table">
+              <thead>
+                <tr>
+                  <th style="text-align: left;">Nama Barang / Item</th>
+                  <th>Harga Unit</th>
+                  <th>Kuantitas</th>
+                  <th>Sub Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${itemsHtml || '<tr><td colspan="4" style="padding: 20px;">Tidak ada rincian barang</td></tr>'}
+              </tbody>
+            </table>
+
+            <div class="totals-section">
+              <div class="totals-box">
+                <table>
+                  <tr>
+                    <td>Sub Total:</td>
+                    <td>Rp ${totalAmountNum.toLocaleString("id-ID")}</td>
+                  </tr>
+                  <tr class="net-total-row">
+                    <td>Net Total:</td>
+                    <td>Rp ${totalAmountNum.toLocaleString("id-ID")}</td>
+                  </tr>
+                </table>
+              </div>
+            </div>
+
+            <div class="bottom-section">
+              <div class="left-info">
+                <div class="payment-info">
+                  <h4>Informasi Pembayaran:</h4>
+                  <table>
+                    <tr>
+                      <td>No Rekening:</td>
+                      <td>${bankAccountText}</td>
+                    </tr>
+                    <tr>
+                      <td>Pemilik Rekening:</td>
+                      <td>${bankOwnerText}</td>
+                    </tr>
+                    <tr>
+                      <td>Bank:</td>
+                      <td>${bankNameText}</td>
+                    </tr>
+                  </table>
+                </div>
+                <div class="deal-with-us">
+                  <h4>Hubungi Kami:</h4>
+                  <p>📍 ${regionAddress}</p>
+                  <p>📞 ${activeActorPhone}</p>
+                </div>
+              </div>
+
+              <div class="signature">
+                <div class="signature-name">${activeActorName}</div>
+                <p>${isPiutang ? "Petugas Gudang Pengirim" : "Penanggung Jawab"}</p>
+              </div>
+            </div>
+
+          </td>
+        </tr>
+      </tbody>
+      
+      <tfoot>
+        <!-- Spacer Footer: Mendorong konten agar tidak menabrak elemen desain bawah saat ganti halaman -->
+        <tr><td><div style="height: 120px;"></div></td></tr>
+      </tfoot>
+    </table>
   </body>
 </html>`;
 
-  // Buka jendela cetak A4 langsung
+  // Eksekusi Buka & Cetak (Dengan jeda diperpanjang agar browser sempat kalkulasi multi-halaman tabel HTML)
   const printWindow = window.open("", "_blank", "width=900,height=1100");
   if (printWindow) {
     printWindow.document.write(fullHtml);
@@ -335,9 +341,9 @@ export const printSingleInvoicePdf = (context: InvoicePrintContext) => {
     printWindow.focus();
     setTimeout(() => {
       printWindow.print();
-    }, 400);
+    }, 600);
   } else {
-    // Fallback iframe jika popup browser terblokir
+    // Fallback iframe jika popup terblokir
     const iframe = document.createElement("iframe");
     iframe.style.position = "fixed";
     iframe.style.right = "0";
@@ -354,8 +360,8 @@ export const printSingleInvoicePdf = (context: InvoicePrintContext) => {
       setTimeout(() => {
         iframe.contentWindow?.focus();
         iframe.contentWindow?.print();
-        setTimeout(() => document.body.removeChild(iframe), 1500);
-      }, 400);
+        setTimeout(() => document.body.removeChild(iframe), 2500);
+      }, 600);
     }
   }
 };
