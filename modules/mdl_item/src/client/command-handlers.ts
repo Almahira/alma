@@ -108,7 +108,16 @@ export const itemCommandHandlers: CommandHandler[] = [
         cmd.payload.id,
         "ITEM_CATEGORY",
         nextVer,
-        {},
+        {
+          id: cmd.payload.id || cmd.payload.documentId,
+          organization: {
+            companyId: localStorage.getItem("__unv_companyId") || "",
+          },
+          location: {
+            regionId: localStorage.getItem("__unv_regionId") || null,
+            outletId: localStorage.getItem("__unv_outletId") || null,
+          },
+        },
         getActiveActor(),
       );
     },
@@ -123,7 +132,16 @@ export const itemCommandHandlers: CommandHandler[] = [
         cmd.payload.id,
         "ITEM_UOM",
         nextVer,
-        {},
+        {
+          id: cmd.payload.id || cmd.payload.documentId,
+          organization: {
+            companyId: localStorage.getItem("__unv_companyId") || "",
+          },
+          location: {
+            regionId: localStorage.getItem("__unv_regionId") || null,
+            outletId: localStorage.getItem("__unv_outletId") || null,
+          },
+        },
         getActiveActor(),
       );
     },
@@ -139,7 +157,16 @@ export const itemCommandHandlers: CommandHandler[] = [
         cmd.payload.id,
         "ITEM_CATEGORY",
         nextVer,
-        {},
+        {
+          id: cmd.payload.id || cmd.payload.documentId,
+          organization: {
+            companyId: localStorage.getItem("__unv_companyId") || "",
+          },
+          location: {
+            regionId: localStorage.getItem("__unv_regionId") || null,
+            outletId: localStorage.getItem("__unv_outletId") || null,
+          },
+        },
         getActiveActor(),
       );
     },
@@ -154,7 +181,16 @@ export const itemCommandHandlers: CommandHandler[] = [
         cmd.payload.id,
         "ITEM_UOM",
         nextVer,
-        {},
+        {
+          id: cmd.payload.id || cmd.payload.documentId,
+          organization: {
+            companyId: localStorage.getItem("__unv_companyId") || "",
+          },
+          location: {
+            regionId: localStorage.getItem("__unv_regionId") || null,
+            outletId: localStorage.getItem("__unv_outletId") || null,
+          },
+        },
         getActiveActor(),
       );
     },
@@ -270,7 +306,16 @@ export const itemCommandHandlers: CommandHandler[] = [
         cmd.payload.id,
         "ITEM_PRODUCT",
         nextVer,
-        {},
+        {
+          id: cmd.payload.id || cmd.payload.documentId,
+          organization: {
+            companyId: localStorage.getItem("__unv_companyId") || "",
+          },
+          location: {
+            regionId: localStorage.getItem("__unv_regionId") || null,
+            outletId: localStorage.getItem("__unv_outletId") || null,
+          },
+        },
         getActiveActor(),
       );
     },
@@ -285,7 +330,16 @@ export const itemCommandHandlers: CommandHandler[] = [
         cmd.payload.id,
         "ITEM_PRODUCT",
         nextVer,
-        {},
+        {
+          id: cmd.payload.id || cmd.payload.documentId,
+          organization: {
+            companyId: localStorage.getItem("__unv_companyId") || "",
+          },
+          location: {
+            regionId: localStorage.getItem("__unv_regionId") || null,
+            outletId: localStorage.getItem("__unv_outletId") || null,
+          },
+        },
         getActiveActor(),
       );
     },

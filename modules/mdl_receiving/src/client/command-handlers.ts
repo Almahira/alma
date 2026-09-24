@@ -537,12 +537,24 @@ export const receivingCommandHandlers: CommandHandler[] = [
         documentId,
         "RECEIVING_DOCUMENT",
         nextVer,
-        {},
+        {
+          id: documentId,
+          type: "RECEIVING",
+          action: "ARCHIVE",
+          status: "DRAFT",
+          timestamp: new Date().toISOString(),
+          organization: {
+            companyId: localStorage.getItem("__unv_companyId") || "",
+          },
+          location: {
+            regionId: localStorage.getItem("__unv_regionId") || null,
+            outletId: localStorage.getItem("__unv_outletId") || null,
+          },
+        },
         getActiveActor(),
       );
     },
   },
-
   // 8. RESTORE DRAFT DARI ARSIP
   {
     commandType: "RESTORE_RECEIVING",
@@ -554,7 +566,20 @@ export const receivingCommandHandlers: CommandHandler[] = [
         documentId,
         "RECEIVING_DOCUMENT",
         nextVer,
-        {},
+        {
+          id: documentId,
+          type: "RECEIVING",
+          action: "RESTORE",
+          status: "DRAFT",
+          timestamp: new Date().toISOString(),
+          organization: {
+            companyId: localStorage.getItem("__unv_companyId") || "",
+          },
+          location: {
+            regionId: localStorage.getItem("__unv_regionId") || null,
+            outletId: localStorage.getItem("__unv_outletId") || null,
+          },
+        },
         getActiveActor(),
       );
     },

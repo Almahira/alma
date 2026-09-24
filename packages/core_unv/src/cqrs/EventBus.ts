@@ -119,6 +119,14 @@ export class EventBus {
         }
       }
 
+      // 1b. Bersihkan antrean Outbox lama agar transaksi tertahan tidak menimpa ulang data server
+      if (rxdb.collections.outbox) {
+        const allOutbox = await rxdb.collections.outbox.find().exec();
+        for (const doc of allOutbox) {
+          await doc.remove();
+        }
+      }
+
       // 2. Bersihkan snapshots lokal usang
       if (rxdb.collections.snapshots) {
         const allSnaps = await rxdb.collections.snapshots.find().exec();
@@ -137,6 +145,8 @@ export class EventBus {
 
       // 4. KUNCI ANTI-KORUP: Reset memori sequence & hash chain di RAM
       globalLedger.resetMemoryChain();
+      localStorage.removeItem("__unv_cursor_system");
+      localStorage.removeItem("__unv_cursor_tx");
 
       // 5. Kosongkan state tampilan UI
       globalRegistry.hardReset();
@@ -178,13 +188,13 @@ export class EventBus {
    */
   private static clearUserSession(): void {
     if (typeof window === "undefined") return;
-
     try {
       // 1. Hapus kredensial sesi user spesifik ALMA
       localStorage.removeItem("__unv_activeUser");
       localStorage.removeItem("__unv_user_allowed_outlets");
+      localStorage.removeItem("__unv_recent_logins");
 
-      // 2. Bersihkan token generik (jika ada) dari localStorage & sessionStorage
+      // 2. Bersihkan token generik dari localStorage & sessionStorage
       const GENERIC_SESSION_KEYS = [
         "token",
         "authToken",
@@ -200,15 +210,15 @@ export class EventBus {
 
       // 3. Segarkan cache RAM sesi
       RuntimeSession.refresh();
-
       console.log(
-        "[RESYNC ENGINE] Sesi user dibersihkan. Identitas mesin & lisensi tetap aman.",
+        "[RESYNC ENGINE] Sesi user dibersihkan. Memaksa kembali ke halaman login...",
       );
 
-      // 4. Paksa reload browser ke halaman login agar React me-remount WorkspaceWrapper
-      window.location.reload();
+      // 4. Arahkan URL ke rute utama dan reload aplikasi
+      window.location.href = "/";
     } catch (e) {
       console.warn("[RESYNC] Gagal membersihkan sesi user:", e);
+      window.location.reload();
     }
   }
 

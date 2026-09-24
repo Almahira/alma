@@ -56,46 +56,48 @@ export class InboxDaemon {
   public async processQueue(): Promise<void> {
     if (this.isProcessing) return;
     this.isProcessing = true;
-
     try {
       const db = globalLedger.getRxDatabase();
       if (!db || !db.collections.inbox) return;
 
-      const pendingEvents = await db.collections.inbox
-        .find({
-          selector: { status: "PENDING" },
-          sort: [{ createdAt: "asc" }],
-        })
-        .exec();
+      // Kuras antrean inbox per batch (50 event sekaligus) hingga tuntas
+      while (true) {
+        const pendingEvents = await db.collections.inbox
+          .find({
+            selector: { status: "PENDING" },
+            sort: [{ createdAt: "asc" }],
+            limit: 50,
+          })
+          .exec();
 
-      for (const doc of pendingEvents) {
-        const rawDoc = doc.toJSON();
-        const eventData = rawDoc.eventPayload as unknown as LedgerEventDoc;
+        if (pendingEvents.length === 0) {
+          break;
+        }
+
+        const rawDocs = pendingEvents.map((doc) => doc.toJSON());
+        const eventPayloads = rawDocs.map((doc) => doc.eventPayload);
 
         try {
-          // 1. Delegasikan pemrosesan rantai event ke Ledger Utama
-          await globalLedger.commitInboxEvent(eventData);
+          // 1. Delegasikan pemrosesan batch ke Ledger Utama
+          await globalLedger.commitInboxBatch(eventPayloads);
 
-          // 2. Hapus dokumen dari Inbox secara aman (Conflict-Safe)
-          try {
-            if (doc.incrementalRemove) {
-              await doc.incrementalRemove();
-            } else {
-              await doc.remove();
-            }
-          } catch (delErr: any) {
-            const freshDoc = await db.collections.inbox
-              .findOne(rawDoc.id)
-              .exec();
-            if (freshDoc) {
-              await freshDoc.remove();
+          // 2. Hapus seluruh dokumen inbox yang sudah selesai diproses secara borongan
+          const docIds = pendingEvents.map(
+            (d) => (d as any).primary || d.id || d.toJSON().id,
+          );
+          if (db.collections.inbox.bulkRemove) {
+            await db.collections.inbox.bulkRemove(docIds);
+          } else {
+            for (const doc of pendingEvents) {
+              await doc.remove().catch(() => {});
             }
           }
         } catch (error: any) {
           console.error(
-            `[INBOX] Gagal memproses event ${eventData.id || "Unknown"}:`,
+            "[INBOX DAEMON] Gagal memproses batch inbox:",
             error?.message || error,
           );
+          break;
         }
       }
     } catch (err: any) {

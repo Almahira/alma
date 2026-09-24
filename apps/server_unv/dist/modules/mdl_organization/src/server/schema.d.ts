@@ -2260,6 +2260,23 @@ export declare const userAccounts: import("drizzle-orm/pg-core").PgTableWithColu
             identity: undefined;
             generated: undefined;
         }, {}, {}>;
+        allowedOutletIds: import("drizzle-orm/pg-core").PgColumn<{
+            name: "allowed_outlet_ids";
+            tableName: "user_accounts";
+            dataType: "json";
+            columnType: "PgJsonb";
+            data: unknown;
+            driverParam: unknown;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
         lastLogin: import("drizzle-orm/pg-core").PgColumn<{
             name: "last_login";
             tableName: "user_accounts";

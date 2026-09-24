@@ -129,7 +129,8 @@ const io = new Server(httpServer, {
     pingTimeout: 5000, // Putus jika 5 detik tidak merespons
 });
 app.use(cors(corsOptions));
-app.use(express.json());
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 app.use("/api/payment", paymentRouter);
 app.use("/api/storage", storageRouter);
 app.use("/api/provision", provisionRouter);
@@ -225,8 +226,25 @@ app.get("/api/events/pull/tx", async (req, res) => {
         const filterCompanyId = req.query.companyId;
         const filterRegionId = req.query.regionId;
         const filterOutletId = req.query.outletId;
-        console.log(`[HTTP] PULL Tx Events dari device: ${deviceId} (Outlet: ${filterOutletId || "ALL"}, Region: ${filterRegionId || "ALL"}, Window: ${windowMode || "MONTHLY"})`);
-        const txEventsRaw = await db.select().from(txEventJournal);
+        const filterOutletIds = req.query.outletIds; // <--- DUKUNGAN MULTI-OUTLET
+        const sinceParam = req.query.since;
+        console.log(`[HTTP] PULL Tx Events dari device: ${deviceId} (Outlet: ${filterOutletId || "ALL"}, Region: ${filterRegionId || "ALL"}, Since: ${sinceParam || "FULL"})`);
+        // Kueri inkremental berindeks: hanya ambil baris yang terjadi setelah stempel waktu cursor
+        let txEventsRaw;
+        if (sinceParam && !isNaN(Number(sinceParam))) {
+            const sinceDate = new Date(Number(sinceParam));
+            txEventsRaw = await db
+                .select()
+                .from(txEventJournal)
+                .where(sql `${txEventJournal.createdAt} > ${sinceDate}`)
+                .orderBy(txEventJournal.createdAt);
+        }
+        else {
+            txEventsRaw = await db
+                .select()
+                .from(txEventJournal)
+                .orderBy(txEventJournal.createdAt);
+        }
         const now = Date.now();
         const startOfCurrentMonth = getStartOfCurrentMonth();
         const twentyFourHoursAgo = now - 24 * 60 * 60 * 1000;
@@ -249,31 +267,31 @@ app.get("/api/events/pull/tx", async (req, res) => {
                 }
                 catch { }
             }
-            // 2. JIKA PERANGKAT ADALAH CABANG OUTLET (Paling Ketat)
-            if (filterOutletId) {
-                // Outlet HANYA berhak menarik event miliknya sendiri!
-                // Event Gudang Region (outletId null) atau Outlet lain DITOLAK MUTLAK.
-                if (evt.outletId !== filterOutletId) {
+            // Ekstrak data payload JSON untuk membaca lokasi jika kolom tabel kosong
+            const p = typeof evt.payload === "string" ? JSON.parse(evt.payload) : evt.payload;
+            const effectiveOutletId = evt.outletId || p?.location?.outletId || null;
+            const effectiveRegionId = evt.regionId || p?.location?.regionId || null;
+            // 2. JIKA PERANGKAT ADALAH CABANG OUTLET (Single Outlet maupun Multi-Outlet)
+            if (filterOutletIds) {
+                const allowedList = filterOutletIds.split(",");
+                if (!effectiveOutletId || !allowedList.includes(effectiveOutletId)) {
+                    return;
+                }
+            }
+            else if (filterOutletId) {
+                // Loloskan jika outletId cocok atau transaksi distribusi gudang menuju ke outlet ini
+                const targetOutletId = p?.reference?.destinationOutletId || p?.data?.destinationOutletId;
+                if (effectiveOutletId !== filterOutletId &&
+                    targetOutletId !== filterOutletId) {
                     return;
                 }
             }
             // 3. JIKA PERANGKAT ADALAH GUDANG PUSAT / REGION (Tanpa Outlet)
             else if (filterRegionId) {
-                // Ekstrak payload untuk membaca referensi vendor tujuan
-                const p = typeof evt.payload === "string"
-                    ? JSON.parse(evt.payload)
-                    : evt.payload;
                 const targetVendorId = p.reference?.supplierId || p.vendorId || p.data?.vendorId;
-                // Loloskan jika Region adalah PEMBUAT dokumen ATAU Region adalah TUJUAN distribusi (B2B)
-                const isCreator = evt.regionId === filterRegionId;
+                const isCreator = effectiveRegionId === filterRegionId;
                 const isTarget = targetVendorId === filterRegionId;
-                if (!isCreator && !isTarget) {
-                    return;
-                }
-                // Transaksi cabang di bawah region ini (termasuk PLUSALES untuk audit omset)
-                // diizinkan ditarik oleh Region selama berada dalam regionId yang sama.
-                // Penolakan hanya berlaku jika event tersebut tidak terkait dengan region ini.
-                if (evt.regionId && evt.regionId !== filterRegionId) {
+                if (!isCreator && !isTarget && effectiveRegionId !== filterRegionId) {
                     return;
                 }
             }
@@ -377,8 +395,35 @@ io.on("connection", async (socket) => {
             }
             console.log(`[SOCKET SPATIAL] Device ${dev.name} (${dev.id}) bergabung ke Room -> Company: ${dev.companyId} | Region: ${dev.regionId || "-"} | Outlet: ${dev.outletId || "-"}`);
         }
+        // 1. Perbarui stempel waktu terakhir terlihat saat perangkat pertama kali connect
+        await db
+            .update(deviceRegistry)
+            .set({ lastSeenAt: new Date() })
+            .where(eq(deviceRegistry.id, queryDeviceId));
+        // 2. Pasang listener heartbeat berkala dari klien
+        socket.on("DEVICE_HEARTBEAT", async () => {
+            try {
+                await db
+                    .update(deviceRegistry)
+                    .set({ lastSeenAt: new Date() })
+                    .where(eq(deviceRegistry.id, queryDeviceId));
+            }
+            catch (err) {
+                console.warn(`[HEARTBEAT] Gagal update lastSeenAt untuk ${queryDeviceId}`);
+            }
+        });
     }
     console.log(`[SOCKET] Client terhubung: ${socket.id} (Device: ${queryDeviceId || "N/A"})`);
+    // Tangkap pembaruan room saat user berpindah cabang/outlet di antarmuka
+    socket.on("UPDATE_SPATIAL_ROOMS", (data) => {
+        if (data?.companyId)
+            socket.join(`company:${data.companyId}`);
+        if (data?.regionId)
+            socket.join(`region:${data.regionId}`);
+        if (data?.outletId)
+            socket.join(`outlet:${data.outletId}`);
+        console.log(`[SOCKET SPATIAL DYNAMIC] Socket ${socket.id} update room -> Company: ${data?.companyId} | Region: ${data?.regionId} | Outlet: ${data?.outletId}`);
+    });
     socket.on("SYNC_UP_EVENTS", async (event, callback) => {
         console.log(`[SOCKET] Menerima event dari client: ${event.type}`);
         try {

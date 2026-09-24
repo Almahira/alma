@@ -112,7 +112,16 @@ export const executivepanelCommandHandlers: CommandHandler[] = [
         id,
         "EXECUTIVE_PANEL",
         nextVer,
-        {},
+        {
+          id: cmd.payload.id || cmd.payload.documentId,
+          organization: {
+            companyId: localStorage.getItem("__unv_companyId") || "",
+          },
+          location: {
+            regionId: localStorage.getItem("__unv_regionId") || null,
+            outletId: localStorage.getItem("__unv_outletId") || null,
+          },
+        },
         getActiveActor(),
       );
     },
@@ -180,7 +189,16 @@ export const executivepanelCommandHandlers: CommandHandler[] = [
         id,
         "EXECUTIVE_PANEL",
         nextVer,
-        {},
+        {
+          id: cmd.payload.id || cmd.payload.documentId,
+          organization: {
+            companyId: localStorage.getItem("__unv_companyId") || "",
+          },
+          location: {
+            regionId: localStorage.getItem("__unv_regionId") || null,
+            outletId: localStorage.getItem("__unv_outletId") || null,
+          },
+        },
         getActiveActor(),
       );
     },
@@ -195,7 +213,16 @@ export const executivepanelCommandHandlers: CommandHandler[] = [
         id,
         "EXECUTIVE_PANEL",
         nextVer,
-        {},
+        {
+          id: cmd.payload.id || cmd.payload.documentId,
+          organization: {
+            companyId: localStorage.getItem("__unv_companyId") || "",
+          },
+          location: {
+            regionId: localStorage.getItem("__unv_regionId") || null,
+            outletId: localStorage.getItem("__unv_outletId") || null,
+          },
+        },
         getActiveActor(),
       );
     },

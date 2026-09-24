@@ -27,6 +27,7 @@ import { IntegrityChecker } from "../../../packages/core_unv/src/ledger/Integrit
 import { InitialLoadingScreen } from "./shared-ui/InitialLoadingScreen";
 import { getApiUrl } from "../../../packages/core_unv/src/config/env";
 import { RuntimeSession } from "../../../packages/core_unv/src/config/session";
+import { Layers } from "lucide-react";
 
 // =========================================================================
 // AUTO-PURGE DATABASE LOKAL (JIKA SERVER DI-RESET / VIRGIN STATE)
@@ -164,6 +165,27 @@ function SystemBootstrapper() {
   const [isIntroFinished, setIsIntroFinished] = useState(false);
   const [bootError, setBootError] = useState("");
 
+  const [isTabDuplicate, setIsTabDuplicate] = useState(false);
+
+  // Kunci eksklusif per tab browser menggunakan Web Locks API
+  useEffect(() => {
+    if (typeof navigator !== "undefined" && (navigator as any).locks) {
+      (navigator as any).locks.request(
+        "alma_unv_primary_instance",
+        { ifAvailable: true },
+        async (lock: any) => {
+          if (!lock) {
+            // Tab lain sudah memegang kunci instance utama
+            setIsTabDuplicate(true);
+            return;
+          }
+          // Pertahankan kunci selama tab ini tetap hidup
+          await new Promise(() => {});
+        },
+      );
+    }
+  }, []);
+
   const isSetupRoute =
     typeof window !== "undefined" &&
     (window.location.pathname === "/" ||
@@ -268,13 +290,11 @@ function SystemBootstrapper() {
               // Otomatis reset total database lokal dan tarik data baru yang sah!
               if (serverEpoch > 0 && serverEpoch > localEpoch) {
                 console.log(
-                  `[STEMPEL UNIVERSAL] Terdeteksi versi server (${serverEpoch}) lebih baru dari lokal (${localEpoch}). Melakukan sinkronisasi masal otomatis...`,
+                  `[STEMPEL UNIVERSAL] Terdeteksi versi server (${serverEpoch}) lebih baru dari lokal (${localEpoch}). Melakukan reset & logout otomatis...`,
                 );
-                await EventBus.executeSafeLocalResync();
                 localStorage.setItem("__unv_sync_epoch", String(serverEpoch));
-                console.log(
-                  "[STEMPEL UNIVERSAL] Database lokal berhasil diperbarui & stempel tersimpan.",
-                );
+                await EventBus.executeSafeLocalResync();
+                return;
               }
             }
           } catch (epochErr) {
@@ -297,6 +317,27 @@ function SystemBootstrapper() {
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-slate-900 text-white font-sans">
         <p className="font-bold text-rose-400">ERROR: {bootError}</p>
+      </div>
+    );
+  }
+
+  if (isTabDuplicate) {
+    return (
+      <div className="flex h-screen w-screen flex-col items-center justify-center bg-slate-950 text-white p-6 font-sans text-center select-none">
+        <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-400 flex items-center justify-center mb-4 shadow-lg shadow-amber-500/10">
+          <Layers className="w-8 h-8 text-amber-500" />
+        </div>
+        <h2 className="text-base font-black uppercase tracking-wider text-white">
+          Aplikasi ALMA Terbuka di Tab Lain
+        </h2>
+        <p className="text-xs text-slate-400 max-w-sm mt-2 leading-relaxed font-medium">
+          Untuk melindungi konsistensi transaksi lokal dan database kasir,
+          sistem hanya mengizinkan 1 tab aktif dalam satu browser.
+        </p>
+        <p className="text-[11px] text-slate-500 mt-4">
+          Silakan gunakan tab ALMA yang sudah aktif, atau tutup tab lain lalu
+          muat ulang halaman ini.
+        </p>
       </div>
     );
   }

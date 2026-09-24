@@ -58,6 +58,41 @@ export async function startSyncWorker(io) {
                         aggregateType === "WAREHOUSE_DOCUMENT" ||
                         aggregateType === "PLUSALES_DOCUMENT";
                 const targetJournal = isTxEvent ? txEventJournal : systemEventJournal;
+                // 1. Ekstraksi spasial awal dari payload event
+                let effectiveRegionId = payload.location?.regionId || payload.regionId || null;
+                let effectiveOutletId = payload.location?.outletId || payload.outletId || null;
+                let effectiveCompanyId = payload.organization?.companyId || payload.companyId || null;
+                // 2. SMART SPATIAL INHERITANCE:
+                // Jika event lanjutan (v > 1) tidak membawa lokasi (misal payload {} saat ARCHIVE/RESTORE),
+                // server otomatis mewarisinya dari event versi awal di database
+                if ((!effectiveRegionId || !effectiveOutletId || !effectiveCompanyId) &&
+                    (event.aggregateVersion || 1) > 1) {
+                    try {
+                        const rootEvents = await db
+                            .select()
+                            .from(targetJournal)
+                            .where(eq(targetJournal.aggregateId, aggregateId))
+                            .limit(1);
+                        if (rootEvents.length > 0) {
+                            const root = rootEvents[0];
+                            if (!effectiveRegionId)
+                                effectiveRegionId = root.regionId;
+                            if (!effectiveOutletId)
+                                effectiveOutletId = root.outletId;
+                            if (!effectiveCompanyId && root.payload) {
+                                const rootP = typeof root.payload === "string"
+                                    ? JSON.parse(root.payload)
+                                    : root.payload;
+                                effectiveCompanyId =
+                                    rootP.organization?.companyId || rootP.companyId || null;
+                            }
+                        }
+                    }
+                    catch (inhErr) {
+                        console.warn("[WORKER] Pewarisan spasial dilewati:", inhErr);
+                    }
+                }
+                // 3. Simpan ke database dengan lokasi dan aggregateType yang lengkap
                 await db.transaction(async (tx) => {
                     await tx.insert(targetJournal).values({
                         id: eventId,
@@ -65,8 +100,8 @@ export async function startSyncWorker(io) {
                         aggregateType: event.dddMetadata?.aggregateType || "SYSTEM",
                         aggregateVersion: event.aggregateVersion || 1,
                         type: type,
-                        regionId: payload.location?.regionId || payload.regionId || null,
-                        outletId: payload.location?.outletId || payload.outletId || null,
+                        regionId: effectiveRegionId,
+                        outletId: effectiveOutletId,
                         payload: JSON.stringify(payload),
                         actor: event.dddMetadata?.actor?.userId || "SYSTEM",
                     });
@@ -82,9 +117,9 @@ export async function startSyncWorker(io) {
                 // ============================================================
                 // TARGETED SPATIAL BROADCAST (SYNC_NEEDED)
                 // ============================================================
-                const payloadCompanyId = payload.organization?.companyId || payload.companyId;
-                const payloadRegionId = payload.location?.regionId || payload.regionId;
-                const payloadOutletId = payload.location?.outletId || payload.outletId;
+                const payloadCompanyId = effectiveCompanyId;
+                const payloadRegionId = effectiveRegionId;
+                const payloadOutletId = effectiveOutletId;
                 // EKSTRAK TARGET B2B (Vendor / Gudang Pusat)
                 const targetVendorId = payload.reference?.supplierId ||
                     payload.vendorId ||
@@ -97,17 +132,19 @@ export async function startSyncWorker(io) {
                     companyId: payloadCompanyId,
                     regionId: payloadRegionId,
                     outletId: payloadOutletId,
-                    targetVendorId: targetVendorId, // Lampirkan untuk referensi klien
+                    targetVendorId: targetVendorId,
                 };
-                // 1. Jika ini event master data tingkat holding (Company), tembakkan ke seluruh company
-                if (payloadCompanyId && !payloadRegionId && !payloadOutletId) {
+                // Jika event tidak memiliki konteks spasial perusahaan (seperti DICTIONARY), pancarkan broadcast global
+                if (!payloadCompanyId && !payloadRegionId && !payloadOutletId) {
+                    io.emit("SYNC_NEEDED", syncPayload);
+                }
+                else if (payloadCompanyId && !payloadRegionId && !payloadOutletId) {
                     io.to(`company:${payloadCompanyId}`).emit("SYNC_NEEDED", syncPayload);
                 }
                 else {
                     if (payloadRegionId) {
                         io.to(`region:${payloadRegionId}`).emit("SYNC_NEEDED", syncPayload);
                     }
-                    // --> TAMBAHAN: BROADCAST KE GUDANG TARGET JIKA TRANSAKSI B2B
                     if (targetVendorId && targetVendorId !== payloadRegionId) {
                         io.to(`region:${targetVendorId}`).emit("SYNC_NEEDED", syncPayload);
                     }

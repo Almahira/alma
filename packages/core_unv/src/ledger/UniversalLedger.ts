@@ -176,6 +176,23 @@ export class UniversalLedger {
         this.syncInitial();
       });
 
+      // Daftarkan room spasial aktif saat ini ke server
+      const currentCompId = localStorage.getItem("__unv_companyId");
+      const currentRegId = localStorage.getItem("__unv_regionId");
+      const currentOutId = localStorage.getItem("__unv_outletId");
+      this.socket.emit("UPDATE_SPATIAL_ROOMS", {
+        companyId: currentCompId,
+        regionId: currentRegId,
+        outletId: currentOutId,
+      });
+
+      // Kirim detak jantung berkala setiap 60 detik agar server mengetahui perangkat masih online
+      setInterval(() => {
+        if (this.socket && this.socket.connected) {
+          this.socket.emit("DEVICE_HEARTBEAT");
+        }
+      }, 60000);
+
       this.socket.on("SYNC_NEEDED", async (data: any) => {
         if (data?.originDeviceId !== this.nodeId) {
           console.log(
@@ -185,6 +202,17 @@ export class UniversalLedger {
           notifyStateUpdated();
         }
       });
+
+      // JARING PENGAMAN: Rekonsiliasi berkala setiap 5 menit saat sedang online
+      // Memastikan klien tidak pernah tertinggal data jika sinyal socket sempat terlewat
+      setInterval(
+        () => {
+          if (typeof navigator === "undefined" || navigator.onLine) {
+            this.syncInitial();
+          }
+        },
+        5 * 60 * 1000,
+      );
 
       this.db.collections.outbox.insert$.subscribe(() => {
         globalOutbox.processQueue();
@@ -237,7 +265,6 @@ export class UniversalLedger {
           queryParams.append("outletId", outletId);
         }
       }
-      // Catatan: Jika SUPER_ADMIN, tidak ada outletId yang dikirim sehingga server memberikan data seluruh cabang
 
       // ---> OPTIMASI SNAPSHOT PUSAT: Jika database lokal masih kosong (Klien Baru / Habis Reset) <---
       const localEventCount = await this.db.collections.events.count().exec();
@@ -279,14 +306,31 @@ export class UniversalLedger {
         }
       }
 
+      // Siapkan cursor checkpoint inkremental (kurangi buffer 2 detik untuk toleransi latensi jam)
+      const lastCursorSystem = localStorage.getItem("__unv_cursor_system");
+      const lastCursorTx = localStorage.getItem("__unv_cursor_tx");
+
+      const queryParamsSystem = new URLSearchParams(queryParams);
+      if (lastCursorSystem && localEventCount > 0) {
+        const safeSystemSince = Math.max(0, Number(lastCursorSystem) - 2000);
+        queryParamsSystem.set("since", String(safeSystemSince));
+      }
+
+      const queryParamsTx = new URLSearchParams(queryParams);
+      if (lastCursorTx && localEventCount > 0) {
+        const safeTxSince = Math.max(0, Number(lastCursorTx) - 2000);
+        queryParamsTx.set("since", String(safeTxSince));
+      }
+
       const serverEvents = await globalCircuitBreaker.fire(async () => {
         const [resSystem, resTx] = await Promise.all([
           fetch(
-            getApiUrl(`/api/events/pull/system?${queryParams.toString()}`),
+            getApiUrl(
+              `/api/events/pull/system?${queryParamsSystem.toString()}`,
+            ),
           ).catch(() => null),
-          // ---> GUNAKAN queryParams.toString() AGAR SERVER MENERIMA OUTLET_ID & REGION_ID <---
           fetch(
-            getApiUrl(`/api/events/pull/tx?${queryParams.toString()}`),
+            getApiUrl(`/api/events/pull/tx?${queryParamsTx.toString()}`),
           ).catch(() => null),
         ]);
 
@@ -294,9 +338,27 @@ export class UniversalLedger {
         let eventsTx: any[] = [];
         if (resSystem && resSystem.ok) {
           eventsSys = await resSystem.json();
+          // Update cursor system jika ada event baru
+          if (eventsSys.length > 0) {
+            const maxSysTime = Math.max(
+              ...eventsSys.map((e: any) =>
+                new Date(e.createdAt || Date.now()).getTime(),
+              ),
+            );
+            localStorage.setItem("__unv_cursor_system", String(maxSysTime));
+          }
         }
         if (resTx && resTx.ok) {
           eventsTx = await resTx.json();
+          // Update cursor tx jika ada event baru
+          if (eventsTx.length > 0) {
+            const maxTxTime = Math.max(
+              ...eventsTx.map((e: any) =>
+                new Date(e.createdAt || Date.now()).getTime(),
+              ),
+            );
+            localStorage.setItem("__unv_cursor_tx", String(maxTxTime));
+          }
         }
         return [...(eventsSys || []), ...(eventsTx || [])];
       });
@@ -369,9 +431,7 @@ export class UniversalLedger {
     } catch (error) {
       console.warn("[UNIVERSAL LEDGER] Gagal sinkronisasi awal:", error);
     } finally {
-      if (!isBackpressureHold && globalCircuitBreaker.getState() === "CLOSED") {
-        this.isSyncing = false;
-      }
+      this.isSyncing = false;
     }
   }
 
@@ -389,53 +449,81 @@ export class UniversalLedger {
   }
 
   public async commitInboxEvent(rawPayload: any): Promise<void> {
-    if (!this.initialized) await this.init();
-    const eventId = rawPayload.id;
+    await this.commitInboxBatch([rawPayload]);
+  }
 
-    const existingEvent = await this.db.collections.events
-      .findOne(eventId)
-      .exec();
-    if (existingEvent) {
-      return;
-    }
+  public async commitInboxBatch(rawPayloads: any[]): Promise<void> {
+    if (!rawPayloads || rawPayloads.length === 0) return;
 
-    const nextSeq = this.memCurrentSeq + 1;
-    const prevHash = this.memCurrentHash;
+    const job = async () => {
+      if (!this.initialized) await this.init();
 
-    const hashData = {
-      seq: nextSeq,
-      prevHash: prevHash,
-      type: rawPayload.type,
-      payload: rawPayload.payload,
-      dddMetadata: rawPayload.dddMetadata,
-      hlc: rawPayload.hlc,
+      // 1. Kumpulkan seluruh ID dan cek deduplikasi sekali jalan
+      const eventIds = rawPayloads.map((p) => p.id);
+      const existingEvents = await this.db.collections.events
+        .find({
+          selector: {
+            id: { $in: eventIds },
+          },
+        })
+        .exec();
+      const existingIdSet = new Set(existingEvents.map((d) => d.id));
+
+      const eventDocsToInsert: LedgerEventDoc[] = [];
+
+      // 2. Bangun rantai hash dan sequence untuk setiap event baru
+      for (const rawPayload of rawPayloads) {
+        const eventId = rawPayload.id;
+        if (existingIdSet.has(eventId)) continue;
+        existingIdSet.add(eventId);
+
+        const nextSeq = this.memCurrentSeq + 1;
+        const prevHash = this.memCurrentHash;
+
+        const hashData = {
+          seq: nextSeq,
+          prevHash: prevHash,
+          type: rawPayload.type,
+          payload: rawPayload.payload,
+          dddMetadata: rawPayload.dddMetadata,
+          hlc: rawPayload.hlc,
+        };
+        const validHash = CryptoManager.hash(hashData);
+
+        const eventDoc: LedgerEventDoc = {
+          id: eventId,
+          aggregateId: rawPayload.aggregateId,
+          aggregateVersion: rawPayload.aggregateVersion,
+          seq: nextSeq,
+          prevHash: prevHash,
+          hash: validHash,
+          hlc: rawPayload.hlc,
+          type: rawPayload.type,
+          payload: rawPayload.payload,
+          dddMetadata: rawPayload.dddMetadata,
+          nodeMetadata: rawPayload.nodeMetadata,
+        };
+
+        this.memCurrentSeq = nextSeq;
+        this.memCurrentHash = validHash;
+        this.memAggregateVersions.set(
+          rawPayload.aggregateId,
+          rawPayload.aggregateVersion,
+        );
+
+        eventDocsToInsert.push(eventDoc);
+      }
+
+      // 3. Simpan seluruh batch ke IndexedDB dalam 1 kali transaksi
+      if (eventDocsToInsert.length > 0) {
+        await this.db.collections.events.bulkInsert(eventDocsToInsert);
+        notifyStateUpdated();
+      }
     };
-    const validHash = CryptoManager.hash(hashData);
 
-    const eventDoc: LedgerEventDoc = {
-      id: eventId,
-      aggregateId: rawPayload.aggregateId,
-      aggregateVersion: rawPayload.aggregateVersion,
-      seq: nextSeq,
-      prevHash: prevHash,
-      hash: validHash,
-      hlc: rawPayload.hlc,
-      type: rawPayload.type,
-      payload: rawPayload.payload,
-      dddMetadata: rawPayload.dddMetadata,
-      nodeMetadata: rawPayload.nodeMetadata,
-    };
-
-    this.memCurrentSeq = nextSeq;
-    this.memCurrentHash = validHash;
-    this.memAggregateVersions.set(
-      rawPayload.aggregateId,
-      rawPayload.aggregateVersion,
-    );
-
-    await this.db.collections.events.insert(eventDoc);
-
-    notifyStateUpdated();
+    const nextPromise = this.appendQueue.catch(() => {}).then(job);
+    this.appendQueue = nextPromise;
+    await nextPromise;
   }
 
   public async appendEvent(
@@ -446,7 +534,7 @@ export class UniversalLedger {
     payload: Record<string, any>,
     actor: { userId: string; role: string },
   ): Promise<LedgerEventDoc> {
-    return (this.appendQueue = this.appendQueue.then(async () => {
+    const job = async (): Promise<LedgerEventDoc> => {
       if (!this.initialized) await this.init();
 
       const currentVersion = await this.getAggregateVersion(aggregateId);
@@ -523,7 +611,13 @@ export class UniversalLedger {
       }
 
       return eventDoc;
-    })) as Promise<LedgerEventDoc>;
+    };
+
+    // Tangkap kegagalan sebelumnya dengan .catch() agar antrean tidak macet,
+    // namun tetap meneruskan hasil/error ke pemanggil appendEvent
+    const nextPromise = this.appendQueue.catch(() => {}).then(job);
+    this.appendQueue = nextPromise;
+    return nextPromise;
   }
 
   public getRxDatabase() {

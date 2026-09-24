@@ -407,16 +407,17 @@ router.post("/broadcast-resync", async (req: Request, res: Response) => {
     // 1. Terbitkan stempel epoch baru (angka selalu lebih besar)
     serverSyncEpoch = Date.now();
 
-    // 2. Siarkan ke seluruh perangkat yang sedang online saat ini
+    // 2. Siarkan ke seluruh perangkat dengan perintah paksa logout ke halaman login
     const io = req.app.get("io");
     if (io) {
       io.emit("REMOTE_RESYNC_TRIGGER", {
         epoch: serverSyncEpoch,
         timestamp: serverSyncEpoch,
+        forceLogout: true,
         reason,
       });
       console.log(
-        `[STEMPEL UNIVERSAL] Epoch baru diterbitkan: ${serverSyncEpoch}. Menembakkan sinyal ke seluruh cabang...`,
+        `[STEMPEL UNIVERSAL] Epoch baru diterbitkan: ${serverSyncEpoch}. Menembakkan sinyal reset masal & logout ke seluruh cabang...`,
       );
     }
 

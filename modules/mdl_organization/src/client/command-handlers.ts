@@ -642,7 +642,16 @@ export const organizationCommandHandlers: CommandHandler[] = [
           id,
           type,
           nextVer,
-          {},
+          {
+            id: cmd.payload.id || cmd.payload.documentId,
+            organization: {
+              companyId: localStorage.getItem("__unv_companyId") || "",
+            },
+            location: {
+              regionId: localStorage.getItem("__unv_regionId") || null,
+              outletId: localStorage.getItem("__unv_outletId") || null,
+            },
+          },
           getActiveActor(),
         );
       }
@@ -680,7 +689,16 @@ export const organizationCommandHandlers: CommandHandler[] = [
           aggregateId,
           type,
           nextVer,
-          {},
+          {
+            id: cmd.payload.id || cmd.payload.documentId,
+            organization: {
+              companyId: localStorage.getItem("__unv_companyId") || "",
+            },
+            location: {
+              regionId: localStorage.getItem("__unv_regionId") || null,
+              outletId: localStorage.getItem("__unv_outletId") || null,
+            },
+          },
           getActiveActor(),
         );
       }

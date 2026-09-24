@@ -1,5 +1,5 @@
 // File: modules/mdl_organization/src/server/schema.ts
-import { pgTable, text, varchar, boolean, timestamp, integer, date, } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, boolean, timestamp, integer, date, jsonb, } from "drizzle-orm/pg-core";
 // ==========================================
 // 1. STRUKTUR ORGANISASI
 // ==========================================
@@ -198,6 +198,7 @@ export const userAccounts = pgTable("user_accounts", {
     pin: varchar("pin", { length: 10 }),
     role: varchar("role", { length: 50 }).notNull().default("STAFF"),
     positionId: text("position_id"),
+    allowedOutletIds: jsonb("allowed_outlet_ids").notNull().default([]), // <--- DAFTAR CABANG YANG DIBERI HAK AKSES
     lastLogin: timestamp("last_login"),
     isActive: boolean("is_active").default(true),
     aggregateVersion: integer("aggregate_version").notNull().default(1),

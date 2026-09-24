@@ -20,7 +20,7 @@ export interface InvoicePrintContext {
 
 /**
  * 1. CETAK INVOICE DARI BARIS AKSI (ICON PRINT)
- * Diperbarui: Menggunakan struktur Native Table Header/Footer 
+ * Diperbarui: Menggunakan struktur Native Table Header/Footer
  * agar desain Heksagonal dan Teks aman di multi-halaman tanpa terpotong.
  */
 export const printSingleInvoicePdf = (context: InvoicePrintContext) => {
@@ -38,7 +38,7 @@ export const printSingleInvoicePdf = (context: InvoicePrintContext) => {
 
   const isPiutang = doc.documentType === "PIUTANG";
   const invoiceTitle = isPiutang ? "SURAT JALAN" : "INVOICE";
-  
+
   const items = doc.items || [];
   const formattedDate = new Date(doc.date).toLocaleDateString("id-ID", {
     day: "2-digit",
