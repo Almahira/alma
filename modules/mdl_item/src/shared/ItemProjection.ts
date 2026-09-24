@@ -62,6 +62,7 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
         this.products.set(aggregateId, {
           id: aggregateId,
           ...payload,
+          aggregateVersion: event.aggregateVersion || 1,
           isExpense: Boolean(payload.isExpense),
           uomConversions: Array.isArray(payload.uomConversions)
             ? payload.uomConversions
@@ -75,6 +76,8 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
           this.products.set(aggregateId, {
             ...existing,
             ...payload,
+            aggregateVersion:
+              event.aggregateVersion || existing.aggregateVersion || 1,
             isExpense:
               payload.isExpense !== undefined
                 ? Boolean(payload.isExpense)
@@ -97,6 +100,8 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
             ...existing,
             approvalStatus: payload.approvalStatus,
             validateId: payload.validateId || null,
+            aggregateVersion:
+              event.aggregateVersion || existing.aggregateVersion || 1,
           });
         }
         break;

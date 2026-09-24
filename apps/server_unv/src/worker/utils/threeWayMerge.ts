@@ -30,22 +30,31 @@ export function threeWayMerge(
     const valServer = serverState[key];
     const valClient = clientState[key];
 
-    const serverChanged = JSON.stringify(valBase) !== JSON.stringify(valServer);
-    const clientChanged = JSON.stringify(valBase) !== JSON.stringify(valClient);
+    // Field hanya dianggap berubah jika didefinisikan secara eksplisit (bukan undefined / delta kosong)
+    const serverChanged =
+      valServer !== undefined &&
+      JSON.stringify(valBase) !== JSON.stringify(valServer);
+    const clientChanged =
+      valClient !== undefined &&
+      JSON.stringify(valBase) !== JSON.stringify(valClient);
 
     if (
       serverChanged &&
       clientChanged &&
       JSON.stringify(valServer) !== JSON.stringify(valClient)
     ) {
-      // Tabrakan keras di field yang sama dengan nilai berbeda
-      hasConflict = true;
-      conflictFields.push(key);
-    } else if (serverChanged) {
-      merged[key] = valServer;
+      // Khusus approval status: jika klien menyetujui (APPROVED), dahulukan keputusan validasi supervisor
+      if (key === "approvalStatus" && valClient === "APPROVED") {
+        merged[key] = valClient;
+      } else {
+        hasConflict = true;
+        conflictFields.push(key);
+      }
     } else if (clientChanged) {
       merged[key] = valClient;
-    } else {
+    } else if (serverChanged) {
+      merged[key] = valServer;
+    } else if (valBase !== undefined) {
       merged[key] = valBase;
     }
   });

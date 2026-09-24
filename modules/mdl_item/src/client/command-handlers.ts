@@ -265,20 +265,20 @@ export const itemCommandHandlers: CommandHandler[] = [
   {
     commandType: "VALIDATE_PRODUCT",
     execute: async (cmd: Command) => {
-      // 1. Ambil versi dari ledger lokal
+      // 1. Ambil versi dari ledger lokal RxDB
       const localLedgerVer = await globalLedger.getAggregateVersion(
         cmd.payload.id,
       );
 
-      // 2. Ambil versi dari proyeksi store produk di memori (jika ada event sync masuk)
+      // 2. Ambil versi dari memori proyeksi produk
       const { useItemStore } = await import("./store.js");
       const storeItem = useItemStore
         .getState()
         .products.find((p: any) => p.id === cmd.payload.id);
-      const storeVer = Number(storeItem?.aggregateVersion || 1);
+      const storeVer = Number(storeItem?.aggregateVersion || 0);
 
-      // 3. Gunakan versi tertinggi yang terdeteksi agar tidak menembakkan versi usang
-      const currentVer = Math.max(localLedgerVer, storeVer);
+      // 3. Pastikan versi lanjutan selalu bergerak maju di atas versi tertinggi
+      const currentVer = Math.max(localLedgerVer, storeVer, 1);
       const nextVer = currentVer + 1;
 
       const payload = {
