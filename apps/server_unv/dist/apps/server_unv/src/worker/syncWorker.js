@@ -1,6 +1,6 @@
 // File: apps/server_unv/src/worker/syncWorker.ts
 import { AckPolicy } from "nats";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, asc } from "drizzle-orm";
 import { js, jsm, sc } from "../config/nats.js";
 import { db } from "../config/db.js";
 import { systemEventJournal, txEventJournal, quarantineEventJournal, } from "../../../../packages/db-schema/index.js";
@@ -39,6 +39,10 @@ export async function startSyncWorker(io) {
             let payload = {};
             let event = {};
             let isTxEvent = false;
+            // Deklarasi variabel spasial di level scope iterasi agar dapat diakses di try dan catch
+            let effectiveRegionId = null;
+            let effectiveOutletId = null;
+            let effectiveCompanyId = null;
             try {
                 const rawData = sc.decode(m.data);
                 event = JSON.parse(rawData);
@@ -59,9 +63,12 @@ export async function startSyncWorker(io) {
                         aggregateType === "PLUSALES_DOCUMENT";
                 const targetJournal = isTxEvent ? txEventJournal : systemEventJournal;
                 // 1. Ekstraksi spasial awal dari payload event
-                let effectiveRegionId = payload.location?.regionId || payload.regionId || null;
-                let effectiveOutletId = payload.location?.outletId || payload.outletId || null;
-                let effectiveCompanyId = payload.organization?.companyId || payload.companyId || null;
+                effectiveRegionId =
+                    payload.location?.regionId || payload.regionId || null;
+                effectiveOutletId =
+                    payload.location?.outletId || payload.outletId || null;
+                effectiveCompanyId =
+                    payload.organization?.companyId || payload.companyId || null;
                 // 2. SMART SPATIAL INHERITANCE:
                 // Jika event lanjutan (v > 1) tidak membawa lokasi (misal payload {} saat ARCHIVE/RESTORE),
                 // server otomatis mewarisinya dari event versi awal di database
@@ -72,6 +79,7 @@ export async function startSyncWorker(io) {
                             .select()
                             .from(targetJournal)
                             .where(eq(targetJournal.aggregateId, aggregateId))
+                            .orderBy(asc(targetJournal.aggregateVersion))
                             .limit(1);
                         if (rootEvents.length > 0) {
                             const root = rootEvents[0];
@@ -219,6 +227,13 @@ export async function startSyncWorker(io) {
                                         aggregateVersion: newVersion,
                                         payload: merged,
                                     };
+                                    // Pastikan lokasi spasial mewarisi nilai yang sah
+                                    const mergedRegionId = effectiveRegionId ||
+                                        latestServerEventData[0].regionId ||
+                                        null;
+                                    const mergedOutletId = effectiveOutletId ||
+                                        latestServerEventData[0].outletId ||
+                                        null;
                                     await db.transaction(async (tx) => {
                                         await tx.insert(targetJournal).values({
                                             id: newEventId,
@@ -226,8 +241,8 @@ export async function startSyncWorker(io) {
                                             aggregateType: event.dddMetadata?.aggregateType || "SYSTEM",
                                             aggregateVersion: newVersion,
                                             type: type,
-                                            regionId: payload.location?.regionId || payload.regionId || null,
-                                            outletId: payload.location?.outletId || payload.outletId || null,
+                                            regionId: mergedRegionId,
+                                            outletId: mergedOutletId,
                                             payload: JSON.stringify(merged),
                                             actor: "SYSTEM_MERGE",
                                         });
@@ -236,12 +251,47 @@ export async function startSyncWorker(io) {
                                             await handler(tx, newEvent);
                                         }
                                     });
+                                    // Pancarkan SYNC_NEEDED seketika agar klien langsung menarik versi hasil merge
+                                    const syncPayload = {
+                                        eventId: newEventId,
+                                        type,
+                                        aggregateType: event.dddMetadata?.aggregateType,
+                                        originDeviceId: "SERVER_MERGE",
+                                        companyId: effectiveCompanyId,
+                                        regionId: mergedRegionId,
+                                        outletId: mergedOutletId,
+                                    };
+                                    if (mergedOutletId) {
+                                        io.to(`outlet:${mergedOutletId}`).emit("SYNC_NEEDED", syncPayload);
+                                    }
+                                    else if (mergedRegionId) {
+                                        io.to(`region:${mergedRegionId}`).emit("SYNC_NEEDED", syncPayload);
+                                    }
+                                    if (effectiveCompanyId) {
+                                        io.to(`company:${effectiveCompanyId}`).emit("SYNC_NEEDED", syncPayload);
+                                    }
                                 }
                             }
                             m.ack();
                         }
                         catch (mergeErr) {
                             console.error("[WORKER] Gagal melakukan proses 3-Way Merge:", mergeErr);
+                            try {
+                                await db.insert(quarantineEventJournal).values({
+                                    id: eventId,
+                                    aggregateId: aggregateId,
+                                    aggregateType: event.dddMetadata?.aggregateType || "SYSTEM",
+                                    aggregateVersion: event.aggregateVersion || 1,
+                                    type: type,
+                                    payload: JSON.stringify(payload),
+                                    actor: event.dddMetadata?.actor?.userId || "SYSTEM",
+                                    errorReason: `Crash pada 3-Way Merge: ${mergeErr.message}`,
+                                });
+                                m.ack();
+                            }
+                            catch (qErr) {
+                                console.error("[WORKER] Gagal karantina crash merge:", qErr);
+                            }
                         }
                     }
                 }

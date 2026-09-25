@@ -386,9 +386,29 @@ router.get("/devices", async (_req: Request, res: Response) => {
 // =========================================================================
 // 7. STEMPEL UNIVERSAL: PENYIMPANAN EPOCH & BROADCAST RESYNC MASAL
 // =========================================================================
+import fs from "fs";
+import path from "path";
 
-// Variabel penyimpan nomor versi stempel server (Dimulai dari timestamp saat server boot)
-let serverSyncEpoch = Date.now();
+// Simpan stempel epoch ke file lokal agar TIDAK BERUBAH saat server restart biasa,
+// dan HANYA berubah ketika tombol 'Broadcast Re-Sync' ditekan oleh admin.
+const EPOCH_FILE_PATH = path.join(process.cwd(), ".server_sync_epoch");
+
+function getStoredEpoch(): number {
+  try {
+    if (fs.existsSync(EPOCH_FILE_PATH)) {
+      const content = fs.readFileSync(EPOCH_FILE_PATH, "utf-8").trim();
+      const num = Number(content);
+      if (!isNaN(num) && num > 0) return num;
+    }
+  } catch {}
+  const initial = Date.now();
+  try {
+    fs.writeFileSync(EPOCH_FILE_PATH, String(initial));
+  } catch {}
+  return initial;
+}
+
+let serverSyncEpoch = getStoredEpoch();
 
 // Endpoint ringan untuk diperiksa oleh tablet/HP saat pertama kali buka / online
 router.get("/sync-epoch", (_req: Request, res: Response) => {
@@ -404,8 +424,13 @@ router.post("/broadcast-resync", async (req: Request, res: Response) => {
   try {
     const { reason = "Penyelarasan Masal & Reset Data Pusat" } = req.body;
 
-    // 1. Terbitkan stempel epoch baru (angka selalu lebih besar)
+    // 1. Terbitkan stempel epoch baru dan simpan permanen ke disk server
     serverSyncEpoch = Date.now();
+    try {
+      fs.writeFileSync(EPOCH_FILE_PATH, String(serverSyncEpoch));
+    } catch (fsErr) {
+      console.error("[EPOCH SAVE ERROR]:", fsErr);
+    }
 
     // 2. Siarkan ke seluruh perangkat dengan perintah paksa logout ke halaman login
     const io = req.app.get("io");

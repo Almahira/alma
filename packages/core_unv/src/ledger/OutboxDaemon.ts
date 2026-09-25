@@ -14,6 +14,9 @@ function formatHumanReadableLog(
   status: string,
   serverMessage?: string,
 ): { title: string; message: string } {
+  // Proteksi null-safety jika payload kosong / undefined
+  const p = payload && typeof payload === "object" ? payload : {};
+
   // 1. Memisahkan Entitas dan Aksi (Misal: OUTLET_CREATED -> Entitas: OUTLET, Aksi: CREATED)
   const parts = type.split("_");
   const entityRaw = parts[0] || "DATA";
@@ -25,10 +28,10 @@ function formatHumanReadableLog(
 
   // 2. Mencari identitas/nama dari data yang diedit
   const itemName =
-    payload.name ||
-    payload.code ||
-    payload.documentName ||
-    `ID: ${payload.id?.substring(0, 6) || "Data"}`;
+    p.name ||
+    p.code ||
+    p.documentName ||
+    `ID: ${p.id?.substring(0, 6) || "Data"}`;
 
   // 3. Menangani Respon Konflik/Merge dari Server
   if (status === "MERGED") {
@@ -37,10 +40,10 @@ function formatHumanReadableLog(
       message: `Perubahan Anda berhasil digabungkan dengan perubahan dari pengguna lain secara otomatis.`,
     };
   }
-  if (status === "REJECTED") {
+  if (status === "REJECTED" || status === "FAILED") {
     return {
       title: `Gagal Menyimpan: ${entity} "${itemName}"`,
-      message: `Data ditolak oleh server. Alasan: ${serverMessage || "Terjadi tabrakan data yang tidak bisa digabungkan"}.`,
+      message: `Data ditolak oleh server. Alasan: ${serverMessage || "Terjadi tabrakan data atau kendala di server"}.`,
     };
   }
 
@@ -48,14 +51,12 @@ function formatHumanReadableLog(
   const ignoredKeys = ["id", "companyId", "regionId", "documentId", "fileObj"];
 
   // 5. Mengumpulkan daftar perubahan (Delta / Payload)
-  const changedFields = Object.keys(payload)
+  const changedFields = Object.keys(p)
     .filter(
       (key) =>
-        !ignoredKeys.includes(key) &&
-        payload[key] !== undefined &&
-        payload[key] !== "",
+        !ignoredKeys.includes(key) && p[key] !== undefined && p[key] !== "",
     )
-    .map((key) => `${key}: ${payload[key]}`)
+    .map((key) => `${key}: ${p[key]}`)
     .join(", ");
 
   // 6. Menyusun Kalimat Akhir Berdasarkan Aksi
@@ -78,7 +79,6 @@ function formatHumanReadableLog(
     title = `Penambahan Dokumen Baru`;
     message = `File "${itemName}" berhasil diunggah dan ditambahkan oleh ${actor}.`;
   } else {
-    // Fallback untuk event custom di masa depan
     title = `Aktivitas: ${entity} ${actionRaw}`;
     message = `Aksi dilakukan oleh ${actor}. Detail: ${changedFields}`;
   }
@@ -114,8 +114,8 @@ export class OutboxDaemon {
   }
 
   /**
-   * Draining Queue Loop: Terus memproses antrean sampai benar-benar KOSONG (Anti-Race Condition)
-   * Dilengkapi pengecekan konektivitas nyata, Circuit Breaker, dan Backoff Failure Guard.
+   * Draining Queue Loop: Terus memproses antrean sampai benar-benar KOSONG
+   * Dilengkapi proteksi Head-of-Line Blocking, Circuit Breaker, dan Timeout yang stabil.
    */
   public async processQueue() {
     if (this.isProcessing) return;
@@ -129,7 +129,7 @@ export class OutboxDaemon {
       return;
     }
 
-    // 2. Validasi Status Circuit Breaker (Jika sedang cooldown 30 detik, jangan kirim)
+    // 2. Validasi Status Circuit Breaker (Jika sedang cooldown, tahan pengiriman)
     if (globalCircuitBreaker.getState() === "OPEN") {
       return;
     }
@@ -140,7 +140,6 @@ export class OutboxDaemon {
       const rxdb = globalLedger.getRxDatabase();
       if (!rxdb || !rxdb.collections.outbox) return;
 
-      // Label untuk keluar dari while ketika terjadi error jaringan / circuit open
       outer: while (true) {
         if (
           (typeof navigator !== "undefined" && !navigator.onLine) ||
@@ -150,9 +149,13 @@ export class OutboxDaemon {
           break outer;
         }
 
-        // Ambil batch dokumen antrean terurut dari yang tertua
+        // Ambil dokumen berstatus PENDING terurut dari yang tertua
         const pendingEvents = await rxdb.collections.outbox
-          .find({ sort: [{ createdAt: "asc" }], limit: 10 })
+          .find({
+            selector: { status: "PENDING" },
+            sort: [{ createdAt: "asc" }],
+            limit: 10,
+          })
           .exec();
 
         // Jika antrean sudah bersih, hentikan loop
@@ -164,6 +167,16 @@ export class OutboxDaemon {
           const docData = doc.toJSON();
           const retryCount = docData.retryCount || 0;
 
+          // PROTEKSI HEAD-OF-LINE BLOCKING:
+          // Jika event gagal lebih dari 10 kali berturut-turut, tandai FAILED agar tidak menghalangi antrean lain
+          if (retryCount >= 10) {
+            console.error(
+              `[OUTBOX DEAD-LETTER] Event ${docData.id} melebihi batas coba ulang (10x). Memindahkan ke status FAILED.`,
+            );
+            await doc.patch({ status: "FAILED" });
+            continue;
+          }
+
           const payload = docData.eventPayload;
           const actorUserId = payload.dddMetadata?.actor?.userId || "Sistem";
 
@@ -172,12 +185,13 @@ export class OutboxDaemon {
               if (!this.socket || !this.socket.connected) {
                 throw new Error("Socket terputus saat transmisi.");
               }
+              // Timeout 10 detik (stabil untuk jaringan seluler cabang)
               return await this.socket
-                .timeout(5000)
+                .timeout(10000)
                 .emitWithAck("SYNC_UP_EVENTS", payload);
             });
 
-            // Handle jika perangkat ini sudah dinonaktifkan / digantikan oleh mesin lain
+            // Handle jika perangkat dinonaktifkan
             if (response.error === "DEVICE_DEACTIVATED") {
               if (typeof window !== "undefined") {
                 window.dispatchEvent(
@@ -201,6 +215,7 @@ export class OutboxDaemon {
               response.message,
             );
 
+            // Jika sukses atau di-merge: buang dari antrean outbox
             if (response.status === "SUCCESS" || response.status === "MERGED") {
               await rxdb.collections.sync_logs.insert({
                 id: ulid(),
@@ -221,6 +236,11 @@ export class OutboxDaemon {
                 createdAt: Date.now(),
               });
               await doc.remove();
+            } else if (response.status === "FAILED") {
+              // Jika server mengembalikan FAILED, lempar error agar memicu backoff retry
+              throw new Error(
+                response.message || "Server menolak memproses antrean.",
+              );
             }
           } catch (error) {
             console.warn(
@@ -231,7 +251,7 @@ export class OutboxDaemon {
               retryCount: retryCount + 1,
             });
 
-            // Hentikan batch saat jaringan putus / socket timeout, keluar dari loop draining
+            // Hentikan batch saat jaringan putus / socket timeout, jeda sejenak
             break outer;
           }
         }

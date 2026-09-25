@@ -1,6 +1,5 @@
 // File: packages/core_unv/src/ledger/InboxDaemon.ts
 import { globalLedger } from "./UniversalLedger";
-import { LedgerEventDoc } from "./schema";
 import { Subscription } from "rxjs";
 
 export class InboxDaemon {
@@ -51,7 +50,7 @@ export class InboxDaemon {
   }
 
   /**
-   * MEMPROSES SELURUH ANTREAN EVENT DI INBOX SECARA IDEMPOTEN & AMAN
+   * MEMPROSES SELURUH ANTREAN EVENT DI INBOX SECARA IDEMPOTEN & KEBAL MACET
    */
   public async processQueue(): Promise<void> {
     if (this.isProcessing) return;
@@ -78,10 +77,10 @@ export class InboxDaemon {
         const eventPayloads = rawDocs.map((doc) => doc.eventPayload);
 
         try {
-          // 1. Delegasikan pemrosesan batch ke Ledger Utama
+          // 1. Eksekusi cepat dalam 1 batch besar (50 event)
           await globalLedger.commitInboxBatch(eventPayloads);
 
-          // 2. Hapus seluruh dokumen inbox yang sudah selesai diproses secara borongan
+          // 2. Hapus seluruh dokumen inbox yang berhasil diproses
           const docIds = pendingEvents.map(
             (d) => (d as any).primary || d.id || d.toJSON().id,
           );
@@ -92,12 +91,27 @@ export class InboxDaemon {
               await doc.remove().catch(() => {});
             }
           }
-        } catch (error: any) {
-          console.error(
-            "[INBOX DAEMON] Gagal memproses batch inbox:",
-            error?.message || error,
+        } catch (batchError: any) {
+          console.warn(
+            "[INBOX DAEMON] Batch 50 event gagal diproses sekaligus. Beralih ke pemrosesan per-item agar antrean tidak macet...",
+            batchError?.message || batchError,
           );
-          break;
+
+          // PROTEKSI HEAD-OF-LINE BLOCKING:
+          // Proses satu per satu agar event yang valid tetap bisa masuk
+          for (const doc of pendingEvents) {
+            try {
+              await globalLedger.commitInboxBatch([doc.toJSON().eventPayload]);
+              await doc.remove().catch(() => {});
+            } catch (singleErr: any) {
+              console.error(
+                `[INBOX DAEMON] Event ${doc.id} korup/gagal:`,
+                singleErr?.message || singleErr,
+              );
+              // Tandai FAILED agar loop berikutnya tidak mencoba event rusak ini lagi
+              await doc.patch({ status: "FAILED" }).catch(() => {});
+            }
+          }
         }
       }
     } catch (err: any) {

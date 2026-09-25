@@ -31,24 +31,44 @@ export function getStartOfCurrentMonth(): number {
 }
 
 /**
- * Mengecek apakah payload transaksi menandakan data tersebut sudah berada di "Terminal State" (Status Akhir).
- * Terminal State berarti transaksi sudah tamat (entah sukses, lunas, dibatalkan, atau ditolak),
- * sehingga aman untuk di-pruning (dihapus dari RAM) jika sudah melewati bulan berjalan.
+ * Mengecek apakah payload transaksi menandakan data tersebut benar-benar sudah selesai.
+ * Transaksi yang masih berhutang (UNPAID/PARTIAL) dan Stok Opname TIDAK BOLEH di-pruning!
  */
 export function isTransactionCompleted(payload: any): boolean {
   if (!payload) return false;
 
-  // Deteksi berbagai key yang mungkin dipakai oleh modul bisnis di masa depan
+  // 1. JANGAN PERNAH PRUNE STOCK OPNAME, INITIAL STOCK, ATAU RESEP:
+  // Ini adalah data dasar acuan saldo stok fisik gudang yang wajib selalu ada
+  if (
+    payload.realQty !== undefined ||
+    payload.recipeItems !== undefined ||
+    payload.type === "STOCK_OPNAME" ||
+    payload.type === "INITIAL_STOCK" ||
+    payload.type === "RECIPE"
+  ) {
+    return false;
+  }
+
+  // 2. CEK STATUS PEMBAYARAN: Jika nota masih berhutang (UNPAID/PARTIAL/TEMPO), JANGAN DIHAPUS!
+  const paymentStatus = String(payload.paymentStatus || "").toUpperCase();
+  if (
+    paymentStatus === "UNPAID" ||
+    paymentStatus === "PARTIAL" ||
+    paymentStatus === "TEMPO"
+  ) {
+    return false;
+  }
+
+  // 3. DAFTAR UNIVERSAL STATUS AKHIR (TERMINAL STATES)
   const status =
     payload.status ||
-    payload.paymentStatus ||
     payload.docStatus ||
-    payload.transactionStatus;
+    payload.transactionStatus ||
+    payload.paymentStatus;
   if (!status) return false;
 
-  // DAFTAR UNIVERSAL TERMINAL STATES (STATUS AKHIR)
   const terminalStatuses = [
-    // 1. Rumpun Sukses / Lunas / Selesai
+    // Rumpun Sukses & Lunas Sempurna
     "PAID",
     "COMPLETED",
     "VALIDATED",
@@ -56,10 +76,7 @@ export function isTransactionCompleted(payload: any): boolean {
     "CLOSED",
     "SETTLED",
     "DELIVERED",
-    "RECEIVED",
-    "APPROVED",
-
-    // 2. Rumpun Batal / Gagal (Sudah tutup buku, aman untuk dihapus)
+    // Rumpun Batal / Void
     "CANCELLED",
     "REJECTED",
     "FAILED",

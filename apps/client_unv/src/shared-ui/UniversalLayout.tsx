@@ -1,5 +1,23 @@
+// ============================================================================
 // File: apps/client_unv/src/shared-ui/UniversalLayout.tsx
+// Layout universal ALMA ERP: Header, Sidebar, Footer, Modal, Radial Menu, PWA
+// ============================================================================
+
+// ---------------------------------------------------------------------------
+// 1. IMPORTS
+// ---------------------------------------------------------------------------
 import { LicenseManager } from "../../../../packages/core_unv/src/ledger/licenseManager";
+import { globalLedger } from "../../../../packages/core_unv/src/ledger/UniversalLedger";
+import { useOrgStore } from "../../../../modules/mdl_organization/src/client/store";
+import { manager } from "../pluginRegistry";
+import { sysToast } from "./useToastStore";
+import { EventBus } from "../../../../packages/core_unv/src/cqrs/EventBus";
+
+import { ActivityDrawer } from "./ActivityDrawer";
+import { CommandPalette } from "./CommandPalette";
+import { UniversalToast } from "./UniversalToast";
+import { VirtualNumpad } from "./VirtualNumpad";
+
 import React, {
   useState,
   useEffect,
@@ -8,40 +26,43 @@ import React, {
   useContext,
   useMemo,
 } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
+import { createPortal } from "react-dom";
+
+// ---------------------------------------------------------------------------
+// 2. ICONS
+// ---------------------------------------------------------------------------
 import {
   Search,
-  LogOut,
-  ChevronDown,
   Bell,
   Settings,
+  ChevronDown,
   Circle,
-  Sun,
-  Moon,
-  Wifi,
-  WifiOff,
-  X,
   Boxes,
-  Power,
   Box,
-  ShieldCheck,
-  Key,
-  Minimize2,
-  Download,
   Store,
   Building2,
   LayoutDashboard,
+  LogOut,
+  ShieldCheck,
+  Key,
+  Sun,
+  Moon,
+  Minimize2,
   Maximize2,
+  Wifi,
+  WifiOff,
+  Power,
+  Download,
+  X,
+  RefreshCw,
+  AlertTriangle,
+  Database,
 } from "lucide-react";
-import { useNavigate, useLocation } from "react-router-dom";
-import { createPortal } from "react-dom";
-import { ActivityDrawer } from "./ActivityDrawer";
-import { CommandPalette } from "./CommandPalette";
-import { VirtualNumpad } from "./VirtualNumpad";
-import { UniversalToast } from "./UniversalToast";
-import { manager } from "../pluginRegistry";
-import { sysToast } from "./useToastStore";
-import { useOrgStore } from "../../../../modules/mdl_organization/src/client/store";
-import { globalLedger } from "../../../../packages/core_unv/src/ledger/UniversalLedger";
+
+// ============================================================================
+// 3. TIPE & INTERFACE
+// ============================================================================
 
 export interface MenuConfig {
   id: string;
@@ -63,7 +84,6 @@ export interface UniversalLayoutProps {
   workspaceName?: string;
 }
 
-// ========== TIPE MODAL UNIVERSAL ==========
 export interface AlertConfig {
   title?: string;
   message: string;
@@ -96,6 +116,10 @@ interface UniversalModalContextValue {
   closeSideOver: () => void;
 }
 
+// ============================================================================
+// 4. CONTEXT MODAL
+// ============================================================================
+
 export const UniversalModalContext = createContext<
   UniversalModalContextValue | undefined
 >(undefined);
@@ -103,16 +127,15 @@ export const UniversalModalContext = createContext<
 export const useUniversalModal = () => {
   const context = useContext(UniversalModalContext);
   if (!context) {
-    throw new Error(
-      "useUniversalModal harus digunakan di dalam UniversalLayout",
-    );
+    throw new Error("useUniversalModal harus dipakai di dalam UniversalLayout");
   }
   return context;
 };
 
-// =========================================================================
-// MODAL: KONFIGURASI MODUL KONTROL PERANGKAT
-// =========================================================================
+// ============================================================================
+// 5. MODAL: MODUL & LISENSI
+// ============================================================================
+
 const ModuleManagerModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const allPlugins = manager.getAllPlugins();
 
@@ -129,7 +152,6 @@ const ModuleManagerModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     }
   });
 
-  // State Input Kunci Lisensi Baru
   const [showKeyInput, setShowKeyInput] = useState(false);
   const [licenseInput, setLicenseInput] = useState("");
 
@@ -146,7 +168,6 @@ const ModuleManagerModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     setAllowedModules(allPlugins.map((p) => p.name));
   };
 
-  // VERIFIKASI & AKTIVASI KUNCI LISENSI SECARA INSTAN (OFFLINE-SAFE)
   const handleApplyLicenseKey = () => {
     if (!licenseInput.trim()) {
       return sysToast.error(
@@ -163,11 +184,9 @@ const ModuleManagerModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       );
     }
 
-    // 1. Simpan Tier & Token Baru
     localStorage.setItem("__unv_license_tier", result.tier);
     localStorage.setItem("__unv_license_token", licenseInput.trim());
 
-    // 2. Gabungkan modul baru yang diizinkan oleh lisensi
     const newAllowed = Array.from(
       new Set([...allowedModules, ...result.allowedModules]),
     );
@@ -183,9 +202,7 @@ const ModuleManagerModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       `Paket ${result.tier} aktif untuk ${result.companyName || "Perusahaan"}. Masa aktif s/d ${result.validUntil ? new Date(result.validUntil).toLocaleDateString("id-ID") : "Selamanya"}`,
     );
 
-    setTimeout(() => {
-      window.location.reload();
-    }, 600);
+    setTimeout(() => window.location.reload(), 600);
   };
 
   const handleSave = () => {
@@ -197,15 +214,13 @@ const ModuleManagerModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       "Modul Diperbarui",
       "Konfigurasi modul berhasil disimpan. Memuat ulang antarmuka...",
     );
-    setTimeout(() => {
-      window.location.reload();
-    }, 400);
+    setTimeout(() => window.location.reload(), 400);
   };
 
   return (
     <div className="fixed inset-0 z-100 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
       <div className="bg-(--bg-card) w-full max-w-2xl rounded-2xl shadow-2xl border border-(--border-color) overflow-hidden flex flex-col max-h-[85vh] animate-in fade-in zoom-in-95 duration-150">
-        {/* Header Modal */}
+        {/* Header */}
         <div className="px-6 py-4 border-b border-(--border-color) flex items-center justify-between bg-(--surface-hover) shrink-0">
           <div className="flex items-center gap-3">
             <Boxes className="w-5 h-5 text-orange-500" />
@@ -239,8 +254,9 @@ const ModuleManagerModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           </button>
         </div>
 
-        {/* BUKU AKTIVASI LISENSI BARU */}
+        {/* Body */}
         <div className="p-6 overflow-y-auto custom-scrollbar flex-1 space-y-4">
+          {/* Status lisensi */}
           <div className="p-3.5 bg-(--bg-input) rounded-xl border border-(--border-color) flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               <ShieldCheck className="w-4 h-4 text-orange-500" />
@@ -264,7 +280,7 @@ const ModuleManagerModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             </button>
           </div>
 
-          {/* FORM AKTIVASI / PEMBELIAN LISENSI IN-APP */}
+          {/* Form aktivasi */}
           {showKeyInput && (
             <div className="p-4 bg-orange-500/5 rounded-xl border border-orange-500/30 space-y-3 animate-in fade-in duration-150">
               <div className="flex justify-between items-center border-b border-orange-500/20 pb-2">
@@ -272,11 +288,10 @@ const ModuleManagerModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                   Aktivasi atau Pembelian Lisensi Baru:
                 </label>
                 <span className="text-[9px] text-(--text-secondary)">
-                  Bisa bayar langsung atau tempel kunci dari email
+                  Bayar langsung atau tempel kunci dari email
                 </span>
               </div>
 
-              {/* INPUT TEMPEL KUNCI (DARI EMAIL) */}
               <div className="space-y-1.5">
                 <span className="text-[9px] font-bold text-(--text-secondary) uppercase block">
                   1. Jika sudah punya kunci (dari Email / Kantor Pusat):
@@ -307,7 +322,6 @@ const ModuleManagerModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                 <div className="h-px bg-(--border-color) flex-1" />
               </div>
 
-              {/* TOMBOL BELI LANGSUNG DI DALAM APLIKASI */}
               <div className="flex items-center justify-between p-2.5 bg-(--bg-card) rounded-lg border border-(--border-color)">
                 <div>
                   <span className="text-xs font-black text-(--text-primary) block">
@@ -315,14 +329,12 @@ const ModuleManagerModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                   </span>
                   <span className="text-[9px] text-(--text-secondary)">
                     Bayar via QRIS / Bank Transfer • Kunci otomatis aktif
-                    seketika
                   </span>
                 </div>
                 <button
                   type="button"
                   onClick={() => {
                     onClose();
-                    // Arahkan ke modal checkout atau buka landing page
                     window.open("/#paket", "_blank");
                   }}
                   className="px-3.5 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white font-black text-[10px] uppercase rounded-lg transition shadow-xs cursor-pointer"
@@ -333,7 +345,7 @@ const ModuleManagerModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             </div>
           )}
 
-          {/* DAFTAR CHECKBOX MODUL TERPASANG */}
+          {/* Daftar modul */}
           <div>
             <div className="flex justify-between items-center mb-2">
               <span className="text-[10px] font-black text-(--text-secondary) uppercase tracking-wider">
@@ -404,7 +416,7 @@ const ModuleManagerModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           </div>
         </div>
 
-        {/* Footer Modal */}
+        {/* Footer */}
         <div className="px-6 py-3.5 bg-(--surface-hover) border-t border-(--border-color) flex items-center justify-between shrink-0">
           <span className="text-xs font-bold text-(--text-secondary)">
             {allowedModules.length} dari {allPlugins.length} modul aktif
@@ -429,7 +441,10 @@ const ModuleManagerModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   );
 };
 
-// ========== KOMPONEN MODAL ==========
+// ============================================================================
+// 6. MODAL DASAR
+// ============================================================================
+
 const AlertDialog: React.FC<{ config: AlertConfig; onClose: () => void }> = ({
   config,
   onClose,
@@ -542,7 +557,10 @@ const SideOver: React.FC<{ config: SideOverConfig; onClose: () => void }> = ({
   );
 };
 
-// ========== VERTICAL MENU PORTAL (Bubble Capsule & Liquid Glass Solid) ==========
+// ============================================================================
+// 7. RADIAL MENU PORTAL
+// ============================================================================
+
 const RadialMenuPortal: React.FC<{
   menu: MenuConfig;
   position: { x: number; y: number };
@@ -659,7 +677,10 @@ const RadialMenuPortal: React.FC<{
   );
 };
 
-// ========== KOMPONEN BARU: ConnectionStatus ==========
+// ============================================================================
+// 8. STATUS KONEKSI & SINKRONISASI
+// ============================================================================
+
 const ConnectionStatus = React.memo(() => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [pingMs, setPingMs] = useState<number | null>(null);
@@ -743,7 +764,6 @@ const ConnectionStatus = React.memo(() => {
         {isOnline ? "ONLINE" : "OFFLINE"}
       </span>
 
-      {/* TINGKAT BAR SINYAL BERDASARKAN LATENSI NYATA */}
       <div className="flex items-end gap-0.5 h-3 ml-1">
         {[1, 2, 3, 4].map((bar) => {
           const activeBars =
@@ -776,7 +796,6 @@ const ConnectionStatus = React.memo(() => {
         })}
       </div>
 
-      {/* NILAI MS NYATA */}
       <div className="flex items-center gap-1.5 ml-2 px-2 py-0.5 bg-(--surface-hover) rounded border border-(--border-color)">
         <span
           className={`w-1.5 h-1.5 rounded-full ${
@@ -793,7 +812,6 @@ const ConnectionStatus = React.memo(() => {
   );
 });
 
-// ========== KOMPONEN BARU: PendingSyncBadge ==========
 const PendingSyncBadge = React.memo(() => {
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
 
@@ -828,7 +846,11 @@ const PendingSyncBadge = React.memo(() => {
     </div>
   );
 });
-// ========== KOMPONEN SIDEBAR ITEM (DI-MEMO) ==========
+
+// ============================================================================
+// 9. SIDEBAR ITEM
+// ============================================================================
+
 const SidebarItem = React.memo(
   ({
     menu,
@@ -939,13 +961,17 @@ const SidebarItem = React.memo(
   },
 );
 
-// ========== LAYOUT UTAMA ==========
+// ============================================================================
+// 10. LAYOUT UTAMA
+// ============================================================================
+
 export function UniversalLayout({
   children,
   menus,
   activeMenuId,
   workspaceName = "Modul Control",
 }: UniversalLayoutProps) {
+  // --- State dasar ---
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>(
     {},
@@ -955,12 +981,15 @@ export function UniversalLayout({
   const [radialPosition, setRadialPosition] = useState({ x: 0, y: 0 });
   const [darkMode, setDarkMode] = useState(false);
 
-  // 1. DETEKSI NAMA OUTLET, AKUN USER & HAK AKSES MULTI-CABANG
+  // --- Organisasi & outlet ---
   const { outlets, companies, userAccounts } = useOrgStore();
+  const { regions } = useOrgStore();
   const [isOutletSwitcherOpen, setIsOutletSwitcherOpen] = useState(false);
   const outletSwitcherRef = useRef<HTMLDivElement>(null);
 
   const activeOutletId = localStorage.getItem("__unv_outletId") || "";
+  const localRegionId = localStorage.getItem("__unv_regionId") || "";
+
   const currentOutletName = React.useMemo(() => {
     if (!activeOutletId) return "Holding Pusat";
     return (
@@ -968,7 +997,7 @@ export function UniversalLayout({
     );
   }, [outlets, activeOutletId]);
 
-  // Deteksi akun yang sedang aktif bertugas
+  // --- Deteksi user aktif ---
   const activeUser = React.useMemo(() => {
     try {
       const raw = localStorage.getItem("__unv_activeUser");
@@ -988,17 +1017,11 @@ export function UniversalLayout({
     );
   }, [userAccounts, activeUser]);
 
-  // Daftar cabang yang boleh diakses oleh user ini
-  // Ambil data regional dari store organisasi
-  const { regions } = useOrgStore();
-  const localRegionId = localStorage.getItem("__unv_regionId") || "";
-
-  // Daftar ruang kerja dinamis (Region Dashboard + Cabang/Outlet yang diizinkan)
+  // --- Daftar ruang kerja ---
   const availableWorkspaces = React.useMemo(() => {
     const workspaces = [];
     const localCompId = localStorage.getItem("__unv_companyId");
 
-    // 1. Jika user memiliki ikatan Region, masukkan opsi kembali ke Dashboard Region
     if (localRegionId) {
       const userRegion = regions.find((r) => r.id === localRegionId);
       if (userRegion) {
@@ -1051,7 +1074,8 @@ export function UniversalLayout({
     activeOutletId,
     localRegionId,
   ]);
-  // Handler Pindah Ruang Kerja (Region atau Outlet)
+
+  // --- Handler pindah ruang kerja ---
   const handleSwitchWorkspace = (workspace: {
     id: string;
     name: string;
@@ -1074,12 +1098,10 @@ export function UniversalLayout({
     }
 
     setIsOutletSwitcherOpen(false);
-    setTimeout(() => {
-      window.location.reload();
-    }, 250);
+    setTimeout(() => window.location.reload(), 250);
   };
 
-  // Auto-close dropdown saat klik di luar
+  // --- Auto-close dropdown ---
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (
@@ -1093,7 +1115,7 @@ export function UniversalLayout({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // 3. FITUR KIOSK / FULLSCREEN LAYAR PENUH UNTUK KASIR
+  // --- Kiosk / Fullscreen ---
   const [isFullscreen, setIsFullscreen] = useState(false);
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -1104,6 +1126,7 @@ export function UniversalLayout({
       setIsFullscreen(false);
     }
   };
+
   useEffect(() => {
     const handleFsChange = () => setIsFullscreen(!!document.fullscreenElement);
     document.addEventListener("fullscreenchange", handleFsChange);
@@ -1111,7 +1134,7 @@ export function UniversalLayout({
       document.removeEventListener("fullscreenchange", handleFsChange);
   }, []);
 
-  // 4. SMART PWA INSTALL BUTTON (HANYA MUNCUL JIKA BELUM TERPASANG)
+  // --- PWA install ---
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   useEffect(() => {
     const handleBeforeInstall = (e: Event) => {
@@ -1136,17 +1159,16 @@ export function UniversalLayout({
     }
   };
 
+  // --- State UI ---
   const [logoAnim, setLogoAnim] = useState(false);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-
-  // Modal Manager Trigger
   const [isModuleManagerOpen, setIsModuleManagerOpen] = useState(false);
 
   const navigate = useNavigate();
   const location = useLocation();
   const sidebarRef = useRef<HTMLDivElement>(null);
 
-  // State untuk Liquid Pill Sidebar
+  // --- Liquid pill sidebar ---
   const [hoveredMenuId, setHoveredMenuId] = useState<string | null>(null);
   const [focusedMenuId, setFocusedMenuId] = useState<string | null>(null);
   const sidebarListRef = useRef<HTMLDivElement>(null);
@@ -1158,7 +1180,7 @@ export function UniversalLayout({
     opacity: 0,
   });
 
-  // State Modal
+  // --- State modal ---
   const [alertState, setAlertState] = useState<AlertConfig | null>(null);
   const [centerModalState, setCenterModalState] =
     useState<CenterModalConfig | null>(null);
@@ -1178,6 +1200,38 @@ export function UniversalLayout({
     [],
   );
 
+  // ==========================================================================
+  // STATE SINKRONISASI (dipindah ke scope utama agar bisa diakses header+footer)
+  // ==========================================================================
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState<string>(
+    localStorage.getItem("__unv_last_sync_datetime") || "Belum pernah",
+  );
+  const [showSyncModal, setShowSyncModal] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
+
+  useEffect(() => {
+    const handleStatus = (e: any) => {
+      if (e.detail?.isSyncing !== undefined) setIsSyncing(e.detail.isSyncing);
+      if (e.detail?.lastSync) setLastSync(e.detail.lastSync);
+    };
+
+    window.addEventListener("UNV_SYNC_STATUS", handleStatus);
+    return () => window.removeEventListener("UNV_SYNC_STATUS", handleStatus);
+  }, []);
+
+  const handleConfirmFreshSync = async () => {
+    try {
+      setIsResetting(true);
+      await EventBus.executeSafeLocalResync();
+    } catch (err) {
+      console.error("[FRESH SYNC ERROR]:", err);
+      setIsResetting(false);
+      setShowSyncModal(false);
+    }
+  };
+
+  // --- Security alert listener ---
   useEffect(() => {
     const handleSecurityAlert = (e: any) => {
       const { title, message } = e.detail || {};
@@ -1201,7 +1255,7 @@ export function UniversalLayout({
     setFocusedMenuId(null);
   }, [activeMenuId]);
 
-  // Logika Liquid Glass Pill Sidebar (Optimasi: rAF & ResizeObserver)
+  // --- Logika liquid pill (rAF + ResizeObserver) ---
   useEffect(() => {
     const listEl = sidebarListRef.current;
     if (!listEl || !isCollapsed) {
@@ -1278,6 +1332,7 @@ export function UniversalLayout({
     focusedMenuId,
   ]);
 
+  // --- Handler radial menu ---
   const handleCloseRadial = () => {
     if (radialOpenId && !closingRadialId) setClosingRadialId(radialOpenId);
   };
@@ -1325,6 +1380,7 @@ export function UniversalLayout({
     setRadialOpenId(radialOpenId === menuId ? null : menuId);
   };
 
+  // --- Theme variables ---
   const themeVars = {
     "--bg-app": darkMode ? "#090c13" : "#f0f2f5",
     "--bg-sidebar": darkMode ? "#0e1119" : "#ffffff",
@@ -1341,18 +1397,48 @@ export function UniversalLayout({
   const glassInputStyle =
     "bg-(--surface-hover) backdrop-blur-xl border border-(--border-color) shadow-[inset_0_1px_1px_rgba(255,255,255,0.15),inset_0_-1px_1px_rgba(0,0,0,0.05)] transition-all duration-300";
 
+  // --- Profil user (dihitung tanpa IIFE berisi state) ---
+  const profile = React.useMemo(() => {
+    let fullName = "Rendi Faizal";
+    let role = "Superadmin";
+    try {
+      const raw = localStorage.getItem("__unv_activeUser");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const name = parsed.fullName || parsed.username || "Karyawan";
+        const parts = name.trim().split(" ");
+        const initials =
+          parts.length > 1
+            ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+            : name.slice(0, 2).toUpperCase();
+        return { fullName: name, role: parsed.role || "STAFF", initials };
+      }
+    } catch {}
+    const parts = fullName.trim().split(" ");
+    const initials =
+      parts.length > 1
+        ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+        : fullName.slice(0, 2).toUpperCase();
+    return { fullName, role, initials };
+  }, []);
+
+  // ==========================================================================
+  // RENDER
+  // ==========================================================================
   return (
     <UniversalModalContext.Provider value={modalApi}>
       <div
         className="flex flex-col h-screen w-screen overflow-hidden font-['Space_Grotesk',sans-serif] relative transition-colors duration-300"
         style={themeVars}
       >
-        {/* MODAL KONFIGURASI MODUL KONTROL */}
+        {/* Modal konfigurasi modul */}
         {isModuleManagerOpen && (
           <ModuleManagerModal onClose={() => setIsModuleManagerOpen(false)} />
         )}
 
+        {/* ================= HEADER ================= */}
         <header className="h-16 bg-(--bg-header)/80 backdrop-blur-xl border-b border-(--border-color) flex items-center justify-between px-5 shrink-0 z-40 relative">
+          {/* Brand */}
           <div
             className={`flex items-center gap-2.5 w-40 shrink-0 px-3 py-1.5 rounded-2xl ${glassInputStyle}`}
           >
@@ -1366,7 +1452,7 @@ export function UniversalLayout({
             </span>
           </div>
 
-          {/* PEMILIH RUANG KERJA OTOMATIS: Muncul jika ada opsi lebih dari 1 (Region + Outlet) */}
+          {/* Pemilih ruang kerja */}
           {availableWorkspaces.length > 1 ? (
             <div className="relative" ref={outletSwitcherRef}>
               <button
@@ -1432,6 +1518,7 @@ export function UniversalLayout({
             </div>
           )}
 
+          {/* Search bar */}
           <div className="flex-1 max-w-xl mx-4 relative">
             <div
               className={`flex items-center gap-2 px-4 py-2 rounded-full ${glassInputStyle} focus-within:border-orange-500/40 focus-within:shadow-[0_0_15px_rgba(244,121,62,0.2),inset_0_1px_1px_rgba(255,255,255,0.25)]`}
@@ -1448,6 +1535,7 @@ export function UniversalLayout({
             </div>
           </div>
 
+          {/* Tombol aksi */}
           <div className="flex items-center gap-3 shrink-0">
             <button
               onClick={() => navigate("/dashboard/executive")}
@@ -1462,6 +1550,7 @@ export function UniversalLayout({
             <button
               onClick={() => setDarkMode(!darkMode)}
               className={`p-2 rounded-full text-(--text-secondary) hover:text-(--text-primary) hover:bg-(--surface-hover) ${glassInputStyle} cursor-pointer`}
+              title={darkMode ? "Mode Terang" : "Mode Gelap"}
             >
               {darkMode ? (
                 <Sun className="w-5 h-5" />
@@ -1469,7 +1558,7 @@ export function UniversalLayout({
                 <Moon className="w-5 h-5" />
               )}
             </button>
-            {/* TOMBOL SMART INSTALL PWA (HANYA MUNCUL JIKA BELUM TERPASANG) */}
+
             {deferredPrompt && (
               <button
                 onClick={handleInstallPWA}
@@ -1481,7 +1570,6 @@ export function UniversalLayout({
               </button>
             )}
 
-            {/* TOMBOL FULLSCREEN / KIOSK MODE KASIR */}
             <button
               onClick={toggleFullscreen}
               className={`p-2 rounded-full text-(--text-secondary) hover:text-(--text-primary) hover:bg-(--surface-hover) ${glassInputStyle} cursor-pointer`}
@@ -1497,62 +1585,35 @@ export function UniversalLayout({
                 <Maximize2 className="w-5 h-5" />
               )}
             </button>
+
             <button
               onClick={() => setIsDrawerOpen(true)}
               className={`relative p-2 rounded-full text-(--text-secondary) hover:text-(--text-primary) hover:bg-(--surface-hover) ${glassInputStyle} cursor-pointer`}
+              title="Buka Aktivitas / Notifikasi"
             >
               <Bell className="w-5 h-5" />
               <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 rounded-full border-2 border-(--bg-header)" />
             </button>
 
-            {/* PROFIL AKTOR AKTIF DINAMIS */}
-            {(() => {
-              let activeUser = {
-                fullName: "Rendi Faizal",
-                role: "Superadmin",
-                initials: "RF",
-              };
-
-              try {
-                const raw = localStorage.getItem("__unv_activeUser");
-                if (raw) {
-                  const parsed = JSON.parse(raw);
-                  const name = parsed.fullName || parsed.username || "Karyawan";
-                  const parts = name.trim().split(" ");
-                  const initials =
-                    parts.length > 1
-                      ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
-                      : name.slice(0, 2).toUpperCase();
-
-                  activeUser = {
-                    fullName: name,
-                    role: parsed.role || "STAFF",
-                    initials,
-                  };
-                }
-              } catch {}
-
-              return (
-                <div
-                  className={`flex items-center gap-2 pl-1 pr-3 rounded-full cursor-pointer ${glassInputStyle}`}
-                  title={`Sedang bertugas: ${activeUser.fullName} (${activeUser.role})`}
-                >
-                  <div className="w-8 h-8 rounded-full bg-linear-to-br from-orange-500 to-teal-500 flex items-center justify-center font-['Syne',sans-serif] font-bold text-white text-xs shadow-xs">
-                    {activeUser.initials}
-                  </div>
-                  <div className="hidden lg:block text-left leading-tight">
-                    <div className="text-xs font-semibold text-(--text-primary)">
-                      {activeUser.fullName}
-                    </div>
-                    <div className="text-[10px] text-(--text-secondary) uppercase font-mono font-bold">
-                      {activeUser.role}
-                    </div>
-                  </div>
+            {/* Profil user */}
+            <div
+              className={`flex items-center gap-2 pl-1 pr-3 rounded-full cursor-pointer ${glassInputStyle}`}
+              title={`Sedang bertugas: ${profile.fullName} (${profile.role})`}
+            >
+              <div className="w-8 h-8 rounded-full bg-linear-to-br from-orange-500 to-teal-500 flex items-center justify-center font-['Syne',sans-serif] font-bold text-white text-xs shadow-xs">
+                {profile.initials}
+              </div>
+              <div className="hidden lg:block text-left leading-tight">
+                <div className="text-xs font-semibold text-(--text-primary)">
+                  {profile.fullName}
                 </div>
-              );
-            })()}
+                <div className="text-[10px] text-(--text-secondary) uppercase font-mono font-bold">
+                  {profile.role}
+                </div>
+              </div>
+            </div>
 
-            {/* TOMBOL LOGOUT / KUNCI LAYAR */}
+            {/* Logout */}
             <button
               onClick={() => {
                 modalApi.openAlert({
@@ -1575,10 +1636,18 @@ export function UniversalLayout({
           </div>
         </header>
 
+        {/* ================= BODY ================= */}
         <div className="flex-1 flex overflow-hidden relative bg-(--bg-app)">
+          {/* Sidebar */}
           <aside
             ref={sidebarRef}
-            className={`flex shrink-0 bg-(--bg-sidebar)/80 backdrop-blur-xl border-r border-(--border-color) transition-all duration-700 z-30 ${sideOverState ? sideOverState.width || "w-96" : isCollapsed ? "w-23" : "w-65"}`}
+            className={`flex shrink-0 bg-(--bg-sidebar)/80 backdrop-blur-xl border-r border-(--border-color) transition-all duration-700 z-30 ${
+              sideOverState
+                ? sideOverState.width || "w-96"
+                : isCollapsed
+                  ? "w-23"
+                  : "w-65"
+            }`}
             style={{
               transitionTimingFunction: "cubic-bezier(0.77, 0, 0.175, 1)",
             }}
@@ -1592,10 +1661,12 @@ export function UniversalLayout({
               </div>
             ) : (
               <div className="flex flex-col flex-1 overflow-hidden relative">
+                {/* Collapse toggle */}
                 <div className="absolute right-0 top-0 bottom-0 w-6 flex flex-col items-center justify-between py-2 z-20">
                   <button
                     onClick={() => setIsCollapsed(!isCollapsed)}
                     className="w-6 h-6 rounded-full bg-(--bg-sidebar) border border-(--border-color) flex items-center justify-center text-(--text-secondary) hover:text-orange-500 hover:border-orange-500 transition-all cursor-pointer shadow-[inset_0_1px_1px_rgba(255,255,255,0.15)]"
+                    title={isCollapsed ? "Perluas Sidebar" : "Ciutkan Sidebar"}
                   >
                     <Settings
                       className={`w-3.5 h-3.5 transition-transform duration-700 ${isCollapsed ? "rotate-180" : ""}`}
@@ -1605,18 +1676,20 @@ export function UniversalLayout({
                   <button
                     onClick={() => setIsCollapsed(!isCollapsed)}
                     className="w-6 h-6 rounded-full bg-(--bg-sidebar) border border-(--border-color) flex items-center justify-center text-(--text-secondary) hover:text-teal-400 hover:border-teal-400 transition-all cursor-pointer shadow-[inset_0_1px_1px_rgba(255,255,255,0.15)]"
+                    title={isCollapsed ? "Perluas Sidebar" : "Ciutkan Sidebar"}
                   >
                     <Settings
                       className={`w-3.5 h-3.5 transition-transform duration-700 ${isCollapsed ? "rotate-180" : ""}`}
                     />
                   </button>
                 </div>
+
+                {/* Menu list */}
                 <div
                   ref={sidebarListRef}
                   className="flex-1 overflow-y-auto overflow-x-hidden px-2 py-4 custom-scrollbar space-y-3 relative"
                   onMouseLeave={() => setHoveredMenuId(null)}
                 >
-                  {/* LIQUID GLASS PILL SIDEBAR (Collapsed Mode Only) */}
                   {isCollapsed && (
                     <div
                       className="absolute rounded-full pointer-events-none z-0"
@@ -1634,6 +1707,7 @@ export function UniversalLayout({
                       }}
                     />
                   )}
+
                   {menus.map((menu) => (
                     <SidebarItem
                       key={menu.id}
@@ -1670,6 +1744,8 @@ export function UniversalLayout({
               </div>
             )}
           </aside>
+
+          {/* Radial menu portal */}
           {radialOpenId &&
             radialMenu &&
             createPortal(
@@ -1685,8 +1761,11 @@ export function UniversalLayout({
               />,
               document.body,
             )}
+
+          {/* Main content */}
           <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-transparent relative z-10 p-6">
             <div className="w-full h-full relative">{children}</div>
+
             {alertState && (
               <AlertDialog
                 config={alertState}
@@ -1702,14 +1781,49 @@ export function UniversalLayout({
           </main>
         </div>
 
+        {/* ================= FOOTER ================= */}
         <footer className="h-10 bg-(--bg-header)/80 backdrop-blur-xl border-t border-(--border-color) flex items-center justify-between px-5 shrink-0 z-40 text-[11px] font-medium text-(--text-secondary)">
-          {/* SISI KIRI: INDIKATOR SINYAL & PING NYATA */}
-          <div className="flex items-center gap-4">
+          {/* Kiri: sinyal, pending sync, riwayat sinkron */}
+          <div className="flex items-center gap-3">
             <ConnectionStatus />
             <PendingSyncBadge />
+
+            <div className="h-3.5 w-px bg-(--border-color)" />
+
+            <div className="flex items-center gap-1.5">
+              <span className="flex h-1.5 w-1.5 relative">
+                <span
+                  className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                    isSyncing ? "bg-amber-400" : "bg-emerald-400"
+                  }`}
+                ></span>
+                <span
+                  className={`relative inline-flex rounded-full h-1.5 w-1.5 ${
+                    isSyncing ? "bg-amber-500" : "bg-emerald-500"
+                  }`}
+                ></span>
+              </span>
+              <span className="text-(--text-secondary) text-[10.5px]">
+                Sync:{" "}
+                <strong className="text-(--text-primary) font-mono font-semibold">
+                  {lastSync}
+                </strong>
+              </span>
+
+              <button
+                type="button"
+                onClick={() => setShowSyncModal(true)}
+                title="Klik untuk Sinkronisasi Penuh & Pembersihan Cache Storage"
+                className="p-1 text-(--text-secondary) hover:text-orange-500 hover:bg-(--surface-hover) rounded transition-colors cursor-pointer flex items-center justify-center"
+              >
+                <RefreshCw
+                  className={`w-3 h-3 ${isSyncing ? "animate-spin text-amber-500" : ""}`}
+                />
+              </button>
+            </div>
           </div>
 
-          {/* SISI TENGAH: IDENTITAS ALMA & FOUNDER */}
+          {/* Tengah: identitas */}
           <div className="flex items-center gap-2">
             <span className="text-(--text-secondary)">Developed by</span>
             <span className="text-(--text-primary) font-bold">
@@ -1723,7 +1837,7 @@ export function UniversalLayout({
             </span>
           </div>
 
-          {/* SISI KANAN: VERSI APLIKASI & BUILD TIMESTAMP NYATA */}
+          {/* Kanan: versi & modul control */}
           <div className="flex items-center gap-2">
             <span className="text-(--text-secondary) font-mono text-[10px]">
               v
@@ -1750,9 +1864,6 @@ export function UniversalLayout({
                 DATA MANAGER
               </span>
             </button>
-            {/* ================================================================= */}
-            {/* KAPSUL "MODUL CONTROL" (KLIK UNTUK KONFIGURASI MODUL) */}
-            {/* ================================================================= */}
             <button
               onClick={() => setIsModuleManagerOpen(true)}
               className="p-1 text-(--text-secondary) hover:text-orange-500 hover:bg-(--surface-hover) rounded transition-colors cursor-pointer flex items-center gap-1.5"
@@ -1766,6 +1877,84 @@ export function UniversalLayout({
           </div>
         </footer>
 
+        {/* Modal konfirmasi fresh sync */}
+        {showSyncModal && (
+          <div className="fixed inset-0 z-100 flex items-center justify-center bg-black/70 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+            <div className="bg-(--bg-header) border border-(--border-color) rounded-xl shadow-2xl max-w-md w-full p-5 text-(--text-primary)">
+              <div className="flex items-start justify-between pb-3 border-b border-(--border-color)">
+                <div className="flex items-center gap-2 text-amber-500">
+                  <AlertTriangle className="w-5 h-5 shrink-0" />
+                  <h3 className="font-bold text-sm text-(--text-primary)">
+                    Konfirmasi Sinkronisasi Penuh
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  disabled={isResetting}
+                  onClick={() => setShowSyncModal(false)}
+                  className="text-(--text-secondary) hover:text-(--text-primary) p-1 rounded-md transition cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="py-4 space-y-3 text-xs leading-relaxed text-(--text-secondary)">
+                <p>
+                  Tindakan ini akan{" "}
+                  <strong className="text-(--text-primary)">
+                    membersihkan penyimpanan internal browser (IndexedDB &amp;
+                    Cache)
+                  </strong>{" "}
+                  pada perangkat ini untuk menjamin data benar-benar segar dan
+                  bebas dari selisih versi dengan server pusat.
+                </p>
+                <div className="bg-(--surface-hover) p-3 rounded-lg border border-(--border-color) space-y-1.5 text-[11px]">
+                  <div className="flex items-center gap-2 text-orange-500 font-semibold">
+                    <Database className="w-3.5 h-3.5" />
+                    <span>Prosedur pembersihan:</span>
+                  </div>
+                  <ul className="list-disc list-inside text-(--text-secondary) space-y-1">
+                    <li>Mengosongkan cache antrean lokal.</li>
+                    <li>
+                      Mengunduh ulang seluruh Master Data &amp; Transaksi dari
+                      server.
+                    </li>
+                    <li>Sesi login saat ini akan ditutup secara aman.</li>
+                  </ul>
+                </div>
+                <p className="text-amber-500/90 text-[10.5px]">
+                  *Pastikan perangkat terhubung internet sebelum melanjutkan.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-(--border-color)">
+                <button
+                  type="button"
+                  disabled={isResetting}
+                  onClick={() => setShowSyncModal(false)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold text-(--text-secondary) hover:bg-(--surface-hover) border border-(--border-color) transition cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  disabled={isResetting}
+                  onClick={handleConfirmFreshSync}
+                  className="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-red-600 hover:bg-red-500 text-white transition flex items-center gap-1.5 shadow-md disabled:opacity-50 cursor-pointer"
+                >
+                  <RefreshCw
+                    className={`w-3.5 h-3.5 ${isResetting ? "animate-spin" : ""}`}
+                  />
+                  {isResetting
+                    ? "Membersihkan Storage..."
+                    : "Bersihkan & Sinkronkan"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Global overlays */}
         <style>{`
           .custom-scrollbar::-webkit-scrollbar { width: 5px; }
           .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 10px; }

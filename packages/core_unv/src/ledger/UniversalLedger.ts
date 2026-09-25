@@ -172,9 +172,56 @@ export class UniversalLedger {
 
       globalOutbox.attachSocket(this.socket);
 
-      this.socket.on("connect", () => {
-        this.syncInitial();
+      // Fungsi deteksi stempel epoch (Mendeteksi apakah ada broadcast reset saat perangkat offline)
+      const verifyServerEpoch = async () => {
+        if (typeof navigator !== "undefined" && !navigator.onLine) return;
+        try {
+          const res = await fetch(getApiUrl("/api/system-health/sync-epoch"));
+          if (res.ok) {
+            const data = await res.json();
+            const serverEpoch = Number(data.epoch || 0);
+            const localEpoch = Number(
+              localStorage.getItem("__unv_sync_epoch") || 0,
+            );
+
+            // Jika server memiliki stempel epoch yang lebih baru dari stempel lokal perangkat:
+            // Segera reset database lokal, bersihkan sesi, dan lempar ke halaman login!
+            if (serverEpoch > 0 && serverEpoch > localEpoch) {
+              console.log(
+                `[AUTO-EPOCH CATCHUP] Terdeteksi reset masal saat perangkat offline (Server: ${serverEpoch} > Lokal: ${localEpoch}). Melakukan reset lokal otomatis...`,
+              );
+              localStorage.setItem("__unv_sync_epoch", String(serverEpoch));
+              window.dispatchEvent(
+                new CustomEvent("UNV_REMOTE_RESYNC", {
+                  detail: { epoch: serverEpoch, forceLogout: true },
+                }),
+              );
+              return true;
+            }
+          }
+        } catch (e) {
+          // Abaikan jika server belum dapat dijangkau
+        }
+        return false;
+      };
+
+      // Saat socket tersambung kembali pasca-offline:
+      this.socket.on("connect", async () => {
+        const hasReset = await verifyServerEpoch();
+        if (!hasReset) {
+          this.syncInitial();
+        }
       });
+
+      // Saat browser mendeteksi sinyal internet fisik kembali aktif:
+      if (typeof window !== "undefined") {
+        window.addEventListener("online", async () => {
+          const hasReset = await verifyServerEpoch();
+          if (!hasReset) {
+            this.syncInitial();
+          }
+        });
+      }
 
       // Daftarkan room spasial aktif saat ini ke server
       const currentCompId = localStorage.getItem("__unv_companyId");
@@ -205,10 +252,19 @@ export class UniversalLedger {
 
       // JARING PENGAMAN: Rekonsiliasi berkala setiap 5 menit saat sedang online
       // Memastikan klien tidak pernah tertinggal data jika sinyal socket sempat terlewat
+      // JARING PENGAMAN: Cek stempel epoch dan jalankan sinkronisasi delta otomatis setiap 5 menit
       setInterval(
-        () => {
+        async () => {
           if (typeof navigator === "undefined" || navigator.onLine) {
-            this.syncInitial();
+            console.log(
+              "[HEARTBEAT 5-MIN] Memeriksa stempel epoch server & sinkronisasi data...",
+            );
+            // 1. Cek Epoch: Jika ada reset masal saat offline, auto-reset & logout
+            const hasReset = await verifyServerEpoch();
+            if (hasReset) return;
+
+            // 2. Cek Sync: Tarik delta data transaksi maupun sistem yang baru
+            await this.syncInitial();
           }
         },
         5 * 60 * 1000,
@@ -232,6 +288,21 @@ export class UniversalLedger {
     if (this.isSyncing) return;
     this.isSyncing = true;
     let isBackpressureHold = false;
+
+    // Pancarkan sinyal ke Footer UI: Mulai Sinkronisasi
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("UNV_SYNC_STATUS", {
+          detail: {
+            isSyncing: true,
+            lastSync:
+              localStorage.getItem("__unv_last_sync_datetime") ||
+              "Belum pernah",
+          },
+        }),
+      );
+    }
+
     try {
       const companyId = localStorage.getItem("__unv_companyId");
       const regionId = localStorage.getItem("__unv_regionId");
@@ -432,6 +503,26 @@ export class UniversalLedger {
       console.warn("[UNIVERSAL LEDGER] Gagal sinkronisasi awal:", error);
     } finally {
       this.isSyncing = false;
+
+      // Catat Tanggal & Waktu Lengkap (Contoh: 25/09/2026, 16.30.00)
+      const nowFormatted = new Date().toLocaleString("id-ID", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      });
+      localStorage.setItem("__unv_last_sync_datetime", nowFormatted);
+
+      // Pancarkan sinyal ke Footer UI: Sinkronisasi Selesai
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("UNV_SYNC_STATUS", {
+            detail: { isSyncing: false, lastSync: nowFormatted },
+          }),
+        );
+      }
     }
   }
 

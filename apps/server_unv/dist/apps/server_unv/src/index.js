@@ -125,8 +125,8 @@ const io = new Server(httpServer, {
         credentials: true,
         methods: ["GET", "POST"],
     },
-    pingInterval: 10000, // Detak jantung setiap 10 detik
-    pingTimeout: 5000, // Putus jika 5 detik tidak merespons
+    pingInterval: 25000, // Detak jantung setiap 25 detik (Stabil)
+    pingTimeout: 20000, // Toleransi jeda hingga 20 detik (Anti Reconnect Loop)
 });
 app.use(cors(corsOptions));
 app.use(express.json({ limit: "50mb" }));
@@ -174,7 +174,8 @@ app.get("/api/events/pull/system", async (req, res) => {
                 });
             }
         }
-        // Jika klien mengirim parameter `since` (waktu snapshot), ambil hanya event setelah waktu tersebut!
+        const filterCompanyId = req.query.companyId;
+        // Pastikan event master data SELALU berurutan dari waktu paling awal ke terbaru
         let systemEventsRaw;
         if (sinceParam && !isNaN(Number(sinceParam))) {
             const sinceDate = new Date(Number(sinceParam));
@@ -182,11 +183,32 @@ app.get("/api/events/pull/system", async (req, res) => {
             systemEventsRaw = await db
                 .select()
                 .from(systemEventJournal)
-                .where(sql `${systemEventJournal.createdAt} > ${sinceDate}`);
+                .where(sql `${systemEventJournal.createdAt} > ${sinceDate}`)
+                .orderBy(systemEventJournal.createdAt);
         }
         else {
             console.log(`[HTTP] PULL Full System Events dari device: ${deviceId}`);
-            systemEventsRaw = await db.select().from(systemEventJournal);
+            systemEventsRaw = await db
+                .select()
+                .from(systemEventJournal)
+                .orderBy(systemEventJournal.createdAt);
+        }
+        // Filter multi-tenant: jika companyId dikirim, jangan kirim master data perusahaan lain
+        if (filterCompanyId) {
+            systemEventsRaw = systemEventsRaw.filter((ev) => {
+                try {
+                    const p = typeof ev.payload === "string"
+                        ? JSON.parse(ev.payload)
+                        : ev.payload;
+                    const evtCompId = p.organization?.companyId || p.companyId;
+                    return (!evtCompId ||
+                        evtCompId === filterCompanyId ||
+                        ev.aggregateId === filterCompanyId);
+                }
+                catch {
+                    return true;
+                }
+            });
         }
         const formattedEvents = systemEventsRaw.map((ev) => ({
             ...ev,
@@ -309,12 +331,19 @@ app.get("/api/events/pull/tx", async (req, res) => {
             const eventTime = new Date(latestEvt.createdAt).getTime();
             const isOld = eventTime < timeThreshold;
             const isDone = isTransactionCompleted(payloadObj);
-            // Smart Pruning: buang transaksi lama yang sudah berstatus terminal
-            if (isOld && isDone) {
+            // JANGAN PERNAH MEMBUANG EVENT STOK OPNAME & INITIAL STOCK:
+            // Saldo acuan stok fisik gudang wajib selalu utuh di semua perangkat!
+            const isStockBaseline = latestEvt.type.includes("OPNAME") ||
+                latestEvt.type.includes("INITIAL_STOCK") ||
+                latestEvt.type.includes("RECIPE");
+            // Smart Pruning: buang transaksi operasional lama (misal nota kasir selesai bulan lalu)
+            if (isOld && isDone && !isStockBaseline) {
                 continue;
             }
             validTxEvents.push(...eventsOfAgg);
         }
+        // KUNCI SINKRONISASI: Urutkan seluruh event transaksi secara kronologis nyata
+        validTxEvents.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
         const formattedEvents = validTxEvents.map((ev) => ({
             ...ev,
             payload: typeof ev.payload === "string" ? JSON.parse(ev.payload) : ev.payload,

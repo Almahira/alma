@@ -15,7 +15,7 @@ export class PruningManager {
       const rxdb = globalLedger.getRxDatabase();
       if (!rxdb || !rxdb.collections.events || !rxdb.collections.outbox) return;
 
-      // 1. Kumpulkan seluruh ID event & aggregateId yang masih tertahan di antrean Outbox (Belum terkirim / Pending)
+      // 1. Kumpulkan seluruh ID event & aggregateId yang masih tertahan di antrean Outbox
       const pendingOutboxDocs = await rxdb.collections.outbox.find().exec();
       const pendingEventIds = new Set<string>();
       const pendingAggregateIds = new Set<string>();
@@ -34,7 +34,7 @@ export class PruningManager {
       const allEvents = await rxdb.collections.events.find().exec();
       const startOfMonth = getStartOfCurrentMonth();
 
-      // 2. Kelompokkan event berdasarkan aggregateId untuk mencari state/event terakhir
+      // 2. Kelompokkan event berdasarkan aggregateId
       const aggregateMap = new Map<string, any[]>();
       allEvents.forEach((doc) => {
         const evt = doc.toJSON();
@@ -48,11 +48,8 @@ export class PruningManager {
 
       // 3. Evaluasi setiap Aggregate
       for (const [aggregateId, events] of aggregateMap.entries()) {
-        // PERLINDUNGAN MUTLAK 1: Jika masih ada event dari aggregate ini di Outbox, JANGAN PERNAH DIHAPUS!
+        // PERLINDUNGAN 1: Jika ada event di Outbox, jangan hapus!
         if (pendingAggregateIds.has(aggregateId)) {
-          console.log(
-            `[PRUNING] Dilewati: ${aggregateId} masih memiliki event pending di Outbox.`,
-          );
           continue;
         }
 
@@ -60,48 +57,70 @@ export class PruningManager {
         events.sort((a, b) => a.aggregateVersion - b.aggregateVersion);
         const latestEvent = events[events.length - 1];
 
-        // Aturan 1: Hanya periksa Transaction Journal (Bukan System Journal / Master Data)
+        // Hanya evaluasi dokumen transaksi operasional (bukan Master Data)
         if (isTransactionAggregate(latestEvent.aggregateType)) {
-          const eventTime =
-            new Date(latestEvent.hlc.split("_")[0]).getTime() ||
-            latestEvent.createdAt ||
-            0;
+          // PARSER WAKTU PRESISI: Hindari bug NaN yang membuat waktu menjadi 0 (tahun 1970)
+          let eventTime = 0;
+          if (latestEvent.dddMetadata?.businessDate) {
+            eventTime = new Date(
+              latestEvent.dddMetadata.businessDate,
+            ).getTime();
+          }
+          if (!eventTime || isNaN(eventTime)) {
+            const parsedHlcNum = Number(latestEvent.hlc?.split("_")[0]);
+            if (!isNaN(parsedHlcNum) && parsedHlcNum > 0) {
+              eventTime = parsedHlcNum;
+            }
+          }
+          if (!eventTime || isNaN(eventTime)) {
+            eventTime = Number(latestEvent.createdAt) || 0;
+          }
 
-          // Aturan 2: Apakah ini dari bulan-bulan kemarin (lampau)?
+          // Jika waktu event tidak dapat ditentukan, JANGAN PERNAH DIHAPUS (Demi keamanan data)
+          if (eventTime <= 0) {
+            continue;
+          }
+
+          // Aturan 2: Hanya hapus jika transaksi terjadi SEBELUM awal bulan ini
           if (eventTime < startOfMonth) {
-            // Aturan 3: Apakah status transaksi sudah final (TERMINAL STATE)?
+            // Aturan 3: Pastikan status transaksi benar-benar lunas / selesai (bukan hutang aktif)
             if (isTransactionCompleted(latestEvent.payload)) {
-              // PERLINDUNGAN MUTLAK 2: Pastikan tidak ada satupun eventId dari aggregate ini yang tertinggal di Outbox
+              // PERLINDUNGAN 2: Pastikan tidak ada eventId yang tertinggal di Outbox
               const hasUnsyncedEvent = events.some((e) =>
                 pendingEventIds.has(e.id),
               );
               if (hasUnsyncedEvent) {
-                console.log(
-                  `[PRUNING] Dilewati: ${aggregateId} memiliki eventId yang belum di-ack oleh server.`,
-                );
                 continue;
               }
 
-              // HAPUS SEMUA EVENT DARI AGGREGATE INI DARI MEMORI LOKAL
+              // Hapus seluruh event dari agregat ini secara instan
               const docsToDelete = await rxdb.collections.events
                 .find({ selector: { aggregateId: aggregateId } })
                 .exec();
 
-              for (const doc of docsToDelete) {
-                await doc.remove();
-                deletedCount++;
+              const idsToDelete = docsToDelete.map((d) => d.id);
+              if (rxdb.collections.events.bulkRemove) {
+                await rxdb.collections.events.bulkRemove(idsToDelete);
+              } else {
+                for (const doc of docsToDelete) {
+                  await doc.remove().catch(() => {});
+                }
               }
+              deletedCount += docsToDelete.length;
+
               console.log(
-                `[PRUNING] Menghapus histori transaksi lama yang sudah lunas & tersinkron: ${aggregateId} (${latestEvent.aggregateType})`,
+                `[PRUNING] Menghapus transaksi lampau yang sudah lunas & tersinkron: ${aggregateId}`,
               );
             }
           }
         }
       }
 
-      console.log(
-        `[PRUNING] Pembersihan selesai. ${deletedCount} tiket lama berhasil dibersihkan dari memori.`,
-      );
+      if (deletedCount > 0) {
+        console.log(
+          `[PRUNING] Pembersihan selesai. ${deletedCount} event lampau yang lunas dibersihkan dari memori.`,
+        );
+      }
     } catch (error) {
       console.error("[PRUNING] Gagal melakukan pembersihan:", error);
     }

@@ -1,5 +1,24 @@
+// ============================================================================
 // File: apps/client_unv/src/shared-ui/UniversalLayoutSM.tsx
+// Deskripsi: Layout universal versi MOBILE untuk seluruh modul ALMA ERP
+// Berisi: Header, Drawer Navigasi, Footer, Modal System, PWA Install
+// ============================================================================
+
+// ---------------------------------------------------------------------------
+// 1. IMPORTS
+// ---------------------------------------------------------------------------
 import { LicenseManager } from "../../../../packages/core_unv/src/ledger/licenseManager";
+import { globalLedger } from "../../../../packages/core_unv/src/ledger/UniversalLedger";
+import { EventBus } from "../../../../packages/core_unv/src/cqrs/EventBus";
+import { useOrgStore } from "../../../../modules/mdl_organization/src/client/store";
+import { manager } from "../pluginRegistry";
+import { sysToast } from "./useToastStore";
+
+import { ActivityDrawer } from "./ActivityDrawer";
+import { CommandPalette } from "./CommandPalette";
+import { UniversalToast } from "./UniversalToast";
+import { VirtualNumpad } from "./VirtualNumpad";
+
 import React, {
   useState,
   useEffect,
@@ -9,38 +28,48 @@ import React, {
   useMemo,
   memo,
 } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
+
+// ---------------------------------------------------------------------------
+// 2. ICONS (Lucide React)
+// ---------------------------------------------------------------------------
 import {
-  LogOut,
+  // Navigation & Menu
+  Menu,
   ChevronDown,
-  Bell,
-  Settings,
-  Sun,
-  Moon,
-  Wifi,
-  WifiOff,
   X,
+
+  // Brand & Modules
   Boxes,
   Box,
-  ShieldCheck,
-  Key,
-  Download,
   Store,
   Building2,
   LayoutDashboard,
-  Menu,
   Database,
-} from "lucide-react";
-import { useNavigate, useLocation } from "react-router-dom";
-import { ActivityDrawer } from "./ActivityDrawer";
-import { CommandPalette } from "./CommandPalette";
-import { VirtualNumpad } from "./VirtualNumpad";
-import { UniversalToast } from "./UniversalToast";
-import { manager } from "../pluginRegistry";
-import { sysToast } from "./useToastStore";
-import { useOrgStore } from "../../../../modules/mdl_organization/src/client/store";
-import { globalLedger } from "../../../../packages/core_unv/src/ledger/UniversalLedger";
 
-// ========== TIPE & KONTEKS MODAL UNIVERSAL (MOBILE) ==========
+  // User & Auth
+  LogOut,
+  ShieldCheck,
+  Key,
+
+  // Theme & Display
+  Sun,
+  Moon,
+
+  // Status & Connectivity
+  Wifi,
+  WifiOff,
+
+  // Actions
+  Bell,
+  Settings,
+  Download,
+} from "lucide-react";
+
+// ============================================================================
+// 3. TIPE & INTERFACE
+// ============================================================================
+
 export interface MenuConfig {
   id: string;
   label: string;
@@ -61,6 +90,7 @@ export interface UniversalLayoutSMProps {
   workspaceName?: string;
 }
 
+// ---------- Tipe Modal Universal ----------
 export interface AlertConfig {
   title?: string;
   message: string;
@@ -80,7 +110,7 @@ export interface CenterModalConfig {
 export interface SideOverConfig {
   title?: string;
   content: React.ReactNode;
-  width?: string; // diabaikan di mobile, fullscreen
+  width?: string; // Diabaikan di mobile, selalu fullscreen
   onClose?: () => void;
 }
 
@@ -92,6 +122,10 @@ interface UniversalModalContextValue {
   openSideOver: (config: SideOverConfig) => void;
   closeSideOver: () => void;
 }
+
+// ============================================================================
+// 4. CONTEXT MODAL UNIVERSAL
+// ============================================================================
 
 const UniversalModalContext = createContext<
   UniversalModalContextValue | undefined
@@ -107,9 +141,10 @@ export const useUniversalModal = () => {
   return context;
 };
 
-// =========================================================================
-// MODAL: KONFIGURASI MODUL KONTROL PERANGKAT (MOBILE OPTIMIZED)
-// =========================================================================
+// ============================================================================
+// 5. MODAL: KONFIGURASI MODUL & LISENSI (MOBILE OPTIMIZED)
+// ============================================================================
+
 const ModuleManagerModal: React.FC<{ onClose: () => void }> = memo(
   ({ onClose }) => {
     const allPlugins = manager.getAllPlugins();
@@ -130,6 +165,7 @@ const ModuleManagerModal: React.FC<{ onClose: () => void }> = memo(
     const [showKeyInput, setShowKeyInput] = useState(false);
     const [licenseInput, setLicenseInput] = useState("");
 
+    // ---------- Toggle Modul ----------
     const toggleModule = (modName: string, isCore?: boolean) => {
       if (isCore || modName === "mdl_organization") return;
       setAllowedModules((prev) =>
@@ -143,6 +179,7 @@ const ModuleManagerModal: React.FC<{ onClose: () => void }> = memo(
       setAllowedModules(allPlugins.map((p) => p.name));
     };
 
+    // ---------- Verifikasi & Aktivasi Kunci Lisensi ----------
     const handleApplyLicenseKey = () => {
       if (!licenseInput.trim()) {
         return sysToast.error(
@@ -199,7 +236,7 @@ const ModuleManagerModal: React.FC<{ onClose: () => void }> = memo(
     return (
       <div className="fixed inset-0 z-100 flex items-end sm:items-center justify-center bg-slate-950/70 backdrop-blur-sm">
         <div className="bg-(--bg-card) w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl shadow-2xl border border-(--border-color) overflow-hidden flex flex-col max-h-[90vh] animate-in slide-in-from-bottom duration-300">
-          {/* Header */}
+          {/* ---------- Header Modal ---------- */}
           <div className="px-4 py-3 border-b border-(--border-color) flex items-center justify-between bg-(--surface-hover) shrink-0">
             <div className="flex items-center gap-2">
               <Boxes className="w-5 h-5 text-orange-500" />
@@ -225,13 +262,13 @@ const ModuleManagerModal: React.FC<{ onClose: () => void }> = memo(
             </div>
             <button
               onClick={onClose}
-              className="p-2 rounded-lg text-(--text-secondary) hover:text-rose-500 hover:bg-rose-500/10 transition"
+              className="p-2 rounded-lg text-(--text-secondary) hover:text-rose-500 hover:bg-rose-500/10 transition cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
 
-          {/* Konten Scroll */}
+          {/* ---------- Body Modal ---------- */}
           <div className="p-4 overflow-y-auto custom-scrollbar flex-1 space-y-4">
             {/* Status Lisensi */}
             <div className="p-3 bg-(--bg-input) rounded-xl border border-(--border-color) flex items-center justify-between">
@@ -250,14 +287,14 @@ const ModuleManagerModal: React.FC<{ onClose: () => void }> = memo(
               </div>
               <button
                 onClick={() => setShowKeyInput(!showKeyInput)}
-                className="px-3 py-1.5 bg-orange-500/10 text-orange-500 hover:bg-orange-500/20 border border-orange-500/20 rounded-lg text-[10px] font-black uppercase flex items-center gap-1"
+                className="px-3 py-1.5 bg-orange-500/10 text-orange-500 hover:bg-orange-500/20 border border-orange-500/20 rounded-lg text-[10px] font-black uppercase flex items-center gap-1 cursor-pointer"
               >
                 <Key className="w-3 h-3" />
                 {showKeyInput ? "Tutup" : "Upgrade"}
               </button>
             </div>
 
-            {/* Form Aktivasi */}
+            {/* Form Aktivasi Lisensi */}
             {showKeyInput && (
               <div className="p-3 bg-orange-500/5 rounded-xl border border-orange-500/30 space-y-3">
                 <label className="text-[10px] font-black text-orange-500 uppercase">
@@ -273,7 +310,7 @@ const ModuleManagerModal: React.FC<{ onClose: () => void }> = memo(
                   />
                   <button
                     onClick={handleApplyLicenseKey}
-                    className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white font-black text-xs rounded-lg"
+                    className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white font-black text-xs rounded-lg cursor-pointer"
                   >
                     Terapkan
                   </button>
@@ -290,7 +327,7 @@ const ModuleManagerModal: React.FC<{ onClose: () => void }> = memo(
                     onClose();
                     window.open("/#paket", "_blank");
                   }}
-                  className="w-full px-3 py-2 bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs uppercase rounded-lg"
+                  className="w-full px-3 py-2 bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs uppercase rounded-lg cursor-pointer"
                 >
                   Beli via QRIS / VA
                 </button>
@@ -305,7 +342,7 @@ const ModuleManagerModal: React.FC<{ onClose: () => void }> = memo(
                 </span>
                 <button
                   onClick={handleEnableAll}
-                  className="text-[10px] font-black text-orange-500"
+                  className="text-[10px] font-black text-orange-500 cursor-pointer"
                 >
                   AKTIFKAN SEMUA
                 </button>
@@ -323,7 +360,7 @@ const ModuleManagerModal: React.FC<{ onClose: () => void }> = memo(
                     <div
                       key={plugin.name}
                       onClick={() => toggleModule(plugin.name, isCore)}
-                      className={`p-3 rounded-xl border-2 flex items-center justify-between ${
+                      className={`p-3 rounded-xl border-2 flex items-center justify-between cursor-pointer transition-all ${
                         isSelected
                           ? "border-orange-500 bg-orange-500/5"
                           : "border-(--border-color) bg-(--bg-input) opacity-60"
@@ -367,7 +404,7 @@ const ModuleManagerModal: React.FC<{ onClose: () => void }> = memo(
             </div>
           </div>
 
-          {/* Footer */}
+          {/* ---------- Footer Modal ---------- */}
           <div className="px-4 py-3 bg-(--surface-hover) border-t border-(--border-color) flex items-center justify-between shrink-0">
             <span className="text-xs font-bold text-(--text-secondary)">
               {allowedModules.length}/{allPlugins.length} aktif
@@ -375,13 +412,13 @@ const ModuleManagerModal: React.FC<{ onClose: () => void }> = memo(
             <div className="flex gap-2">
               <button
                 onClick={onClose}
-                className="px-3 py-2 text-xs font-bold text-(--text-secondary) rounded-lg"
+                className="px-3 py-2 text-xs font-bold text-(--text-secondary) rounded-lg cursor-pointer"
               >
                 BATAL
               </button>
               <button
                 onClick={handleSave}
-                className="px-4 py-2 text-xs font-black text-white bg-orange-500 rounded-lg"
+                className="px-4 py-2 text-xs font-black text-white bg-orange-500 rounded-lg cursor-pointer"
               >
                 SIMPAN
               </button>
@@ -393,7 +430,11 @@ const ModuleManagerModal: React.FC<{ onClose: () => void }> = memo(
   },
 );
 
-// ========== MODAL ALERT (MOBILE) ==========
+// ============================================================================
+// 6. KOMPONEN MODAL DASAR (MOBILE)
+// ============================================================================
+
+// ---------- Alert Dialog ----------
 const AlertDialog: React.FC<{ config: AlertConfig; onClose: () => void }> = ({
   config,
   onClose,
@@ -415,7 +456,7 @@ const AlertDialog: React.FC<{ config: AlertConfig; onClose: () => void }> = ({
           </h3>
           <button
             onClick={onClose}
-            className="p-1 rounded-full text-(--text-secondary) hover:text-rose-500"
+            className="p-1 rounded-full text-(--text-secondary) hover:text-rose-500 cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -427,14 +468,14 @@ const AlertDialog: React.FC<{ config: AlertConfig; onClose: () => void }> = ({
           {config.cancelText !== undefined && (
             <button
               onClick={handleCancel}
-              className="px-4 py-2 text-xs font-bold text-(--text-secondary) rounded-lg"
+              className="px-4 py-2 text-xs font-bold text-(--text-secondary) rounded-lg cursor-pointer"
             >
               {config.cancelText || "BATAL"}
             </button>
           )}
           <button
             onClick={handleConfirm}
-            className="px-5 py-2 text-xs font-black text-white bg-orange-500 rounded-lg"
+            className="px-5 py-2 text-xs font-black text-white bg-orange-500 rounded-lg cursor-pointer"
           >
             {config.confirmText || "OK"}
           </button>
@@ -444,7 +485,7 @@ const AlertDialog: React.FC<{ config: AlertConfig; onClose: () => void }> = ({
   );
 };
 
-// ========== MODAL TENGAH (MOBILE FULLSCREEN) ==========
+// ---------- Center Modal (Fullscreen di Mobile) ----------
 const CenterModal: React.FC<{
   config: CenterModalConfig;
   onClose: () => void;
@@ -464,7 +505,7 @@ const CenterModal: React.FC<{
           </h3>
           <button
             onClick={onClose}
-            className="p-2 rounded-full text-(--text-secondary) hover:text-rose-500"
+            className="p-2 rounded-full text-(--text-secondary) hover:text-rose-500 cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -480,7 +521,7 @@ const CenterModal: React.FC<{
   );
 };
 
-// ========== SIDE OVER (MOBILE: SLIDE DARI KANAN FULL WIDTH) ==========
+// ---------- Side Over (Mobile: Full Width Slide dari Kanan) ----------
 const SideOver: React.FC<{ config: SideOverConfig; onClose: () => void }> = ({
   config,
   onClose,
@@ -493,7 +534,7 @@ const SideOver: React.FC<{ config: SideOverConfig; onClose: () => void }> = ({
         </h3>
         <button
           onClick={onClose}
-          className="p-2 rounded-full text-(--text-secondary) hover:text-rose-500"
+          className="p-2 rounded-full text-(--text-secondary) hover:text-rose-500 cursor-pointer"
         >
           <X className="w-5 h-5" />
         </button>
@@ -503,7 +544,11 @@ const SideOver: React.FC<{ config: SideOverConfig; onClose: () => void }> = ({
   );
 };
 
-// ========== INDIKATOR KONEKSI (HEMAT BATERAI) ==========
+// ============================================================================
+// 7. KOMPONEN STATUS KONEKSI & SINKRONISASI (HEMAT BATERAI)
+// ============================================================================
+
+// ---------- Connection Status (Mobile-friendly) ----------
 const ConnectionStatus = memo(() => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [pingMs, setPingMs] = useState<number | null>(null);
@@ -601,7 +646,7 @@ const ConnectionStatus = memo(() => {
   );
 });
 
-// ========== PENDING SYNC BADGE ==========
+// ---------- Pending Sync Badge (Compact) ----------
 const PendingSyncBadge = memo(() => {
   const [pendingSyncCount, setPendingSyncCount] = useState(0);
 
@@ -631,7 +676,10 @@ const PendingSyncBadge = memo(() => {
   );
 });
 
-// ========== MENU DRAWER ITEM (ACCORDION) ==========
+// ============================================================================
+// 8. KOMPONEN DRAWER MENU ITEM (ACCORDION)
+// ============================================================================
+
 const DrawerMenuItem: React.FC<{
   menu: MenuConfig;
   activeMenuId: string;
@@ -655,7 +703,7 @@ const DrawerMenuItem: React.FC<{
             onNavigate(menu.path);
           }
         }}
-        className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg text-left transition-colors ${
+        className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg text-left transition-colors cursor-pointer ${
           isActive
             ? "bg-orange-500/10 text-orange-500"
             : "text-(--text-primary) hover:bg-(--surface-hover)"
@@ -690,7 +738,7 @@ const DrawerMenuItem: React.FC<{
                 <button
                   key={child.id}
                   onClick={() => onNavigate(child.path)}
-                  className={`w-full flex items-center gap-2 py-2.5 px-3 text-sm rounded-lg ${
+                  className={`w-full flex items-center gap-2 py-2.5 px-3 text-sm rounded-lg cursor-pointer ${
                     isChildActive
                       ? "text-orange-500 bg-orange-500/10"
                       : "text-(--text-secondary) hover:bg-(--surface-hover)"
@@ -712,23 +760,28 @@ const DrawerMenuItem: React.FC<{
   );
 });
 
-// ========== LAYOUT UTAMA MOBILE ==========
+// ============================================================================
+// 9. LAYOUT UTAMA MOBILE
+// ============================================================================
+
 export function UniversalLayoutSM({
   children,
   menus,
   activeMenuId,
   workspaceName = "Modul Control",
 }: UniversalLayoutSMProps) {
+  // ---------- State Dasar ----------
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [isModuleManagerOpen, setIsModuleManagerOpen] = useState(false);
   const [isActivityOpen, setIsActivityOpen] = useState(false);
+  const [isOutletModalOpen, setIsOutletModalOpen] = useState(false);
 
   const navigate = useNavigate();
   const location = useLocation();
 
+  // ---------- Organisasi & Outlet ----------
   const { outlets, userAccounts, regions } = useOrgStore();
-  const [isOutletModalOpen, setIsOutletModalOpen] = useState(false);
   const activeOutletId = localStorage.getItem("__unv_outletId") || "";
   const localRegionId = localStorage.getItem("__unv_regionId") || "";
 
@@ -739,7 +792,7 @@ export function UniversalLayoutSM({
     );
   }, [outlets, activeOutletId]);
 
-  // Deteksi akun yang sedang aktif bertugas
+  // ---------- Deteksi User Aktif ----------
   const activeUser = useMemo(() => {
     try {
       const raw = localStorage.getItem("__unv_activeUser");
@@ -759,7 +812,7 @@ export function UniversalLayoutSM({
     );
   }, [userAccounts, activeUser]);
 
-  // Daftar ruang kerja dinamis (Region Dashboard + Cabang/Outlet yang diizinkan)
+  // ---------- Daftar Ruang Kerja (Region + Outlet) ----------
   const availableWorkspaces = useMemo(() => {
     const workspaces: {
       id: string;
@@ -824,15 +877,13 @@ export function UniversalLayoutSM({
     localRegionId,
   ]);
 
-  // Handler Pindah Ruang Kerja (Region atau Outlet) — sama dengan desktop
+  // ---------- Handler Pindah Ruang Kerja ----------
   const handleSwitchWorkspace = (workspace: {
     id: string;
     name: string;
     type: "REGION" | "OUTLET";
   }) => {
-    // Guard: kalau pilih REGION tapi sekarang sudah di region → abaikan
     if (workspace.type === "REGION" && !activeOutletId) return;
-    // Guard: kalau pilih OUTLET yang sama → abaikan
     if (workspace.type === "OUTLET" && activeOutletId === workspace.id) return;
 
     if (workspace.type === "REGION") {
@@ -854,7 +905,7 @@ export function UniversalLayoutSM({
     }, 250);
   };
 
-  // Modal states
+  // ---------- State Modal ----------
   const [alertState, setAlertState] = useState<AlertConfig | null>(null);
   const [centerModalState, setCenterModalState] =
     useState<CenterModalConfig | null>(null);
@@ -874,7 +925,7 @@ export function UniversalLayoutSM({
     [],
   );
 
-  // Security alert listener
+  // ---------- Security Alert Listener ----------
   useEffect(() => {
     const handleSecurityAlert = (e: any) => {
       const { title, message } = e.detail || {};
@@ -894,7 +945,7 @@ export function UniversalLayoutSM({
       window.removeEventListener("UNV_SECURITY_ALERT", handleSecurityAlert);
   }, [modalApi]);
 
-  // PWA install
+  // ---------- Smart PWA Install Button ----------
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   useEffect(() => {
     const handleBeforeInstall = (e: Event) => {
@@ -916,6 +967,7 @@ export function UniversalLayoutSM({
     }
   };
 
+  // ---------- Theme Variables ----------
   const themeVars = {
     "--bg-app": darkMode ? "#090c13" : "#f0f2f5",
     "--bg-sidebar": darkMode ? "#0e1119" : "#ffffff",
@@ -933,7 +985,7 @@ export function UniversalLayoutSM({
     setDrawerOpen(false);
   };
 
-  // Profil tampilan pengguna di menu samping
+  // ---------- Profil User untuk Drawer ----------
   let userProfile = {
     fullName: "Rendi Faizal",
     role: "Superadmin",
@@ -957,18 +1009,24 @@ export function UniversalLayoutSM({
     }
   } catch {}
 
+  // ==========================================================================
+  // RENDER
+  // ==========================================================================
   return (
     <UniversalModalContext.Provider value={modalApi}>
       <div
         className="flex flex-col h-screen w-screen overflow-hidden font-['Space_Grotesk',sans-serif] relative transition-colors duration-300"
         style={themeVars}
       >
-        {/* Header Mobile */}
+        {/* ================================================================== */}
+        {/* HEADER MOBILE                                                       */}
+        {/* ================================================================== */}
         <header className="h-14 bg-(--bg-header)/90 backdrop-blur-xl border-b border-(--border-color) flex items-center justify-between px-3 shrink-0 z-40">
+          {/* Kiri: Hamburger + Brand + Workspace */}
           <div className="flex items-center gap-2 min-w-0">
             <button
               onClick={() => setDrawerOpen(true)}
-              className="p-2 rounded-lg text-(--text-primary) hover:bg-(--surface-hover)"
+              className="p-2 rounded-lg text-(--text-primary) hover:bg-(--surface-hover) cursor-pointer"
             >
               <Menu className="w-6 h-6" />
             </button>
@@ -980,7 +1038,7 @@ export function UniversalLayoutSM({
                 <button
                   type="button"
                   onClick={() => setIsOutletModalOpen(true)}
-                  className="px-2 py-0.5 rounded-lg bg-orange-500/10 border border-orange-500/30 text-orange-400 text-[10px] font-black uppercase flex items-center gap-1 truncate max-w-32"
+                  className="px-2 py-0.5 rounded-lg bg-orange-500/10 border border-orange-500/30 text-orange-400 text-[10px] font-black uppercase flex items-center gap-1 truncate max-w-32 cursor-pointer"
                   title="Pindah Ruang Kerja (Region / Cabang)"
                 >
                   <span className="truncate">
@@ -996,10 +1054,13 @@ export function UniversalLayoutSM({
             </div>
           </div>
 
+          {/* Kanan: Action Buttons */}
           <div className="flex items-center gap-1.5">
+            {/* Toggle Dark Mode */}
             <button
               onClick={() => setDarkMode(!darkMode)}
-              className="p-2 rounded-lg text-(--text-secondary) hover:bg-(--surface-hover)"
+              className="p-2 rounded-lg text-(--text-secondary) hover:bg-(--surface-hover) cursor-pointer"
+              title={darkMode ? "Mode Terang" : "Mode Gelap"}
             >
               {darkMode ? (
                 <Sun className="w-5 h-5" />
@@ -1007,26 +1068,29 @@ export function UniversalLayoutSM({
                 <Moon className="w-5 h-5" />
               )}
             </button>
+
+            {/* PWA Install */}
             {deferredPrompt && (
               <button
                 onClick={handleInstallPWA}
-                className="p-2 rounded-lg text-emerald-500 hover:bg-emerald-500/10"
+                className="p-2 rounded-lg text-emerald-500 hover:bg-emerald-500/10 cursor-pointer"
                 title="Install App"
               >
                 <Download className="w-5 h-5" />
               </button>
             )}
-            {/* Tombol Aktivitas/Notifikasi */}
+
+            {/* Tombol Aktivitas / Notifikasi */}
             <button
               onClick={() => setIsActivityOpen(true)}
-              className="p-2 rounded-lg text-(--text-secondary) hover:bg-(--surface-hover) relative"
+              className="p-2 rounded-lg text-(--text-secondary) hover:bg-(--surface-hover) relative cursor-pointer"
+              title="Buka Aktivitas / Notifikasi"
             >
               <Bell className="w-5 h-5" />
-              {/* Badge titik merah jika ada pending sync (bisa diganti dengan notifikasi lain) */}
-              {
-                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 rounded-full border border-(--bg-header)" />
-              }
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 rounded-full border border-(--bg-header)" />
             </button>
+
+            {/* Tombol Logout / Kunci Sesi */}
             <button
               onClick={() =>
                 modalApi.openAlert({
@@ -1040,23 +1104,27 @@ export function UniversalLayoutSM({
                   },
                 })
               }
-              className="p-2 rounded-lg text-rose-400 hover:bg-rose-500/10"
+              className="p-2 rounded-lg text-rose-400 hover:bg-rose-500/10 cursor-pointer"
+              title="Kunci Sesi / Logout"
             >
               <LogOut className="w-5 h-5" />
             </button>
           </div>
         </header>
 
-        {/* Drawer Navigasi */}
+        {/* ================================================================== */}
+        {/* DRAWER NAVIGASI                                                     */}
+        {/* ================================================================== */}
         {drawerOpen && (
           <div
             className="fixed inset-0 z-90 bg-black/60 backdrop-blur-sm"
             onClick={() => setDrawerOpen(false)}
           >
             <div
-              className="absolute left-0 top-0 h-full w-4/5 max-w-xs bg-(--bg-card) shadow-2xl flex flex-col"
+              className="absolute left-0 top-0 h-full w-4/5 max-w-xs bg-(--bg-card) shadow-2xl flex flex-col animate-in slide-in-from-left duration-300"
               onClick={(e) => e.stopPropagation()}
             >
+              {/* Profil User */}
               <div className="p-4 border-b border-(--border-color) flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-full bg-linear-to-br from-orange-500 to-teal-500 flex items-center justify-center text-white font-bold">
@@ -1073,13 +1141,14 @@ export function UniversalLayoutSM({
                 </div>
                 <button
                   onClick={() => setDrawerOpen(false)}
-                  className="p-2 rounded-lg text-(--text-secondary) hover:bg-(--surface-hover)"
+                  className="p-2 rounded-lg text-(--text-secondary) hover:bg-(--surface-hover) cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-3">
+              {/* Menu List */}
+              <div className="flex-1 overflow-y-auto p-3 custom-scrollbar">
                 {menus.map((menu) => (
                   <DrawerMenuItem
                     key={menu.id}
@@ -1091,13 +1160,14 @@ export function UniversalLayoutSM({
                 ))}
               </div>
 
+              {/* Quick Actions */}
               <div className="p-3 border-t border-(--border-color) space-y-2">
                 <button
                   onClick={() => {
                     setDrawerOpen(false);
                     setIsModuleManagerOpen(true);
                   }}
-                  className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-(--text-primary) hover:bg-(--surface-hover)"
+                  className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-(--text-primary) hover:bg-(--surface-hover) cursor-pointer"
                 >
                   <Settings className="w-5 h-5 text-(--text-secondary)" />
                   {workspaceName}
@@ -1107,7 +1177,7 @@ export function UniversalLayoutSM({
                     setDrawerOpen(false);
                     navigate("/system/data-manager");
                   }}
-                  className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-(--text-primary) hover:bg-(--surface-hover)"
+                  className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-(--text-primary) hover:bg-(--surface-hover) cursor-pointer"
                 >
                   <Database className="w-5 h-5 text-(--text-secondary)" />
                   Data Manager
@@ -1117,7 +1187,7 @@ export function UniversalLayoutSM({
                     setDrawerOpen(false);
                     navigate("/dashboard/executive");
                   }}
-                  className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-(--text-primary) hover:bg-(--surface-hover)"
+                  className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-(--text-primary) hover:bg-(--surface-hover) cursor-pointer"
                 >
                   <LayoutDashboard className="w-5 h-5 text-orange-500" />
                   Executive Dashboard
@@ -1127,10 +1197,13 @@ export function UniversalLayoutSM({
           </div>
         )}
 
-        {/* Konten Utama */}
+        {/* ================================================================== */}
+        {/* MAIN CONTENT                                                        */}
+        {/* ================================================================== */}
         <main className="flex-1 overflow-y-auto bg-(--bg-app) relative z-10 p-3 sm:p-4">
           {children}
-          {/* Modals */}
+
+          {/* Modal Overlays */}
           {alertState && (
             <AlertDialog
               config={alertState}
@@ -1159,7 +1232,9 @@ export function UniversalLayoutSM({
           )}
         </main>
 
-        {/* Footer Minimal */}
+        {/* ================================================================== */}
+        {/* FOOTER MINIMAL                                                      */}
+        {/* ================================================================== */}
         <footer className="h-10 bg-(--bg-header)/90 backdrop-blur-xl border-t border-(--border-color) flex items-center justify-between px-4 shrink-0 z-40">
           <div className="flex items-center gap-2">
             <ConnectionStatus />
@@ -1176,12 +1251,16 @@ export function UniversalLayoutSM({
           </div>
         </footer>
 
-        {/* Modul Manager Modal */}
+        {/* ================================================================== */}
+        {/* GLOBAL OVERLAYS                                                     */}
+        {/* ================================================================== */}
+
+        {/* Module Manager Modal */}
         {isModuleManagerOpen && (
           <ModuleManagerModal onClose={() => setIsModuleManagerOpen(false)} />
         )}
 
-        {/* Global Components */}
+        {/* Command Palette, Numpad, Toast, Activity Drawer */}
         <CommandPalette menus={menus} />
         <VirtualNumpad />
         <UniversalToast />
@@ -1190,7 +1269,10 @@ export function UniversalLayoutSM({
           onClose={() => setIsActivityOpen(false)}
         />
       </div>
-      {/* MODAL PEMILIH RUANG KERJA KHUSUS SMARTPHONE (REGION + OUTLET) */}
+
+      {/* ================================================================== */}
+      {/* MODAL PEMILIH RUANG KERJA (SMARTPHONE)                              */}
+      {/* ================================================================== */}
       {isOutletModalOpen && (
         <div className="fixed inset-0 z-100 flex items-end sm:items-center justify-center p-3 bg-black/70 backdrop-blur-sm">
           <div className="bg-(--bg-card) border border-(--border-color) rounded-2xl w-full max-w-sm p-4 space-y-3 animate-in slide-in-from-bottom">
@@ -1200,7 +1282,7 @@ export function UniversalLayoutSM({
               </span>
               <button
                 onClick={() => setIsOutletModalOpen(false)}
-                className="text-slate-400 hover:text-white"
+                className="text-slate-400 hover:text-white cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1218,7 +1300,7 @@ export function UniversalLayoutSM({
                     key={`${workspace.type}-${workspace.id}`}
                     type="button"
                     onClick={() => handleSwitchWorkspace(workspace)}
-                    className={`w-full text-left p-2.5 rounded-xl border text-xs font-bold flex items-center justify-between transition ${
+                    className={`w-full text-left p-2.5 rounded-xl border text-xs font-bold flex items-center justify-between transition cursor-pointer ${
                       isSelected
                         ? "bg-orange-500/10 border-orange-500 text-orange-400"
                         : "bg-(--bg-input) border-(--border-color) text-(--text-primary)"

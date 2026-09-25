@@ -90,7 +90,7 @@ export class EventBus {
     );
 
     // 3. Ambil potret baru jika ada event delta yang baru diproses
-    if (deltaEvents.length > 0 || startSeq === 0) {
+    if (deltaEvents.length > 0) {
       await SnapshotEngine.takeSnapshot();
     }
 
@@ -111,42 +111,40 @@ export class EventBus {
     const rxdb = globalLedger.getRxDatabase();
     if (!rxdb) return;
     try {
-      // 1. Bersihkan antrean Inbox lama
+      // 1. Bersihkan antrean Inbox & Outbox lama secara instan (1 batch transaction)
       if (rxdb.collections.inbox) {
-        const allInbox = await rxdb.collections.inbox.find().exec();
-        for (const doc of allInbox) {
-          await doc.remove();
-        }
+        await rxdb.collections.inbox.find().remove();
       }
-
-      // 1b. Bersihkan antrean Outbox lama agar transaksi tertahan tidak menimpa ulang data server
       if (rxdb.collections.outbox) {
-        const allOutbox = await rxdb.collections.outbox.find().exec();
-        for (const doc of allOutbox) {
-          await doc.remove();
-        }
+        await rxdb.collections.outbox.find().remove();
       }
 
-      // 2. Bersihkan snapshots lokal usang
+      // 2. Bersihkan snapshots & events lokal usang secara instan
       if (rxdb.collections.snapshots) {
-        const allSnaps = await rxdb.collections.snapshots.find().exec();
-        for (const doc of allSnaps) {
-          await doc.remove();
-        }
+        await rxdb.collections.snapshots.find().remove();
       }
-
-      // 3. Bersihkan event lokal lama
       if (rxdb.collections.events) {
-        const allEvents = await rxdb.collections.events.find().exec();
-        for (const doc of allEvents) {
-          await doc.remove();
-        }
+        await rxdb.collections.events.find().remove();
       }
 
-      // 4. KUNCI ANTI-KORUP: Reset memori sequence & hash chain di RAM
+      // 3. KUNCI ANTI-KORUP: Reset memori sequence & hash chain di RAM
       globalLedger.resetMemoryChain();
       localStorage.removeItem("__unv_cursor_system");
       localStorage.removeItem("__unv_cursor_tx");
+
+      // 4. Perbarui stempel epoch lokal agar tidak memicu reload ganda saat boot
+      try {
+        const { getApiUrl } = await import("../config/env");
+        const epochRes = await fetch(
+          getApiUrl("/api/system-health/sync-epoch"),
+        );
+        if (epochRes.ok) {
+          const epochData = await epochRes.json();
+          if (epochData.epoch) {
+            localStorage.setItem("__unv_sync_epoch", String(epochData.epoch));
+          }
+        }
+      } catch {}
 
       // 5. Kosongkan state tampilan UI
       globalRegistry.hardReset();
@@ -162,9 +160,7 @@ export class EventBus {
       );
       notifyStateUpdated();
 
-      // =====================================================================
       // 8. PEMBERSIHAN SESI USER & LEMPAR KE HALAMAN LOGIN
-      // =====================================================================
       this.clearUserSession();
     } catch (error) {
       console.error("[RESYNC ENGINE] Gagal melakukan safe resync:", error);
@@ -214,8 +210,12 @@ export class EventBus {
         "[RESYNC ENGINE] Sesi user dibersihkan. Memaksa kembali ke halaman login...",
       );
 
-      // 4. Arahkan URL ke rute utama dan reload aplikasi
-      window.location.href = "/";
+      // 4. Arahkan URL ke rute utama dan pastikan aplikasi reload bersih
+      if (window.location.pathname === "/") {
+        window.location.reload();
+      } else {
+        window.location.href = "/";
+      }
     } catch (e) {
       console.warn("[RESYNC] Gagal membersihkan sesi user:", e);
       window.location.reload();
