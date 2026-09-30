@@ -18,6 +18,8 @@ import { provisionRouter } from "./routes/provision.js";
 import { executiveDashboardRouter } from "./routes/executiveDashboard.js";
 import { paymentRouter } from "./routes/payment.js";
 import { systemHealthRouter } from "./routes/systemHealth.js";
+import { whatsappRouter } from "./routes/whatsapp.js";
+import { globalWhatsAppService } from "../../../modules/mdl_whatsapp/src/server/baileysService.js";
 dotenv.config();
 // ============================================================
 // 1. DYNAMIC CORS ORIGIN RESOLVER
@@ -136,6 +138,7 @@ app.use("/api/storage", storageRouter);
 app.use("/api/provision", provisionRouter);
 app.use("/api/executive", executiveDashboardRouter);
 app.use("/api/system-health", systemHealthRouter);
+app.use("/api/whatsapp", whatsappRouter);
 app.set("io", io);
 app.get("/api/health", async (_req, res) => {
     try {
@@ -517,6 +520,8 @@ const PORT = process.env.PORT || 5000;
 initNATS()
     .then(() => {
     startSyncWorker(io);
+    globalWhatsAppService.attachSocketIO(io);
+    globalWhatsAppService.initIfSessionExists();
     setupDefaultServerTasks();
     globalServerScheduler.start(60000);
     httpServer.listen(PORT, () => {

@@ -1,12 +1,15 @@
 // File: packages/core_unv/src/ledger/UniversalLedger.ts
 import { addRxPlugin, createRxDatabase, RxCollection, RxDatabase } from "rxdb";
+import { isTransactionAggregate } from "../utils/pruningUtils";
 import { getRxStorageDexie } from "rxdb/plugins/storage-dexie";
 import { RxDBDevModePlugin } from "rxdb/plugins/dev-mode";
 import { wrappedValidateZSchemaStorage } from "rxdb/plugins/validate-z-schema";
+import { RxDBMigrationSchemaPlugin } from "rxdb/plugins/migration-schema";
 import { ulid } from "ulidx";
 import {
   LedgerEventDoc,
   UniversalEventSchema,
+  eventMigrationStrategies,
   OutboxSchema,
   SyncLogSchema,
   InboxSchema,
@@ -31,6 +34,8 @@ if (typeof window !== "undefined" && (import.meta as any).env?.DEV) {
   disableWarnings();
   addRxPlugin(RxDBDevModePlugin);
 }
+
+addRxPlugin(RxDBMigrationSchemaPlugin);
 
 export class UniversalLedger {
   private db!: RxDatabase<{
@@ -83,7 +88,10 @@ export class UniversalLedger {
       });
 
       await this.db.addCollections({
-        events: { schema: UniversalEventSchema },
+        events: {
+          schema: UniversalEventSchema,
+          migrationStrategies: eventMigrationStrategies,
+        },
         outbox: { schema: OutboxSchema },
         sync_logs: { schema: SyncLogSchema },
         inbox: { schema: InboxSchema },
@@ -247,6 +255,23 @@ export class UniversalLedger {
           );
           await this.syncInitial();
           notifyStateUpdated();
+        }
+      });
+
+      // Listener status sesi dan pesan WhatsApp masuk secara real-time
+      this.socket.on("WA_CONNECTION_STATUS", (data: any) => {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent("UNV_WA_STATUS", { detail: data }),
+          );
+        }
+      });
+
+      this.socket.on("WA_NEW_MESSAGE", (data: any) => {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent("UNV_WA_MESSAGE", { detail: data }),
+          );
         }
       });
 
@@ -583,6 +608,12 @@ export class UniversalLedger {
 
         const eventDoc: LedgerEventDoc = {
           id: eventId,
+          isTx: isTransactionAggregate(
+            rawPayload.dddMetadata?.aggregateType ||
+              rawPayload.aggregateType ||
+              "",
+          ),
+          createdAt: Number(rawPayload.createdAt) || Date.now(),
           aggregateId: rawPayload.aggregateId,
           aggregateVersion: rawPayload.aggregateVersion,
           seq: nextSeq,
@@ -663,6 +694,8 @@ export class UniversalLedger {
 
       const eventDoc: LedgerEventDoc = {
         id: eventId,
+        isTx: isTransactionAggregate(aggregateType),
+        createdAt: Date.now(),
         aggregateId,
         aggregateVersion: expectedVersion,
         seq: nextSeq,

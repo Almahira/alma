@@ -110,7 +110,7 @@ export class OutboxDaemon {
     // Jalankan sweep berkala setiap 3 detik sebagai jaring pengaman
     setInterval(() => {
       this.processQueue();
-    }, 3000);
+    }, 30000);
   }
 
   /**

@@ -37,8 +37,9 @@ export class ConnectivityManager {
     // Pengecekan aktif setiap 15 detik
     if (!this.pingIntervalId) {
       this.pingIntervalId = setInterval(() => {
+        if (typeof document !== "undefined" && document.hidden) return;
         this.checkRealConnection();
-      }, 15000);
+      }, 60000);
     }
   }
 

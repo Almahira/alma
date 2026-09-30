@@ -335,14 +335,16 @@ function WorkspaceWrapper() {
           );
         })}
 
-        {/* Fallback Redirect untuk Rute /app atau Rute Kosong ke Modul Pertama */}
+        {/* Fallback Redirect Cerdas: Cek Submenu -> Menu Utama -> Default Rute Aman */}
         <Route
           path="/app"
           element={
             dynamicMenus[0]?.children?.[0]?.path ? (
               <Navigate to={dynamicMenus[0].children[0].path} replace />
+            ) : dynamicMenus[0]?.path ? (
+              <Navigate to={dynamicMenus[0].path} replace />
             ) : (
-              <Navigate to="/" replace />
+              <Navigate to="/transaksi/receiving" replace />
             )
           }
         />
@@ -351,6 +353,8 @@ function WorkspaceWrapper() {
           element={
             dynamicMenus[0]?.children?.[0]?.path ? (
               <Navigate to={dynamicMenus[0].children[0].path} replace />
+            ) : dynamicMenus[0]?.path ? (
+              <Navigate to={dynamicMenus[0].path} replace />
             ) : (
               <div className="p-8 text-center text-slate-400 font-bold">
                 Halaman tidak ditemukan.

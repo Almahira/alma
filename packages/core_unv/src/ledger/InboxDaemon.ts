@@ -30,7 +30,7 @@ export class InboxDaemon {
     // 3. Fallback Interval setiap 3 detik untuk memastikan tidak ada event yang tertinggal
     this.intervalId = setInterval(() => {
       this.processQueue();
-    }, 3000);
+    }, 30000);
   }
 
   /**

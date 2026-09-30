@@ -12,7 +12,7 @@ export class FileDaemon {
   }
 
   public start() {
-    setInterval(() => this.processQueue(), 5000);
+    setInterval(() => this.processQueue(), 60000);
     window.addEventListener("online", () => this.processQueue());
   }
 

@@ -19,6 +19,8 @@ export const SYSTEM_AGGREGATES = [
   "ITEM_PRODUCT",
   "EXECUTIVE_PANEL",
   "EXECUTIVE_TARGET",
+  "WHATSAPP_CONFIG",
+  "WHATSAPP_MESSAGE",
 ];
 
 export function isTransactionAggregate(aggregateType: string): boolean {

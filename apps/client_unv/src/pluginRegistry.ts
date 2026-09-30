@@ -10,6 +10,7 @@ import { ReceivingPlugin } from "../../../modules/mdl_receiving/src/index";
 import { PlusalesPlugin } from "../../../modules/mdl_plusales/src/index";
 import { WarehousePlugin } from "../../../modules/mdl_warehouse/src/index";
 import { ExecutivePanelPlugin } from "../../../modules/mdl_executivepanel/src/index";
+import { WhatsAppPlugin } from "../../../modules/mdl_whatsapp/src/index";
 
 export const manager = new PluginManager<ClientPlugin>();
 
@@ -21,3 +22,4 @@ manager.register(ReceivingPlugin);
 manager.register(PlusalesPlugin);
 manager.register(WarehousePlugin);
 manager.register(ExecutivePanelPlugin);
+manager.register(WhatsAppPlugin);

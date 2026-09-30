@@ -12,6 +12,7 @@ import { useOrgStore } from "../../../../modules/mdl_organization/src/client/sto
 import { manager } from "../pluginRegistry";
 import { sysToast } from "./useToastStore";
 import { EventBus } from "../../../../packages/core_unv/src/cqrs/EventBus";
+import { WhatsAppChatDrawer } from "../../../../modules/mdl_whatsapp/src/client/components/WhatsAppChatDrawer";
 
 import { ActivityDrawer } from "./ActivityDrawer";
 import { CommandPalette } from "./CommandPalette";
@@ -43,6 +44,7 @@ import {
   Store,
   Building2,
   LayoutDashboard,
+  MessageSquare,
   LogOut,
   ShieldCheck,
   Key,
@@ -973,6 +975,7 @@ export function UniversalLayout({
 }: UniversalLayoutProps) {
   // --- State dasar ---
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [prevSidebarState, setPrevSidebarState] = useState(false);
   const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>(
     {},
   );
@@ -1162,6 +1165,7 @@ export function UniversalLayout({
   // --- State UI ---
   const [logoAnim, setLogoAnim] = useState(false);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isWADrawerOpen, setIsWADrawerOpen] = useState(false);
   const [isModuleManagerOpen, setIsModuleManagerOpen] = useState(false);
 
   const navigate = useNavigate();
@@ -1587,6 +1591,27 @@ export function UniversalLayout({
             </button>
 
             <button
+              onClick={() => {
+                if (!isWADrawerOpen) {
+                  setPrevSidebarState(isCollapsed);
+                  setIsCollapsed(true); // Otomatis ciutkan sidebar ke minimalis
+                  setIsWADrawerOpen(true);
+                } else {
+                  setIsCollapsed(prevSidebarState); // Kembalikan ukuran sidebar semula
+                  setIsWADrawerOpen(false);
+                }
+              }}
+              className={`relative p-2 rounded-full ${
+                isWADrawerOpen
+                  ? "bg-emerald-500/20 text-emerald-500 border border-emerald-500/40"
+                  : "text-(--text-secondary) hover:text-emerald-500 hover:bg-(--surface-hover)"
+              } ${glassInputStyle} cursor-pointer`}
+              title="Buka Chat WhatsApp & PO Vendor (Multitasking Dock)"
+            >
+              <MessageSquare className="w-5 h-5 text-emerald-500" />
+            </button>
+
+            <button
               onClick={() => setIsDrawerOpen(true)}
               className={`relative p-2 rounded-full text-(--text-secondary) hover:text-(--text-primary) hover:bg-(--surface-hover) ${glassInputStyle} cursor-pointer`}
               title="Buka Aktivitas / Notifikasi"
@@ -1762,10 +1787,9 @@ export function UniversalLayout({
               document.body,
             )}
 
-          {/* Main content */}
+          {/* Main content (Kolom Ke-2) */}
           <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-transparent relative z-10 p-6">
             <div className="w-full h-full relative">{children}</div>
-
             {alertState && (
               <AlertDialog
                 config={alertState}
@@ -1779,6 +1803,18 @@ export function UniversalLayout({
               />
             )}
           </main>
+
+          {/* Kolom Ke-3: WhatsApp Dock Panel (Sejajar di Sisi Kanan) */}
+          {isWADrawerOpen && (
+            <WhatsAppChatDrawer
+              isOpen={isWADrawerOpen}
+              isInline={true}
+              onClose={() => {
+                setIsCollapsed(prevSidebarState); // Kembalikan ukuran sidebar semula
+                setIsWADrawerOpen(false);
+              }}
+            />
+          )}
         </div>
 
         {/* ================= FOOTER ================= */}

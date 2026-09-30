@@ -31,8 +31,19 @@ export class PruningManager {
         }
       });
 
-      const allEvents = await rxdb.collections.events.find().exec();
       const startOfMonth = getStartOfCurrentMonth();
+
+      // HANYA ambil transaksi operasional lampau secara parsial (100 event per putaran)
+      const allEvents = await rxdb.collections.events
+        .find({
+          selector: {
+            isTx: true,
+            createdAt: { $lt: startOfMonth },
+          },
+          sort: [{ createdAt: "asc" }],
+          limit: 100,
+        })
+        .exec();
 
       // 2. Kelompokkan event berdasarkan aggregateId
       const aggregateMap = new Map<string, any[]>();

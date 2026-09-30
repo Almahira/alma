@@ -1,8 +1,11 @@
 // File: packages/core_unv/src/ledger/schema.ts
 import { RxJsonSchema } from "rxdb";
+import { isTransactionAggregate } from "../utils/pruningUtils";
 
 export interface LedgerEventDoc {
   id: string;
+  isTx: boolean;
+  createdAt: number;
   aggregateId: string;
   aggregateVersion: number;
   seq: number;
@@ -58,11 +61,18 @@ export interface InboxDoc {
 
 export const UniversalEventSchema: RxJsonSchema<LedgerEventDoc> = {
   title: "universal event ledger schema",
-  version: 0,
+  version: 1,
   primaryKey: "id",
   type: "object",
   properties: {
     id: { type: "string", maxLength: 100 },
+    isTx: { type: "boolean" },
+    createdAt: {
+      type: "number",
+      minimum: 0,
+      maximum: 999999999999999,
+      multipleOf: 1,
+    },
     aggregateId: { type: "string", maxLength: 100 },
     aggregateVersion: { type: "number" },
     seq: {
@@ -81,6 +91,8 @@ export const UniversalEventSchema: RxJsonSchema<LedgerEventDoc> = {
   },
   required: [
     "id",
+    "isTx",
+    "createdAt",
     "aggregateId",
     "aggregateVersion",
     "seq",
@@ -92,7 +104,7 @@ export const UniversalEventSchema: RxJsonSchema<LedgerEventDoc> = {
     "dddMetadata",
     "nodeMetadata",
   ],
-  indexes: ["seq", "aggregateId", "type"],
+  indexes: ["seq", "aggregateId", "type", ["isTx", "createdAt"]],
 };
 
 export const OutboxSchema = {
@@ -213,3 +225,22 @@ export interface SystemLogDoc {
   actorId?: string;
   actorName?: string;
 }
+
+export const eventMigrationStrategies = {
+  1: function (oldDoc: any) {
+    const aggType = oldDoc.dddMetadata?.aggregateType || "";
+    oldDoc.isTx = isTransactionAggregate(aggType);
+
+    let eventTime = 0;
+    if (oldDoc.dddMetadata?.businessDate) {
+      eventTime = new Date(oldDoc.dddMetadata.businessDate).getTime();
+    }
+    if (!eventTime || isNaN(eventTime)) {
+      const parsedHlc = Number(oldDoc.hlc?.split(":")[0]);
+      if (!isNaN(parsedHlc) && parsedHlc > 0) eventTime = parsedHlc;
+    }
+    oldDoc.createdAt = eventTime > 0 ? eventTime : Date.now();
+
+    return oldDoc;
+  },
+};

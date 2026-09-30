@@ -1,0 +1,7 @@
+{
+  "name": "@ALMA/mdl_whatsapp",
+  "version": "1.0.0",
+  "description": "Modul Integrasi WhatsApp Multi-Device & Otomatisasi PO ke Receiving",
+  "main": "src/index.ts",
+  "type": "module"
+}

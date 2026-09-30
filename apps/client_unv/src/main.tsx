@@ -169,21 +169,42 @@ function SystemBootstrapper() {
 
   // Kunci eksklusif per tab browser menggunakan Web Locks API
   useEffect(() => {
-    if (typeof navigator !== "undefined" && (navigator as any).locks) {
-      (navigator as any).locks.request(
+    // Lewati penguncian ganda di mode development (Vite HMR & React 18 StrictMode)
+    if (import.meta.env.DEV) {
+      setIsTabDuplicate(false);
+      return;
+    }
+
+    if (typeof navigator === "undefined" || !(navigator as any).locks) return;
+    let isMounted = true;
+    const controller = new AbortController();
+
+    (navigator as any).locks
+      .request(
         "alma_unv_primary_instance",
         { ifAvailable: true },
         async (lock: any) => {
+          if (!isMounted) return;
           if (!lock) {
-            // Tab lain sudah memegang kunci instance utama
             setIsTabDuplicate(true);
             return;
           }
-          // Pertahankan kunci selama tab ini tetap hidup
-          await new Promise(() => {});
+          setIsTabDuplicate(false);
+          await new Promise((resolve) => {
+            controller.signal.addEventListener("abort", resolve);
+          });
         },
-      );
-    }
+      )
+      .catch((err: any) => {
+        if (err.name !== "AbortError") {
+          console.warn("[WEB LOCK] Error:", err);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+      controller.abort();
+    };
   }, []);
 
   const isSetupRoute =
@@ -332,16 +353,20 @@ function SystemBootstrapper() {
         </h2>
         <p className="text-xs text-slate-400 max-w-sm mt-2 leading-relaxed font-medium">
           Untuk melindungi konsistensi transaksi lokal dan database kasir,
-          sistem hanya mengizinkan 1 tab aktif dalam satu browser.
+          sistem membatasi tab aktif.
         </p>
-        <p className="text-[11px] text-slate-500 mt-4">
-          Silakan gunakan tab ALMA yang sudah aktif, atau tutup tab lain lalu
-          muat ulang halaman ini.
-        </p>
+        <div className="mt-5 flex gap-3">
+          <button
+            type="button"
+            onClick={() => setIsTabDuplicate(false)}
+            className="px-5 py-2.5 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-xs font-black uppercase tracking-wider transition shadow-md cursor-pointer"
+          >
+            Lanjutkan &amp; Buka di Tab Ini
+          </button>
+        </div>
       </div>
     );
   }
-
   // Jika membuka landing page atau setup wizard, langsung tampilkan tanpa loading bar panjang
   if (isSetupRoute) {
     return <App />;
@@ -373,6 +398,16 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
 
 if (typeof window !== "undefined" && "serviceWorker" in navigator) {
   window.addEventListener("load", () => {
+    // Di mode development (localhost), nonaktifkan SW agar tidak menabrak rute baru Vite
+    if (import.meta.env.DEV) {
+      navigator.serviceWorker.getRegistrations().then((registrations) => {
+        for (const registration of registrations) {
+          registration.unregister();
+        }
+      });
+      return;
+    }
+
     navigator.serviceWorker
       .register("/sw.js")
       .then((reg) => {
