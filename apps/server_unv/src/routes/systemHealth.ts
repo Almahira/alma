@@ -1,6 +1,8 @@
 // File: apps/server_unv/src/routes/systemHealth.ts
 import express, { Router, Request, Response } from "express";
 import { sql, desc, eq } from "drizzle-orm";
+import fs from "fs";
+import path from "path";
 import { db } from "../config/db.js";
 import { nc, jsm, publishEvent } from "../config/nats.js";
 import {
@@ -10,28 +12,222 @@ import {
   deviceRegistry,
   systemSnapshots,
 } from "../../../../packages/db-schema/index.js";
+import {
+  companies,
+  regions,
+  outlets,
+  employees,
+  userAccounts,
+} from "../../../../modules/mdl_organization/src/server/schema.js";
 import { telemetryMetrics } from "../../../../packages/db-schema/schema/telemetry.js";
 
 const router = express.Router();
 
 // =========================================================================
-// 1. GET /api/system-health/overview (Desktop & Tablet)
+// ENGINE SNAPSHOT SERVER OTOMATIS (CANONICAL SNAPSHOT GENERATOR)
+// =========================================================================
+export async function generateServerCanonicalSnapshot(
+  targetCompanyId?: string,
+) {
+  try {
+    // 1. Ambil daftar perusahaan aktif
+    const companyList = targetCompanyId
+      ? await db
+          .select()
+          .from(companies)
+          .where(eq(companies.id, targetCompanyId))
+      : await db.select().from(companies).where(eq(companies.isActive, true));
+
+    if (companyList.length === 0) {
+      console.log(
+        "[SERVER SNAPSHOT] Tidak ada perusahaan aktif untuk diproses.",
+      );
+      return null;
+    }
+
+    const reportResults: any[] = [];
+
+    for (const comp of companyList) {
+      const compId = comp.id;
+
+      // 2. Ambil data snapshot terakhir untuk memeriksa apakah ada event baru
+      const existingSnapRows = await db
+        .select()
+        .from(systemSnapshots)
+        .where(eq(systemSnapshots.id, `SNAP_${compId}`))
+        .limit(1);
+
+      const existingSnap = existingSnapRows[0];
+      const lastSnapTime = existingSnap?.updatedAt
+        ? new Date(existingSnap.updatedAt)
+        : new Date(0);
+
+      // 3. Cek apakah ada event baru di jurnal sistem atau transaksi sejak snapshot terakhir
+      const newSysEventsCount = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(systemEventJournal)
+        .where(sql`${systemEventJournal.createdAt} > ${lastSnapTime}`)
+        .then((r) => Number(r[0]?.count || 0));
+
+      const newTxEventsCount = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(txEventJournal)
+        .where(sql`${txEventJournal.createdAt} > ${lastSnapTime}`)
+        .then((r) => Number(r[0]?.count || 0));
+
+      // Jika snapshot sudah ada dan tidak ada event baru dalam 5 menit terakhir, lewati demi efisiensi
+      if (existingSnap && newSysEventsCount === 0 && newTxEventsCount === 0) {
+        console.log(
+          `[SERVER SNAPSHOT] Perusahaan ${comp.name}: Data masih identik dengan snapshot terkini (Seq #${existingSnap.lastSeq}). Melewati pembaruan.`,
+        );
+        reportResults.push({
+          companyId: compId,
+          status: "UNCHANGED",
+          lastSeq: existingSnap.lastSeq,
+        });
+        continue;
+      }
+
+      console.log(
+        `[SERVER SNAPSHOT] Terdeteksi perubahan data pada ${comp.name} (Sys delta: ${newSysEventsCount}, Tx delta: ${newTxEventsCount}). Memperbarui snapshot...`,
+      );
+
+      // 4. Tarik master data organisasi resmi dari PostgreSQL
+      const [compRegions, compOutlets, compEmployees, compUsers] =
+        await Promise.all([
+          db.select().from(regions).where(eq(regions.companyId, compId)),
+          db.select().from(outlets).where(eq(outlets.companyId, compId)),
+          db.select().from(employees),
+          db.select().from(userAccounts).where(eq(userAccounts.isActive, true)),
+        ]);
+
+      // Validasi integritas master data penting
+      if (compEmployees.length === 0 || compUsers.length === 0) {
+        console.warn(
+          `[SERVER SNAPSHOT] Peringatan: Data karyawan/user kosong untuk ${comp.name}. Pembentukan snapshot ditunda demi keamanan login.`,
+        );
+        continue;
+      }
+
+      // 5. Susun struktur State yang kompatibel langsung dengan UniversalRegistry
+      const organizationDomainState = {
+        companies: [comp],
+        regions: compRegions,
+        outlets: compOutlets,
+        documents: [],
+        bankAccounts: [],
+        divisions: [],
+        positions: [],
+        documentTypes: [],
+        employees: compEmployees,
+        employmentAssignments: [],
+        employeeDocuments: [],
+        userAccounts: compUsers.map((u) => ({
+          id: u.id,
+          employeeId: u.employeeId,
+          username: u.username,
+          role: u.role,
+          allowedOutletIds: [],
+          isActive: u.isActive,
+        })),
+      };
+
+      // 6. Hitung Total Sequence Terkini
+      const [totalSysCount, totalTxCount, latestSysEvent] = await Promise.all([
+        db
+          .select({ count: sql<number>`count(*)` })
+          .from(systemEventJournal)
+          .then((r) => Number(r[0]?.count || 0)),
+        db
+          .select({ count: sql<number>`count(*)` })
+          .from(txEventJournal)
+          .then((r) => Number(r[0]?.count || 0)),
+        db
+          .select({ id: systemEventJournal.id })
+          .from(systemEventJournal)
+          .orderBy(desc(systemEventJournal.createdAt))
+          .limit(1),
+      ]);
+
+      const currentTotalSeq = totalSysCount + totalTxCount;
+
+      // Payload snapshot flat di level root agar terbaca langsung oleh projection handlers
+      const snapshotDataPayload = {
+        ORGANIZATION: organizationDomainState,
+        ITEM_DOMAIN: { items: [], categories: [], units: [] },
+        VENDOR: { vendors: [] },
+        DICTIONARY: {},
+        __metadata: {
+          schemaVersion: 2,
+          companyId: compId,
+          lastSeq: currentTotalSeq,
+          totalSystemEvents: totalSysCount,
+          totalTxEvents: totalTxCount,
+          generatedAt: Date.now(),
+        },
+      };
+
+      const snapId = `SNAP_${compId}`;
+      const jsonString = JSON.stringify(snapshotDataPayload);
+
+      // 7. Simpan / Perbarui Snapshot di database PostgreSQL
+      await db
+        .insert(systemSnapshots)
+        .values({
+          id: snapId,
+          companyId: compId,
+          lastSeq: currentTotalSeq,
+          lastEventId: latestSysEvent[0]?.id || null,
+          data: jsonString,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .onConflictDoUpdate({
+          target: systemSnapshots.id,
+          set: {
+            lastSeq: currentTotalSeq,
+            lastEventId: latestSysEvent[0]?.id || null,
+            data: jsonString,
+            updatedAt: new Date(),
+          },
+        });
+
+      console.log(
+        `[SERVER SNAPSHOT] SUKSES: Snapshot resmi Sequence #${currentTotalSeq} berhasil dibekukan untuk ${comp.name}.`,
+      );
+
+      reportResults.push({
+        companyId: compId,
+        status: "UPDATED",
+        lastSeq: currentTotalSeq,
+        employeesCount: compEmployees.length,
+        usersCount: compUsers.length,
+      });
+    }
+
+    return reportResults;
+  } catch (error) {
+    console.error("[SERVER SNAPSHOT GENERATOR ERROR]:", error);
+    return null;
+  }
+}
+
+// =========================================================================
+// 1. GET /api/system-health/overview
 // =========================================================================
 router.get("/overview", async (_req: Request, res: Response) => {
   try {
     const startTime = performance.now();
 
-    // 1. Cek Koneksi PostgreSQL
     let dbStatus = "CONNECTED";
     let dbLatencyMs = 0;
     try {
       await db.execute(sql`SELECT 1`);
       dbLatencyMs = Math.round(performance.now() - startTime);
-    } catch (e: any) {
+    } catch {
       dbStatus = "DISCONNECTED";
     }
 
-    // 2. Cek Koneksi NATS JetStream
     let natsStatus = "CONNECTED";
     let streamMsgCount = 0;
     try {
@@ -45,7 +241,6 @@ router.get("/overview", async (_req: Request, res: Response) => {
       natsStatus = "ERROR";
     }
 
-    // 3. Hitung Jumlah Event di Jurnal
     const [sysCount, txCount, qCount] = await Promise.all([
       db
         .select({ count: sql<number>`count(*)` })
@@ -61,14 +256,12 @@ router.get("/overview", async (_req: Request, res: Response) => {
         .then((r) => Number(r[0]?.count || 0)),
     ]);
 
-    // 4. Memory & Uptime Server
     const memory = process.memoryUsage();
     const heapUsedMb = Math.round(memory.heapUsed / 1024 / 1024);
     const heapTotalMb = Math.round(memory.heapTotal / 1024 / 1024);
     const rssMb = Math.round(memory.rss / 1024 / 1024);
     const uptimeSeconds = Math.floor(process.uptime());
 
-    // 5. Perangkat Aktif vs Offline
     const allDevices = await db.select().from(deviceRegistry);
     const now = Date.now();
     let activeDevicesCount = 0;
@@ -76,7 +269,6 @@ router.get("/overview", async (_req: Request, res: Response) => {
 
     allDevices.forEach((d) => {
       const lastSeen = d.lastSeenAt ? new Date(d.lastSeenAt).getTime() : 0;
-      // Perangkat dianggap online jika ada aktivitas dalam 3 menit terakhir
       const isOnline = now - lastSeen < 3 * 60 * 1000;
       if (d.status === "ACTIVE" && isOnline) {
         activeDevicesCount++;
@@ -123,7 +315,7 @@ router.get("/overview", async (_req: Request, res: Response) => {
 });
 
 // =========================================================================
-// 2. GET /api/system-health/urgency (Khusus Smartphone: Sangat Ringan & Cepat)
+// 2. GET /api/system-health/urgency
 // =========================================================================
 router.get("/urgency", async (_req: Request, res: Response) => {
   try {
@@ -134,7 +326,6 @@ router.get("/urgency", async (_req: Request, res: Response) => {
       timestamp: string;
     }[] = [];
 
-    // 1. Cek DB
     try {
       await db.execute(sql`SELECT 1`);
     } catch {
@@ -146,7 +337,6 @@ router.get("/urgency", async (_req: Request, res: Response) => {
       });
     }
 
-    // 2. Cek NATS
     if (!nc || nc.isClosed()) {
       alerts.push({
         level: "CRITICAL",
@@ -157,7 +347,6 @@ router.get("/urgency", async (_req: Request, res: Response) => {
       });
     }
 
-    // 3. Cek Karantina DLQ (Paling Krusial)
     const qEvents = await db
       .select()
       .from(quarantineEventJournal)
@@ -174,7 +363,6 @@ router.get("/urgency", async (_req: Request, res: Response) => {
       });
     }
 
-    // 4. Cek Memori Server
     const memory = process.memoryUsage();
     const heapPercent = Math.round((memory.heapUsed / memory.heapTotal) * 100);
     if (heapPercent > 85) {
@@ -186,7 +374,6 @@ router.get("/urgency", async (_req: Request, res: Response) => {
       });
     }
 
-    // 5. Cek Error Crash Terkini di Telemetri
     const recentErrors = await db
       .select()
       .from(telemetryMetrics)
@@ -218,7 +405,7 @@ router.get("/urgency", async (_req: Request, res: Response) => {
 });
 
 // =========================================================================
-// 3. GET /api/system-health/quarantine (Daftar Lengkap Event DLQ)
+// 3. GET /api/system-health/quarantine
 // =========================================================================
 router.get("/quarantine", async (_req: Request, res: Response) => {
   try {
@@ -243,7 +430,7 @@ router.get("/quarantine", async (_req: Request, res: Response) => {
 });
 
 // =========================================================================
-// 4. POST /api/system-health/quarantine/retry (Coba Eksekusi Ulang Event)
+// 4. POST /api/system-health/quarantine/retry
 // =========================================================================
 router.post("/quarantine/retry", async (req: Request, res: Response) => {
   try {
@@ -270,7 +457,6 @@ router.post("/quarantine/retry", async (req: Request, res: Response) => {
         ? JSON.parse(qEvent.payload)
         : qEvent.payload;
 
-    // Masukkan kembali ke antrean NATS agar diproses ulang
     const retryPayload = {
       id: qEvent.id,
       aggregateId: qEvent.aggregateId,
@@ -285,7 +471,6 @@ router.post("/quarantine/retry", async (req: Request, res: Response) => {
 
     await publishEvent("events.sync.up", retryPayload);
 
-    // Hapus dari jurnal karantina
     await db
       .delete(quarantineEventJournal)
       .where(eq(quarantineEventJournal.id, eventId));
@@ -300,7 +485,7 @@ router.post("/quarantine/retry", async (req: Request, res: Response) => {
 });
 
 // =========================================================================
-// 5. POST /api/system-health/quarantine/purge (Hapus Event Rusak)
+// 5. POST /api/system-health/quarantine/purge
 // =========================================================================
 router.post("/quarantine/purge", async (req: Request, res: Response) => {
   try {
@@ -333,7 +518,7 @@ router.post("/quarantine/purge", async (req: Request, res: Response) => {
 });
 
 // =========================================================================
-// 6. GET /api/system-health/devices (Daftar & Analisis Diagnosa Mesin)
+// 6. GET /api/system-health/devices
 // =========================================================================
 router.get("/devices", async (_req: Request, res: Response) => {
   try {
@@ -384,13 +569,8 @@ router.get("/devices", async (_req: Request, res: Response) => {
 });
 
 // =========================================================================
-// 7. STEMPEL UNIVERSAL: PENYIMPANAN EPOCH & BROADCAST RESYNC MASAL
+// 7. STEMPEL UNIVERSAL: EPOCH & BROADCAST RESYNC
 // =========================================================================
-import fs from "fs";
-import path from "path";
-
-// Simpan stempel epoch ke file lokal agar TIDAK BERUBAH saat server restart biasa,
-// dan HANYA berubah ketika tombol 'Broadcast Re-Sync' ditekan oleh admin.
 const EPOCH_FILE_PATH = path.join(process.cwd(), ".server_sync_epoch");
 
 function getStoredEpoch(): number {
@@ -410,7 +590,6 @@ function getStoredEpoch(): number {
 
 let serverSyncEpoch = getStoredEpoch();
 
-// Endpoint ringan untuk diperiksa oleh tablet/HP saat pertama kali buka / online
 router.get("/sync-epoch", (_req: Request, res: Response) => {
   res.status(200).json({
     status: "SUCCESS",
@@ -419,12 +598,10 @@ router.get("/sync-epoch", (_req: Request, res: Response) => {
   });
 });
 
-// Endpoint pemicu Reset & Penyelarasan Masal dari Dashboard SRE
 router.post("/broadcast-resync", async (req: Request, res: Response) => {
   try {
     const { reason = "Penyelarasan Masal & Reset Data Pusat" } = req.body;
 
-    // 1. Terbitkan stempel epoch baru dan simpan permanen ke disk server
     serverSyncEpoch = Date.now();
     try {
       fs.writeFileSync(EPOCH_FILE_PATH, String(serverSyncEpoch));
@@ -432,7 +609,6 @@ router.post("/broadcast-resync", async (req: Request, res: Response) => {
       console.error("[EPOCH SAVE ERROR]:", fsErr);
     }
 
-    // 2. Siarkan ke seluruh perangkat dengan perintah paksa logout ke halaman login
     const io = req.app.get("io");
     if (io) {
       io.emit("REMOTE_RESYNC_TRIGGER", {
@@ -465,9 +641,14 @@ router.get("/snapshot/system/latest", async (req: Request, res: Response) => {
   try {
     const companyId = req.query.companyId as string | undefined;
 
+    const whereClause = companyId
+      ? eq(systemSnapshots.companyId, String(companyId))
+      : undefined;
+
     const query = db
       .select()
       .from(systemSnapshots)
+      .where(whereClause)
       .orderBy(desc(systemSnapshots.updatedAt))
       .limit(1);
 
@@ -497,49 +678,32 @@ router.get("/snapshot/system/latest", async (req: Request, res: Response) => {
   }
 });
 
-// Endpoint untuk memperbarui / menitipkan Snapshot kondisi terkini ke Server
-router.post("/snapshot/system/save", async (req: Request, res: Response) => {
-  try {
-    const { companyId, lastSeq, lastEventId, data, updatedAt } = req.body;
+// Endpoint untuk Memicu Pembuatan Snapshot Langsung di Server (On-Demand / Manual)
+router.post(
+  "/snapshot/server/generate",
+  async (req: Request, res: Response) => {
+    try {
+      const { companyId } = req.body;
+      const result = await generateServerCanonicalSnapshot(companyId);
 
-    if (!data || typeof lastSeq !== "number") {
-      return res
-        .status(400)
-        .json({ error: "Data snapshot atau lastSeq tidak valid." });
-    }
+      if (!result || result.length === 0) {
+        return res.status(404).json({
+          status: "FAILED",
+          message:
+            "Gagal membuat snapshot: Data perusahaan tidak ditemukan atau belum ada data aktif.",
+        });
+      }
 
-    const snapId = companyId ? `SNAP_${companyId}` : "SNAP_GLOBAL_SYSTEM";
-    const jsonString = typeof data === "string" ? data : JSON.stringify(data);
-
-    // Simpan atau perbarui snapshot di PostgreSQL
-    await db
-      .insert(systemSnapshots)
-      .values({
-        id: snapId,
-        companyId: companyId || null,
-        lastSeq,
-        lastEventId: lastEventId || null,
-        data: jsonString,
-        updatedAt: updatedAt ? new Date(updatedAt) : new Date(),
-      })
-      .onConflictDoUpdate({
-        target: systemSnapshots.id,
-        set: {
-          lastSeq,
-          lastEventId: lastEventId || null,
-          data: jsonString,
-          updatedAt: new Date(),
-        },
+      res.status(200).json({
+        status: "SUCCESS",
+        message: "Snapshot resmi server berhasil diperbarui secara instan.",
+        snapshots: result,
       });
-
-    res.status(200).json({
-      status: "SUCCESS",
-      message: `Snapshot Sequence #${lastSeq} berhasil disimpan di brankas server.`,
-    });
-  } catch (err: any) {
-    console.error("[SNAPSHOT SAVE ERROR]:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
+    } catch (err: any) {
+      console.error("[SNAPSHOT SERVER GENERATION ERROR]:", err);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 export const systemHealthRouter: Router = router;
