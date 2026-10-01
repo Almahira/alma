@@ -56,6 +56,7 @@ export class UniversalLedger {
   private memAggregateVersions = new Map<string, number>();
   private socket!: Socket;
   private isSyncing = false;
+  private syncPromise: Promise<void> | null = null;
   private appendQueue: Promise<unknown> = Promise.resolve();
 
   public async init(): Promise<void> {
@@ -304,8 +305,19 @@ export class UniversalLedger {
     return this.initPromise;
   }
 
-  public async syncInitial() {
-    if (this.isSyncing) return;
+  public async syncInitial(): Promise<void> {
+    if (this.syncPromise) return this.syncPromise;
+
+    const syncPromise = this.performInitialSync();
+    this.syncPromise = syncPromise;
+    try {
+      await syncPromise;
+    } finally {
+      if (this.syncPromise === syncPromise) this.syncPromise = null;
+    }
+  }
+
+  private async performInitialSync(): Promise<void> {
     this.isSyncing = true;
 
     // Pancarkan sinyal ke Footer UI: Mulai Sinkronisasi

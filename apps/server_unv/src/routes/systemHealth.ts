@@ -67,6 +67,16 @@ import {
 } from "../../../../modules/mdl_executivepanel/src/server/schema.js";
 
 const router = express.Router();
+const SNAPSHOT_SCHEMA_VERSION = 4;
+
+function getSnapshotSchemaVersion(data: unknown): number {
+  try {
+    const payload = typeof data === "string" ? JSON.parse(data) : data;
+    return Number((payload as any)?.__metadata?.schemaVersion) || 0;
+  } catch {
+    return 0;
+  }
+}
 
 // =========================================================================
 // ENGINE SNAPSHOT SERVER OTOMATIS (CANONICAL SNAPSHOT GENERATOR)
@@ -122,7 +132,13 @@ export async function generateServerCanonicalSnapshot(
         .then((r) => Number(r[0]?.count || 0));
 
       // Jika snapshot sudah ada dan tidak ada event baru, lewati demi efisiensi
-      if (existingSnap && newSysEventsCount === 0 && newTxEventsCount === 0) {
+      if (
+        existingSnap &&
+        getSnapshotSchemaVersion(existingSnap.data) >=
+          SNAPSHOT_SCHEMA_VERSION &&
+        newSysEventsCount === 0 &&
+        newTxEventsCount === 0
+      ) {
         console.log(
           `[SERVER SNAPSHOT] Perusahaan ${comp.name}: Data masih identik dengan snapshot terkini (Seq #${existingSnap.lastSeq}). Melewati pembaruan.`,
         );
@@ -386,6 +402,8 @@ export async function generateServerCanonicalSnapshot(
           username: u.username,
           role: u.role,
           positionId: u.positionId,
+          passwordHash: u.passwordHash,
+          pin: u.pin,
           allowedOutletIds: Array.isArray(u.allowedOutletIds)
             ? u.allowedOutletIds
             : [],
@@ -533,7 +551,7 @@ export async function generateServerCanonicalSnapshot(
 
         // Metadata Snapshot
         __metadata: {
-          schemaVersion: 3,
+          schemaVersion: SNAPSHOT_SCHEMA_VERSION,
           companyId: compId,
           lastSeq: currentTotalSeq,
           totalSystemEvents: totalSysCount,
@@ -1066,10 +1084,13 @@ router.get("/snapshot/system/latest", async (req: Request, res: Response) => {
       .orderBy(desc(systemSnapshots.updatedAt))
       .limit(1);
 
-    // SELF-HEALING: Jika database belum memiliki snapshot, langsung bangun dari tabel fisik
-    if (rows.length === 0) {
+    // Build missing or outdated snapshots directly from physical tables.
+    if (
+      rows.length === 0 ||
+      getSnapshotSchemaVersion(rows[0]?.data) < SNAPSHOT_SCHEMA_VERSION
+    ) {
       console.log(
-        "[SNAPSHOT ROUTE] Snapshot belum ada. Membentuk snapshot fisik secara instan...",
+        "[SNAPSHOT ROUTE] Snapshot belum ada atau versinya usang. Membentuk ulang dari tabel fisik...",
       );
       await generateServerCanonicalSnapshot(companyId);
       rows = await db
@@ -1081,12 +1102,10 @@ router.get("/snapshot/system/latest", async (req: Request, res: Response) => {
     }
 
     if (rows.length === 0) {
-      return res
-        .status(200)
-        .json({
-          hasSnapshot: false,
-          message: "Belum ada data perusahaan aktif.",
-        });
+      return res.status(200).json({
+        hasSnapshot: false,
+        message: "Belum ada data perusahaan aktif.",
+      });
     }
 
     const snap = rows[0];

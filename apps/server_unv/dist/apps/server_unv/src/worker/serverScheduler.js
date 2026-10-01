@@ -1,26 +1,66 @@
 // File: apps/server_unv/src/worker/serverScheduler.ts
 import fs from "fs";
 import path from "path";
+import { generateServerCanonicalSnapshot } from "../routes/systemHealth.js";
 import { DistributedLock } from "../config/DistributedLock.js";
 export class ServerScheduler {
     tasks = new Map();
     timer = null;
     isRunning = false;
-    lastCheckedDate = new Date().toISOString().slice(0, 10);
+    // Menggunakan zona waktu Indonesia (WIB) agar pergantian hari presisi pukul 00:00 WIB
+    lastCheckedDate = new Date().toLocaleDateString("en-CA", {
+        timeZone: "Asia/Jakarta",
+    });
+    /**
+     * Mendaftarkan task berkala / harian baru.
+     * `id` bersifat opsional — jika tidak diisi, akan memakai `name`.
+     */
     register(task) {
-        this.tasks.set(task.id, task);
-        console.log(`[SERVER SCHEDULER] Task terdaftar: ${task.name} (${task.id})`);
+        const id = task.id ?? task.name;
+        this.tasks.set(id, {
+            ...task,
+            id,
+            lastRunAt: task.lastRunAt ?? 0,
+            isRunning: false,
+        });
+        console.log(`[SERVER SCHEDULER] Task terdaftar: ${task.name} (${id})` +
+            (task.intervalMs
+                ? ` — Interval: ${Math.round(task.intervalMs / 1000)} detik.`
+                : "") +
+            (task.runDailyMidnight
+                ? " — Mode: Harian tengah malam (00:00 WIB)."
+                : ""));
     }
-    start(checkIntervalMs = 60000) {
+    /** Alias kompatibilitas untuk versi lama (`registerTask`). */
+    registerTask(task) {
+        const execute = task.execute ?? task.handler;
+        if (!execute) {
+            throw new Error(`[SERVER SCHEDULER] Task '${task.name}' tidak memiliki handler/execute.`);
+        }
+        this.register({
+            id: task.id ?? task.name,
+            name: task.name,
+            intervalMs: task.intervalMs,
+            runDailyMidnight: task.runDailyMidnight,
+            enabled: task.enabled ?? true,
+            lockId: task.lockId,
+            execute,
+        });
+    }
+    /**
+     * Menjalankan daemon scheduler.
+     * @param checkIntervalMs Interval pengecekan loop (default 30 detik untuk akurasi tinggi).
+     */
+    start(checkIntervalMs = 30000) {
         if (this.isRunning)
             return;
         this.isRunning = true;
+        console.log("[SERVER SCHEDULER] Engine scheduler aktif. Menjalankan pengawasan berkala...");
         this.timer = setInterval(() => {
-            this.tick();
+            void this.tick();
         }, checkIntervalMs);
-        console.log("[SERVER SCHEDULER] Daemon scheduler server aktif.");
-        // Jalankan satu siklus saat boot
-        this.tick();
+        // Jalankan siklus perdana saat server boot (Cold-start hydration)
+        void this.tick();
     }
     stop() {
         if (this.timer) {
@@ -28,19 +68,27 @@ export class ServerScheduler {
             this.timer = null;
         }
         this.isRunning = false;
-        console.log("[SERVER SCHEDULER] Daemon scheduler server dimatikan.");
+        console.log("[SERVER SCHEDULER] Engine scheduler dimatikan.");
     }
+    /**
+     * Siklus utama scheduler: mengecek interval & pergantian hari (WIB),
+     * lalu mengeksekusi task yang sudah waktunya berjalan.
+     */
     async tick() {
         const now = Date.now();
-        const currentDate = new Date().toISOString().slice(0, 10);
+        const currentDate = new Date().toLocaleDateString("en-CA", {
+            timeZone: "Asia/Jakarta",
+        });
         const isDateChanged = currentDate !== this.lastCheckedDate;
         if (isDateChanged) {
             this.lastCheckedDate = currentDate;
-            console.log(`[SERVER SCHEDULER] Terdeteksi pergantian hari (${currentDate}). Memicu tugas tengah malam.`);
+            console.log(`[SERVER SCHEDULER] Terdeteksi pergantian hari (${currentDate} WIB). Memicu tugas harian tengah malam.`);
         }
-        for (const [id, task] of this.tasks.entries()) {
+        for (const task of this.tasks.values()) {
             if (!task.enabled)
                 continue;
+            if (task.isRunning)
+                continue; // Hindari tumpang-tindih eksekusi
             let shouldRun = false;
             if (task.intervalMs &&
                 (!task.lastRunAt || now - task.lastRunAt >= task.intervalMs)) {
@@ -49,46 +97,114 @@ export class ServerScheduler {
             else if (task.runDailyMidnight && isDateChanged) {
                 shouldRun = true;
             }
-            if (shouldRun) {
-                task.lastRunAt = now; // Segera tandai waktu jalan agar tidak di-trigger ganda oleh siklus tick berikutnya
-                // === IMPLEMENTASI DISTRIBUTED LOCK ===
-                if (task.lockId) {
-                    const hasLock = await DistributedLock.acquire(task.lockId);
-                    if (!hasLock) {
-                        console.log(`[SERVER SCHEDULER] Task '${task.name}' dilewati. Instance server lain sedang mengeksekusinya.`);
-                        continue; // Langsung lompat ke task berikutnya tanpa menjalankan execute()
-                    }
-                }
-                try {
-                    console.log(`[SERVER SCHEDULER] Menjalankan task: ${task.name}`);
-                    await task.execute();
-                    console.log(`[SERVER SCHEDULER] Task selesai: ${task.name}`);
-                }
-                catch (error) {
-                    console.error(`[SERVER SCHEDULER] Gagal menjalankan task ${task.name}:`, error);
-                }
-                finally {
-                    // === PASTIKAN KUNCI DILEPAS APAPUN YANG TERJADI (SUKSES/ERROR) ===
-                    if (task.lockId) {
-                        await DistributedLock.release(task.lockId);
-                    }
+            if (!shouldRun)
+                continue;
+            // Tandai segera agar tidak di-trigger ganda oleh tick berikutnya
+            task.lastRunAt = now;
+            task.isRunning = true;
+            // === IMPLEMENTASI DISTRIBUTED LOCK ===
+            if (task.lockId && typeof DistributedLock?.acquire === "function") {
+                const hasLock = await DistributedLock.acquire(task.lockId);
+                if (!hasLock) {
+                    console.log(`[SERVER SCHEDULER] Task '${task.name}' dilewati. Instance server lain sedang mengeksekusinya.`);
+                    task.isRunning = false;
+                    continue;
                 }
             }
+            try {
+                console.log(`[SERVER SCHEDULER] Menjalankan task: '${task.name}'...`);
+                await task.execute();
+                console.log(`[SERVER SCHEDULER] Selesai task: '${task.name}'.`);
+            }
+            catch (error) {
+                console.error(`[SERVER SCHEDULER] Gagal menjalankan task '${task.name}':`, error);
+            }
+            finally {
+                // === PASTIKAN KUNCI DILEPAS APAPUN YANG TERJADI ===
+                if (task.lockId && typeof DistributedLock?.release === "function") {
+                    try {
+                        await DistributedLock.release(task.lockId);
+                    }
+                    catch (releaseErr) {
+                        console.error(`[SERVER SCHEDULER] Gagal melepas lock '${task.name}':`, releaseErr);
+                    }
+                }
+                task.isRunning = false;
+            }
+        }
+    }
+    /**
+     * Memicu eksekusi langsung task tertentu tanpa menunggu interval.
+     */
+    async runTaskNow(nameOrId) {
+        const task = this.tasks.get(nameOrId) ??
+            [...this.tasks.values()].find((t) => t.name === nameOrId);
+        if (!task) {
+            console.warn(`[SERVER SCHEDULER] Task '${nameOrId}' tidak ditemukan.`);
+            return;
+        }
+        if (task.isRunning) {
+            console.warn(`[SERVER SCHEDULER] Task '${task.name}' sedang berjalan.`);
+            return;
+        }
+        task.isRunning = true;
+        task.lastRunAt = Date.now();
+        if (task.lockId && typeof DistributedLock?.acquire === "function") {
+            const hasLock = await DistributedLock.acquire(task.lockId);
+            if (!hasLock) {
+                console.warn(`[SERVER SCHEDULER] Task '${task.name}' dilewati (lock dipegang instance lain).`);
+                task.isRunning = false;
+                return;
+            }
+        }
+        try {
+            console.log(`[SERVER SCHEDULER] Menjalankan task manual: '${task.name}'...`);
+            await task.execute();
+            console.log(`[SERVER SCHEDULER] Selesai task manual: '${task.name}'.`);
+        }
+        catch (error) {
+            console.error(`[SERVER SCHEDULER] Gagal menjalankan task manual '${task.name}':`, error);
+        }
+        finally {
+            if (task.lockId && typeof DistributedLock?.release === "function") {
+                try {
+                    await DistributedLock.release(task.lockId);
+                }
+                catch (releaseErr) {
+                    console.error(`[SERVER SCHEDULER] Gagal melepas lock '${task.name}':`, releaseErr);
+                }
+            }
+            task.isRunning = false;
         }
     }
 }
 export const globalServerScheduler = new ServerScheduler();
 /**
- * Pendaftaran tugas-tugas default pemeliharaan server
+ * Pendaftaran seluruh task default server.
  */
 export function setupDefaultServerTasks(uploadsDir = path.join(process.cwd(), "uploads")) {
-    // 1. Pembersihan File Sementara / Upload Terputus yang Berumur > 24 Jam
+    // =========================================================================
+    // TASK 1: PEMBARUAN SNAPSHOT RESMI SERVER SETIAP 5 MENIT SEKALI
+    // =========================================================================
+    globalServerScheduler.register({
+        id: "canonical-snapshot",
+        name: "5-Minute Canonical Snapshot Update",
+        intervalMs: 5 * 60 * 1000, // 5 Menit (300.000 ms)
+        enabled: true,
+        lockId: 1002, // Mengunci agar hanya 1 instance server yang memproses snapshot
+        execute: async () => {
+            await generateServerCanonicalSnapshot();
+        },
+    });
+    // =========================================================================
+    // TASK 2: PEMBERSIHAN FILE SEMENTARA / UPLOAD TERPUTUS (>24 JAM)
+    // =========================================================================
     globalServerScheduler.register({
         id: "clean-temp-uploads",
         name: "Clean Temporary & Stale Uploads",
         runDailyMidnight: true,
         enabled: true,
-        lockId: 1001, // <--- KUNCI ID 1001: Hanya 1 server yang boleh melakukan hapus file
+        lockId: 1001, // Hanya 1 server yang melakukan pembersihan file
         execute: async () => {
             if (!fs.existsSync(uploadsDir))
                 return;
@@ -114,14 +230,15 @@ export function setupDefaultServerTasks(uploadsDir = path.join(process.cwd(), "u
             }
         },
     });
-    // 2. Health & Heartbeat Log Berkala (Setiap 30 Menit)
+    // =========================================================================
+    // TASK 3: HEALTH & HEARTBEAT LOG BERKALA (SETIAP 30 MENIT)
+    // =========================================================================
     globalServerScheduler.register({
         id: "server-heartbeat",
         name: "Server Heartbeat & Memory Health",
         intervalMs: 30 * 60 * 1000,
         enabled: true,
-        // TIDAK ADA lockId: Karena ini mencetak RAM process.memoryUsage(),
-        // semua instance server di klaster wajib mencetak ini di log terminalnya masing-masing.
+        // Tanpa lockId: setiap instance server lokal mencetak status RAM-nya masing-masing
         execute: async () => {
             const memoryUsage = process.memoryUsage();
             const heapUsedMb = (memoryUsage.heapUsed / 1024 / 1024).toFixed(2);

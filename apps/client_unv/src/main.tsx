@@ -326,6 +326,13 @@ function SystemBootstrapper() {
           }
         }
 
+        if (hasDevice && !isDemoMode && navigator.onLine) {
+          console.log(
+            "[BOOT] Menyinkronkan snapshot terbaru sebelum membuka aplikasi...",
+          );
+          await globalLedger.syncInitial();
+        }
+
         setIsEngineReady(true);
       } catch (error: any) {
         setBootError(error.message || "Gagal memuat Universal Engine");

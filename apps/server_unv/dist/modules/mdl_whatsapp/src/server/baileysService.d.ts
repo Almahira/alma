@@ -7,6 +7,7 @@ export declare class WhatsAppService {
     private qrCode;
     private phone;
     private authDir;
+    private mediaDir;
     private isConnecting;
     private constructor();
     static getInstance(): WhatsAppService;
