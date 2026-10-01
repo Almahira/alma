@@ -1,5 +1,7 @@
 // File: apps/server_unv/src/routes/whatsappRoutes.ts
 import express, { Request, Response, Router } from "express";
+import path from "path";
+import fs from "fs";
 import { globalWhatsAppService } from "../../../../modules/mdl_whatsapp/src/server/baileysService.js";
 import { db } from "../config/db.js";
 import { desc, eq, sql, inArray, and, lt } from "drizzle-orm";
@@ -24,7 +26,6 @@ router.post("/connect", async (req, res) => {
 // AMBIL DAFTAR INBOX (Daftar orang yang pernah chat)
 router.get("/inbox", async (req, res) => {
   try {
-    // Gunakan Drizzle ORM builder daripada Raw SQL agar aman dari perbedaan dialect DB
     const msgs = await db
       .select({
         jid: waMessages.remoteJid,
@@ -33,9 +34,8 @@ router.get("/inbox", async (req, res) => {
       })
       .from(waMessages)
       .orderBy(desc(waMessages.timestamp))
-      .limit(1000); // Ambil 1000 pesan terakhir
+      .limit(1000);
 
-    // Deduplikasi JID di memori untuk mendapatkan pengirim unik terbaru
     const inboxMap = new Map();
     for (const msg of msgs) {
       if (!inboxMap.has(msg.jid)) {
@@ -58,6 +58,7 @@ router.get("/inbox", async (req, res) => {
 });
 
 // AMBIL HISTORY CHAT DENGAN PAGINASI (CURSOR / INFINITE SCROLL)
+// PENGURUTAN DETERMINISTIK 3 TINGKAT: timestamp -> createdAt -> id
 router.get("/messages", async (req, res) => {
   const { jid, before, limit = "30" } = req.query;
   if (!jid) return res.status(400).json({ error: "jid dibutuhkan" });
@@ -69,7 +70,6 @@ router.get("/messages", async (req, res) => {
     );
     const conditions = [eq(waMessages.remoteJid, jid as string)];
 
-    // Jika parameter cursor 'before' dikirim, ambil pesan yang lebih lama dari waktu tersebut
     if (before) {
       const beforeDate = new Date(before as string);
       if (!isNaN(beforeDate.getTime())) {
@@ -81,10 +81,13 @@ router.get("/messages", async (req, res) => {
       .select()
       .from(waMessages)
       .where(and(...conditions))
-      .orderBy(desc(waMessages.timestamp))
+      .orderBy(
+        desc(waMessages.timestamp),
+        desc(waMessages.createdAt),
+        desc(waMessages.id),
+      )
       .limit(limitNum);
 
-    // Balik urutan agar pesan kronologis (pesan lama di atas, terbaru di bawah)
     res.json(msgs.reverse());
   } catch (err: any) {
     console.error("[WA MESSAGES ERROR]:", err.message);
@@ -101,6 +104,20 @@ router.post("/send", async (req, res) => {
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// SERVE MEDIA LOKAL SEMENTARA
+router.get("/media/:filename", (req, res) => {
+  const filename = path.basename(req.params.filename);
+  const filePath = path.join(process.cwd(), "uploads", "wa_media", filename);
+
+  if (!fs.existsSync(filePath)) {
+    return res
+      .status(404)
+      .json({ error: "Media telah kedaluwarsa atau tidak ditemukan" });
+  }
+
+  res.sendFile(filePath);
 });
 
 // TANDAI PESAN TELAH DIPROSES MENJADI PO (Menghindari Duplikasi PO)
@@ -125,6 +142,62 @@ router.post("/mark-parsed", async (req, res) => {
     res.json({ success: true });
   } catch (err: any) {
     console.error("[WA MARK PARSED ERROR]:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ALIAS ENDPOINT: /messages/link-receiving (kompatibel dengan WhatsAppPage)
+router.post("/messages/link-receiving", async (req, res) => {
+  const { messageIds, receivingId } = req.body;
+
+  if (!messageIds || !Array.isArray(messageIds) || messageIds.length === 0) {
+    return res
+      .status(400)
+      .json({ error: "messageIds tidak valid atau kosong" });
+  }
+
+  try {
+    await db
+      .update(waMessages)
+      .set({
+        isPoParsed: true,
+        receivingId: receivingId || null,
+      })
+      .where(inArray(waMessages.id, messageIds));
+
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error("[WA LINK RECEIVING ERROR]:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// BERSIHKAN CHAT (Hapus seluruh riwayat kontak ATAU pesan tertentu)
+router.post("/messages/clear", async (req, res) => {
+  try {
+    const { jid, messageIds, clearAll } = req.body;
+
+    if (clearAll && jid) {
+      await db.delete(waMessages).where(eq(waMessages.remoteJid, String(jid)));
+      return res.json({
+        success: true,
+        message: "Seluruh chat berhasil dibersihkan.",
+      });
+    }
+
+    if (Array.isArray(messageIds) && messageIds.length > 0) {
+      await db.delete(waMessages).where(inArray(waMessages.id, messageIds));
+      return res.json({
+        success: true,
+        message: `${messageIds.length} pesan berhasil dihapus.`,
+      });
+    }
+
+    return res
+      .status(400)
+      .json({ error: "Parameter jid atau messageIds wajib diisi." });
+  } catch (err: any) {
+    console.error("[WA CLEAR MESSAGES ERROR]:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

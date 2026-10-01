@@ -2,15 +2,16 @@
 import { globalLedger } from "./UniversalLedger";
 import { globalRegistry } from "../cqrs/UniversalRegistry";
 import { getApiUrl } from "../config/env";
+import { notifyStateUpdated } from "../cqrs/EventBus";
 
 export class SnapshotEngine {
   /**
-   * Mengambil snapshot kanonikal terbaru dari server pusat.
-   * Dipanggil saat aplikasi pertama kali boot atau saat beralih dari mode offline ke online.
+   * Mengambil snapshot kanonikal lengkap dari server pusat (Instant Hydration).
+   * Murni membaca tabel fisik yang telah dimaterialisasi oleh server.
    */
   public static async syncFromServer(): Promise<boolean> {
     console.log(
-      "[SNAPSHOT ENGINE] Memeriksa snapshot resmi di server pusat...",
+      "[SNAPSHOT ENGINE] Memeriksa snapshot fisik resmi di server pusat...",
     );
     try {
       const rxdb = globalLedger.getRxDatabase();
@@ -29,23 +30,25 @@ export class SnapshotEngine {
 
       if (!res || !res.ok) {
         console.warn(
-          "[SNAPSHOT ENGINE] Server belum memiliki snapshot atau koneksi offline. Melanjutkan sinkronisasi reguler.",
+          "[SNAPSHOT ENGINE] Gagal menghubungi server snapshot. Melanjutkan mode offline/lokal.",
         );
         return false;
       }
 
       const snapJson = await res.json();
       if (!snapJson.hasSnapshot || !snapJson.snapshot) {
-        console.log("[SNAPSHOT ENGINE] Tidak ada snapshot baru dari server.");
+        console.log(
+          "[SNAPSHOT ENGINE] Belum ada snapshot data aktif dari server.",
+        );
         return false;
       }
 
       const s = snapJson.snapshot;
       console.log(
-        `[SNAPSHOT ENGINE] Menerima Snapshot Resmi Server (Sequence #${s.lastSeq}). Memulihkan memori lokal...`,
+        `[SNAPSHOT ENGINE] Menerima Snapshot Fisik Server (Sequence #${s.lastSeq}). Memulihkan memori lokal...`,
       );
 
-      // Simpan ke RxDB lokal IndexedDB
+      // 1. Simpan salinan ke RxDB lokal IndexedDB
       await rxdb.collections.snapshots.upsert({
         id: "GLOBAL_SNAPSHOT",
         lastSeq: s.lastSeq,
@@ -53,15 +56,21 @@ export class SnapshotEngine {
         updatedAt: s.updatedAt,
       });
 
-      // Rehidrasi memori CQRS Read Model seketika
+      // 2. Rehidrasi memori CQRS Read Model seketika
       if (s.data) {
         const payload =
           typeof s.data === "string" ? JSON.parse(s.data) : s.data;
         globalRegistry.restoreAllStates(payload);
+
+        // 3. Seeding versi agregat ke UniversalLedger agar client mengenali versi terkini
+        this.seedAggregateVersionsFromPayload(payload);
       }
 
+      // 4. Picu re-render UI secara reaktif
+      notifyStateUpdated();
+
       console.log(
-        `[SNAPSHOT ENGINE] Rehidrasi memori lokal sukses (Basis Sequence: #${s.lastSeq}).`,
+        `[SNAPSHOT ENGINE] Rehidrasi memori lokal sukses 1:1 dengan server (Basis Sequence: #${s.lastSeq}).`,
       );
       return true;
     } catch (error) {
@@ -70,6 +79,95 @@ export class SnapshotEngine {
         error,
       );
       return false;
+    }
+  }
+
+  /**
+   * Menarik snapshot khusus untuk 1 modul bisnis (Sangat cepat < 5ms).
+   * Contoh: SnapshotEngine.syncModuleFromServer("item")
+   */
+  public static async syncModuleFromServer(
+    moduleName: string,
+  ): Promise<boolean> {
+    try {
+      const companyId =
+        typeof localStorage !== "undefined"
+          ? localStorage.getItem("__unv_companyId")
+          : "";
+
+      if (!companyId) return false;
+
+      const normalized = moduleName.toLowerCase().replace(/^mdl_/, "");
+      const res = await fetch(
+        getApiUrl(
+          `/api/system-health/snapshot/module/${normalized}?companyId=${companyId}`,
+        ),
+      ).catch(() => null);
+
+      if (!res || !res.ok) return false;
+
+      const result = await res.json();
+      if (result.status !== "SUCCESS" || !result.data) return false;
+
+      const aggType = result.module; // misal: ITEM_DOMAIN
+      const handler = (globalRegistry as any).handlers?.get(aggType);
+      if (handler) {
+        handler.restoreState(result.data);
+      }
+
+      // Seeding versi produk jika modul item
+      if (normalized === "item" && Array.isArray(result.data.products)) {
+        result.data.products.forEach((p: any) => {
+          const v = p.aggregateVersion ?? p.aggregate_version ?? 1;
+          globalLedger.setAggregateVersion(p.id, Number(v) || 1);
+        });
+      }
+
+      notifyStateUpdated();
+      console.log(
+        `[SNAPSHOT ENGINE] Modul '${normalized}' berhasil disinkronkan secara modular.`,
+      );
+      return true;
+    } catch (error) {
+      console.error(
+        `[SNAPSHOT ENGINE] Gagal sinkronisasi modul ${moduleName}:`,
+        error,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Helper private untuk mendaftarkan versi agregat dari snapshot ke UniversalLedger
+   */
+  private static seedAggregateVersionsFromPayload(payload: any): void {
+    try {
+      // Modul Produk
+      if (payload.ITEM_DOMAIN?.products) {
+        payload.ITEM_DOMAIN.products.forEach((p: any) => {
+          const v = p.aggregateVersion ?? p.aggregate_version ?? 1;
+          globalLedger.setAggregateVersion(p.id, Number(v) || 1);
+        });
+      }
+      // Modul Organisasi (Outlet & Region)
+      if (payload.ORGANIZATION?.outlets) {
+        payload.ORGANIZATION.outlets.forEach((o: any) => {
+          const v = o.aggregateVersion ?? o.aggregate_version ?? 1;
+          globalLedger.setAggregateVersion(o.id, Number(v) || 1);
+        });
+      }
+      // Modul Dokumen Gudang
+      if (payload.WAREHOUSE_DOCUMENT?.distributions) {
+        payload.WAREHOUSE_DOCUMENT.distributions.forEach((d: any) => {
+          const v = d.aggregateVersion ?? d.aggregate_version ?? 1;
+          globalLedger.setAggregateVersion(d.id, Number(v) || 1);
+        });
+      }
+    } catch (e) {
+      console.warn(
+        "[SNAPSHOT ENGINE] Gagal seeding beberapa versi agregat:",
+        e,
+      );
     }
   }
 

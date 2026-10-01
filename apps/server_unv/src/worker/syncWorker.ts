@@ -210,12 +210,16 @@ export async function startSyncWorker(io: Server) {
             );
             m.ack();
           } else {
-            console.warn(
-              `[WORKER] Konflik Versi (OCC) pada ${aggregateId}. Memulai 3-Way Merge...`,
+            console.log(
+              `[WORKER] Terdeteksi Event Konkuren/Offline pada ${aggregateId} (Target v${event.aggregateVersion || 1}). Memulai Sequential Rebase...`,
             );
             try {
-              const baseVersion = (event.aggregateVersion || 1) - 1;
-              let basePayload = {};
+              // 1. Ambil Versi Dasar sebelum Client B offline (Base Version)
+              const baseVersion = Math.max(
+                1,
+                (event.aggregateVersion || 1) - 1,
+              );
+              let basePayload: Record<string, any> = {};
 
               if (baseVersion > 0) {
                 const baseEventData = await db
@@ -228,11 +232,15 @@ export async function startSyncWorker(io: Server) {
                     ),
                   )
                   .limit(1);
-                if (baseEventData.length > 0) {
-                  basePayload = JSON.parse(baseEventData[0].payload as string);
+                if (baseEventData.length > 0 && baseEventData[0].payload) {
+                  basePayload =
+                    typeof baseEventData[0].payload === "string"
+                      ? JSON.parse(baseEventData[0].payload)
+                      : baseEventData[0].payload;
                 }
               }
 
+              // 2. Ambil Event Terakhir yang Berhasil di Server (Current Head di DB)
               const latestServerEventData = await db
                 .select()
                 .from(targetJournal)
@@ -241,110 +249,114 @@ export async function startSyncWorker(io: Server) {
                 .limit(1);
 
               if (latestServerEventData.length > 0) {
-                const latestServerPayload = JSON.parse(
-                  latestServerEventData[0].payload as string,
-                );
-                const latestVersion = latestServerEventData[0].aggregateVersion;
+                const latestServer = latestServerEventData[0];
+                const latestServerPayload =
+                  typeof latestServer.payload === "string"
+                    ? JSON.parse(latestServer.payload)
+                    : latestServer.payload;
+                const latestVersion = latestServer.aggregateVersion;
 
-                const { merged, hasConflict, conflictFields } = threeWayMerge(
+                // 3. Ekstraksi Timestamp Mikrodetik (Server vs Client Offline)
+                const serverTimestamp = latestServer.createdAt;
+                const clientTimestamp =
+                  event.createdAt ||
+                  event.client_timestamp ||
+                  payload.updatedAt ||
+                  payload.timestamp;
+
+                // 4. Eksekusi 3-Way Merge Bebas Karantina
+                const { merged, conflictFields } = threeWayMerge(
                   basePayload,
                   latestServerPayload,
                   payload,
+                  serverTimestamp,
+                  clientTimestamp,
                 );
 
-                if (hasConflict) {
-                  console.error(
-                    `[WORKER] Konflik Hard-Collision di field: ${conflictFields.join(", ")}. Karantina!`,
+                if (conflictFields.length > 0) {
+                  console.log(
+                    `[WORKER] Kolom bertabrakan pada [${conflictFields.join(", ")}] berhasil diselesaikan via TIMESTAMP(6).`,
                   );
-                  await db.insert(quarantineEventJournal).values({
-                    id: eventId,
+                }
+
+                // 5. Sequential Rebase: Naikkan versi menjadi latestVersion + 1 (misal 3 -> 4)
+                const newVersion = latestVersion + 1;
+                const newEventId = `REBASED_${eventId}`;
+                const newEvent = {
+                  ...event,
+                  id: newEventId,
+                  aggregateVersion: newVersion,
+                  payload: merged,
+                };
+
+                // Pastikan warisan lokasi spasial tetap sah
+                const mergedRegionId =
+                  effectiveRegionId || latestServer.regionId || null;
+                const mergedOutletId =
+                  effectiveOutletId || latestServer.outletId || null;
+
+                // 6. Simpan Event Hasil Rebase ke Jurnal & Tulis ke Tabel Fisik
+                await db.transaction(async (tx) => {
+                  await tx.insert(targetJournal).values({
+                    id: newEventId,
                     aggregateId: aggregateId,
                     aggregateType: event.dddMetadata?.aggregateType || "SYSTEM",
-                    aggregateVersion: event.aggregateVersion || 1,
-                    type: type,
-                    payload: JSON.stringify(payload),
-                    actor: event.dddMetadata?.actor?.userId || "SYSTEM",
-                    errorReason: `Auto-Merge gagal. Tabrakan pada kolom: ${conflictFields.join(", ")}`,
-                  });
-                } else {
-                  console.log(
-                    `[WORKER] Auto-Merge Berhasil! Membuat Versi ${latestVersion + 1}`,
-                  );
-                  const newEventId = `MERGED_${eventId}`;
-                  const newVersion = latestVersion + 1;
-                  const newEvent = {
-                    ...event,
-                    id: newEventId,
                     aggregateVersion: newVersion,
-                    payload: merged,
-                  };
-
-                  // Pastikan lokasi spasial mewarisi nilai yang sah
-                  const mergedRegionId =
-                    effectiveRegionId ||
-                    latestServerEventData[0].regionId ||
-                    null;
-                  const mergedOutletId =
-                    effectiveOutletId ||
-                    latestServerEventData[0].outletId ||
-                    null;
-
-                  await db.transaction(async (tx) => {
-                    await tx.insert(targetJournal).values({
-                      id: newEventId,
-                      aggregateId: aggregateId,
-                      aggregateType:
-                        event.dddMetadata?.aggregateType || "SYSTEM",
-                      aggregateVersion: newVersion,
-                      type: type,
-                      regionId: mergedRegionId,
-                      outletId: mergedOutletId,
-                      payload: JSON.stringify(merged),
-                      actor: "SYSTEM_MERGE",
-                    });
-
-                    const handler = serverHandlers[type];
-                    if (handler) {
-                      await handler(tx, newEvent);
-                    }
-                  });
-
-                  // Pancarkan SYNC_NEEDED seketika agar klien langsung menarik versi hasil merge
-                  const syncPayload = {
-                    eventId: newEventId,
-                    type,
-                    aggregateType: event.dddMetadata?.aggregateType,
-                    originDeviceId: "SERVER_MERGE",
-                    companyId: effectiveCompanyId,
+                    type: type,
                     regionId: mergedRegionId,
                     outletId: mergedOutletId,
-                  };
+                    payload: JSON.stringify(merged),
+                    actor: event.dddMetadata?.actor?.userId || "SYSTEM_REBASE",
+                  });
 
-                  if (mergedOutletId) {
-                    io.to(`outlet:${mergedOutletId}`).emit(
-                      "SYNC_NEEDED",
-                      syncPayload,
-                    );
-                  } else if (mergedRegionId) {
-                    io.to(`region:${mergedRegionId}`).emit(
-                      "SYNC_NEEDED",
-                      syncPayload,
-                    );
+                  // Update tabel fisik lewat server handler modul terkait
+                  const handler = serverHandlers[type];
+                  if (handler) {
+                    await handler(tx, newEvent);
                   }
-                  if (effectiveCompanyId) {
-                    io.to(`company:${effectiveCompanyId}`).emit(
-                      "SYNC_NEEDED",
-                      syncPayload,
-                    );
-                  }
+                });
+
+                console.log(
+                  `[WORKER] SUKSES: Rebase ${aggregateId} selesai! Versi dinaikkan menjadi v${newVersion} dan tabel fisik diperbarui.`,
+                );
+
+                // 7. Siarkan SYNC_NEEDED ke Seluruh Cabang dengan Versi Terkini
+                const syncPayload = {
+                  eventId: newEventId,
+                  type,
+                  aggregateId,
+                  version: newVersion,
+                  aggregateType: event.dddMetadata?.aggregateType,
+                  originDeviceId: "SERVER_REBASE",
+                  companyId: effectiveCompanyId,
+                  regionId: mergedRegionId,
+                  outletId: mergedOutletId,
+                };
+
+                if (mergedOutletId) {
+                  io.to(`outlet:${mergedOutletId}`).emit(
+                    "SYNC_NEEDED",
+                    syncPayload,
+                  );
+                } else if (mergedRegionId) {
+                  io.to(`region:${mergedRegionId}`).emit(
+                    "SYNC_NEEDED",
+                    syncPayload,
+                  );
+                }
+                if (effectiveCompanyId) {
+                  io.to(`company:${effectiveCompanyId}`).emit(
+                    "SYNC_NEEDED",
+                    syncPayload,
+                  );
                 }
               }
+
+              // Selesaikan pesan di NATS
               m.ack();
             } catch (mergeErr: any) {
-              console.error(
-                "[WORKER] Gagal melakukan proses 3-Way Merge:",
-                mergeErr,
-              );
+              console.error("[WORKER] Gagal pada proses Rebase:", mergeErr);
+              // Hanya jika terjadi crash fatal JavaScript/JSON yang tidak terduga, event dicatat ke karantina
               try {
                 await db.insert(quarantineEventJournal).values({
                   id: eventId,
@@ -354,11 +366,11 @@ export async function startSyncWorker(io: Server) {
                   type: type,
                   payload: JSON.stringify(payload),
                   actor: event.dddMetadata?.actor?.userId || "SYSTEM",
-                  errorReason: `Crash pada 3-Way Merge: ${mergeErr.message}`,
+                  errorReason: `Fatal Crash Rebase: ${mergeErr.message}`,
                 });
                 m.ack();
               } catch (qErr) {
-                console.error("[WORKER] Gagal karantina crash merge:", qErr);
+                console.error("[WORKER] Gagal mencatat crash:", qErr);
               }
             }
           }

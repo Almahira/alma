@@ -1043,10 +1043,14 @@ router.post("/broadcast-resync", async (req: Request, res: Response) => {
 });
 
 // =========================================================================
-// 8. BRANKAS SNAPSHOT MASTER DATA PUSAT
+// 8. BRANKAS SNAPSHOT MASTER DATA PUSAT (PHYSICAL TABLE MATERIALIZED VIEWS)
 // =========================================================================
 
-// Endpoint untuk Klien Baru / Klien Resync menarik data jadi (Instant Hydration)
+/**
+ * 8.1 SNAPSHOT SISTEM GLOBAL (Self-Healing Just-In-Time)
+ * Mengembalikan snapshot fisik lengkap. Jika belum ada atau out-of-date,
+ * langsung dibuatkan dari tabel fisik secara instan.
+ */
 router.get("/snapshot/system/latest", async (req: Request, res: Response) => {
   try {
     const companyId = req.query.companyId as string | undefined;
@@ -1055,17 +1059,34 @@ router.get("/snapshot/system/latest", async (req: Request, res: Response) => {
       ? eq(systemSnapshots.companyId, String(companyId))
       : undefined;
 
-    const query = db
+    let rows = await db
       .select()
       .from(systemSnapshots)
       .where(whereClause)
       .orderBy(desc(systemSnapshots.updatedAt))
       .limit(1);
 
-    const rows = await query;
+    // SELF-HEALING: Jika database belum memiliki snapshot, langsung bangun dari tabel fisik
+    if (rows.length === 0) {
+      console.log(
+        "[SNAPSHOT ROUTE] Snapshot belum ada. Membentuk snapshot fisik secara instan...",
+      );
+      await generateServerCanonicalSnapshot(companyId);
+      rows = await db
+        .select()
+        .from(systemSnapshots)
+        .where(whereClause)
+        .orderBy(desc(systemSnapshots.updatedAt))
+        .limit(1);
+    }
 
     if (rows.length === 0) {
-      return res.status(200).json({ hasSnapshot: false });
+      return res
+        .status(200)
+        .json({
+          hasSnapshot: false,
+          message: "Belum ada data perusahaan aktif.",
+        });
     }
 
     const snap = rows[0];
@@ -1088,6 +1109,335 @@ router.get("/snapshot/system/latest", async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * 8.2 SNAPSHOT MODULAR ULTRA CEPAT (Murni Baca Tabel Fisik PostgreSQL < 5ms)
+ * Contoh rute: GET /api/system-health/snapshot/module/item?companyId=AGG_...
+ */
+router.get(
+  "/snapshot/module/:moduleName",
+  async (req: Request, res: Response) => {
+    try {
+      const { moduleName } = req.params;
+      const companyId = req.query.companyId as string;
+
+      if (!companyId) {
+        return res
+          .status(400)
+          .json({ error: "companyId wajib disertakan pada query parameter" });
+      }
+
+      const normalizedModule = moduleName.toLowerCase().replace(/^mdl_/, "");
+
+      // Ambil nomor sequence mutasi terakhir di server sebagai stempel koordinat
+      const [totalSysCount, totalTxCount, latestSysEvent] = await Promise.all([
+        db
+          .select({ count: sql<number>`count(*)` })
+          .from(systemEventJournal)
+          .then((r) => Number(r[0]?.count || 0)),
+        db
+          .select({ count: sql<number>`count(*)` })
+          .from(txEventJournal)
+          .then((r) => Number(r[0]?.count || 0)),
+        db
+          .select({ id: systemEventJournal.id })
+          .from(systemEventJournal)
+          .orderBy(desc(systemEventJournal.createdAt))
+          .limit(1),
+      ]);
+
+      const latestSeq = totalSysCount + totalTxCount;
+      const latestEventId = latestSysEvent[0]?.id || null;
+
+      // --- MODUL ITEM (mdl_item) ---
+      if (normalizedModule === "item") {
+        const [categories, uoms, products] = await Promise.all([
+          db.select().from(itemCategories),
+          db.select().from(itemUoms),
+          db
+            .select()
+            .from(itemProducts)
+            .where(eq(itemProducts.companyId, companyId)),
+        ]);
+
+        return res.status(200).json({
+          status: "SUCCESS",
+          module: "ITEM_DOMAIN",
+          lastSeq: latestSeq,
+          lastEventId: latestEventId,
+          generatedAt: Date.now(),
+          data: {
+            categories,
+            uoms,
+            products: products.map((p) => ({
+              ...p,
+              isExpense: Boolean(p.isExpense),
+              uomConversions: Array.isArray(p.uomConversions)
+                ? p.uomConversions
+                : [],
+            })),
+          },
+        });
+      }
+
+      // --- MODUL ORGANISASI (mdl_organization) ---
+      if (normalizedModule === "organization") {
+        const [
+          comp,
+          compRegions,
+          compOutlets,
+          compDivisions,
+          compPositions,
+          compEmployees,
+          compUsers,
+        ] = await Promise.all([
+          db
+            .select()
+            .from(companies)
+            .where(eq(companies.id, companyId))
+            .limit(1),
+          db.select().from(regions).where(eq(regions.companyId, companyId)),
+          db.select().from(outlets).where(eq(outlets.companyId, companyId)),
+          db.select().from(divisions).where(eq(divisions.companyId, companyId)),
+          db.select().from(positions).where(eq(positions.companyId, companyId)),
+          db.select().from(employees),
+          db.select().from(userAccounts).where(eq(userAccounts.isActive, true)),
+        ]);
+
+        return res.status(200).json({
+          status: "SUCCESS",
+          module: "ORGANIZATION",
+          lastSeq: latestSeq,
+          lastEventId: latestEventId,
+          generatedAt: Date.now(),
+          data: {
+            companies: comp,
+            regions: compRegions,
+            outlets: compOutlets,
+            divisions: compDivisions,
+            positions: compPositions,
+            employees: compEmployees,
+            userAccounts: compUsers,
+          },
+        });
+      }
+
+      // --- MODUL GUDANG (mdl_warehouse) ---
+      if (normalizedModule === "warehouse") {
+        const [
+          distributions,
+          initialStocks,
+          opnames,
+          opnameItems,
+          spoilWastes,
+          recipes,
+        ] = await Promise.all([
+          db
+            .select()
+            .from(warehouseDistributions)
+            .where(eq(warehouseDistributions.companyId, companyId)),
+          db
+            .select()
+            .from(warehouseInitialStocks)
+            .where(eq(warehouseInitialStocks.companyId, companyId)),
+          db
+            .select()
+            .from(warehouseStockOpnames)
+            .where(eq(warehouseStockOpnames.companyId, companyId)),
+          db.select().from(warehouseStockOpnameItems),
+          db
+            .select()
+            .from(warehouseSpoilWastes)
+            .where(eq(warehouseSpoilWastes.companyId, companyId)),
+          db
+            .select()
+            .from(warehouseRecipes)
+            .where(eq(warehouseRecipes.companyId, companyId)),
+        ]);
+
+        const initialStocksMap: Record<string, number> = {};
+        initialStocks.forEach((st) => {
+          initialStocksMap[`${st.outletId}_${st.itemId}`] = Number(
+            st.initialQty || 0,
+          );
+        });
+
+        const opnameItemsMap = new Map<string, any[]>();
+        opnameItems.forEach((item) => {
+          const list = opnameItemsMap.get(item.opnameId) || [];
+          list.push(item);
+          opnameItemsMap.set(item.opnameId, list);
+        });
+
+        return res.status(200).json({
+          status: "SUCCESS",
+          module: "WAREHOUSE_DOCUMENT",
+          lastSeq: latestSeq,
+          lastEventId: latestEventId,
+          generatedAt: Date.now(),
+          data: {
+            distributions,
+            initialStocks: initialStocksMap,
+            opnames: opnames.map((o) => ({
+              ...o,
+              items: opnameItemsMap.get(o.id) || [],
+            })),
+            spoilWastes,
+            recipes,
+          },
+        });
+      }
+
+      // --- MODUL VENDOR (mdl_vendor) ---
+      if (normalizedModule === "vendor") {
+        const [compVendors, docs] = await Promise.all([
+          db.select().from(vendors).where(eq(vendors.companyId, companyId)),
+          db.select().from(vendorDocuments),
+        ]);
+
+        return res.status(200).json({
+          status: "SUCCESS",
+          module: "VENDOR",
+          lastSeq: latestSeq,
+          lastEventId: latestEventId,
+          generatedAt: Date.now(),
+          data: {
+            vendors: compVendors,
+            documents: docs,
+          },
+        });
+      }
+
+      // --- MODUL PLUSALES (mdl_plusales) ---
+      if (normalizedModule === "plusales") {
+        const [compPlusalesDocs, allDynamicItems] = await Promise.all([
+          db
+            .select()
+            .from(plusalesDocuments)
+            .where(eq(plusalesDocuments.companyId, companyId)),
+          db.select().from(plusalesDynamicItems),
+        ]);
+
+        const dynamicItemsMap = new Map<string, any[]>();
+        allDynamicItems.forEach((item) => {
+          const list = dynamicItemsMap.get(item.documentId) || [];
+          list.push(item);
+          dynamicItemsMap.set(item.documentId, list);
+        });
+
+        return res.status(200).json({
+          status: "SUCCESS",
+          module: "PLUSALES_DOCUMENT",
+          lastSeq: latestSeq,
+          lastEventId: latestEventId,
+          generatedAt: Date.now(),
+          data: {
+            documents: compPlusalesDocs.map((d) => ({
+              ...d,
+              date:
+                d.date instanceof Date ? d.date.toISOString() : String(d.date),
+              dynamicItems: dynamicItemsMap.get(d.id) || [],
+            })),
+          },
+        });
+      }
+
+      // --- MODUL RECEIVING (mdl_receiving) ---
+      if (normalizedModule === "receiving") {
+        const [compReceivingDocs, allReceivingItems, allReceivingPayments] =
+          await Promise.all([
+            db
+              .select()
+              .from(receivingDocuments)
+              .where(eq(receivingDocuments.companyId, companyId)),
+            db.select().from(receivingItems),
+            db.select().from(receivingPayments),
+          ]);
+
+        const receivingItemsMap = new Map<string, any[]>();
+        allReceivingItems.forEach((item) => {
+          const list = receivingItemsMap.get(item.documentId) || [];
+          list.push(item);
+          receivingItemsMap.set(item.documentId, list);
+        });
+
+        const receivingPaymentsMap = new Map<string, any[]>();
+        allReceivingPayments.forEach((p) => {
+          const list = receivingPaymentsMap.get(p.documentId) || [];
+          list.push(p);
+          receivingPaymentsMap.set(p.documentId, list);
+        });
+
+        return res.status(200).json({
+          status: "SUCCESS",
+          module: "RECEIVING_DOCUMENT",
+          lastSeq: latestSeq,
+          lastEventId: latestEventId,
+          generatedAt: Date.now(),
+          data: {
+            documents: compReceivingDocs.map((d) => ({
+              ...d,
+              date:
+                d.date instanceof Date ? d.date.toISOString() : String(d.date),
+              dueDate:
+                d.dueDate instanceof Date ? d.dueDate.toISOString() : d.dueDate,
+              items: receivingItemsMap.get(d.id) || [],
+              payments: receivingPaymentsMap.get(d.id) || [],
+            })),
+          },
+        });
+      }
+
+      // --- MODUL EXECUTIVE PANEL (mdl_executivepanel) ---
+      if (normalizedModule === "executivepanel") {
+        const [targets, allocations, ownerLedgers] = await Promise.all([
+          db
+            .select()
+            .from(executiveTargets)
+            .where(eq(executiveTargets.companyId, companyId)),
+          db
+            .select()
+            .from(executiveAllocations)
+            .where(eq(executiveAllocations.companyId, companyId)),
+          db
+            .select()
+            .from(executiveOwnerLedger)
+            .where(eq(executiveOwnerLedger.companyId, companyId)),
+        ]);
+
+        const targetsMap: Record<string, any> = {};
+        targets.forEach((t) => {
+          targetsMap[t.id] = t;
+        });
+
+        return res.status(200).json({
+          status: "SUCCESS",
+          module: "EXECUTIVE_PANEL",
+          lastSeq: latestSeq,
+          lastEventId: latestEventId,
+          generatedAt: Date.now(),
+          data: {
+            targets: targetsMap,
+            allocations,
+            ownerLedgers: ownerLedgers.map((o) => ({
+              ...o,
+              date:
+                o.date instanceof Date ? o.date.toISOString() : String(o.date),
+            })),
+          },
+        });
+      }
+
+      return res.status(404).json({
+        status: "FAILED",
+        message: `Modul '${moduleName}' tidak ditemukan atau belum mendukung physical snapshot.`,
+      });
+    } catch (err: any) {
+      console.error("[MODULAR SNAPSHOT ERROR]:", err);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
 // Endpoint untuk Memicu Pembuatan Snapshot Langsung di Server (On-Demand / Manual)
 router.post(
   "/snapshot/server/generate",
@@ -1106,7 +1456,8 @@ router.post(
 
       res.status(200).json({
         status: "SUCCESS",
-        message: "Snapshot resmi server berhasil diperbarui secara instan.",
+        message:
+          "Snapshot resmi server berhasil diperbarui secara instan dari tabel fisik.",
         snapshots: result,
       });
     } catch (err: any) {

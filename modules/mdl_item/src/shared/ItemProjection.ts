@@ -38,6 +38,7 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
           id: aggregateId,
           ...payload,
           status: "Aktif",
+          isActive: true,
         });
         break;
       case "UOM_CREATED":
@@ -46,28 +47,36 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
           id: aggregateId,
           ...payload,
           status: "Aktif",
+          isActive: true,
         });
         break;
       case "CATEGORY_ARCHIVED":
         if (this.categories.has(aggregateId)) {
-          this.categories.get(aggregateId).status = "Arsip";
+          const cat = this.categories.get(aggregateId);
+          cat.status = "Arsip";
+          cat.isActive = false;
         }
         break;
       case "UOM_ARCHIVED":
         if (this.uoms.has(aggregateId)) {
-          this.uoms.get(aggregateId).status = "Arsip";
+          const u = this.uoms.get(aggregateId);
+          u.status = "Arsip";
+          u.isActive = false;
         }
         break;
       case "PRODUCT_CREATED":
         this.products.set(aggregateId, {
           id: aggregateId,
           ...payload,
-          aggregateVersion: event.aggregateVersion || 1,
-          isExpense: Boolean(payload.isExpense),
+          aggregateVersion: Number(event.aggregateVersion || 1),
+          isExpense: Boolean(payload.isExpense ?? payload.is_expense),
           uomConversions: Array.isArray(payload.uomConversions)
             ? payload.uomConversions
-            : [],
+            : Array.isArray(payload.uom_conversions)
+              ? payload.uom_conversions
+              : [],
           status: "Aktif",
+          isActive: true,
         });
         break;
       case "PRODUCT_UPDATED":
@@ -76,16 +85,21 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
           this.products.set(aggregateId, {
             ...existing,
             ...payload,
-            aggregateVersion:
+            aggregateVersion: Number(
               event.aggregateVersion || existing.aggregateVersion || 1,
+            ),
             isExpense:
               payload.isExpense !== undefined
                 ? Boolean(payload.isExpense)
-                : existing.isExpense,
+                : payload.is_expense !== undefined
+                  ? Boolean(payload.is_expense)
+                  : existing.isExpense,
             uomConversions:
               payload.uomConversions !== undefined
                 ? payload.uomConversions
-                : existing.uomConversions || [],
+                : payload.uom_conversions !== undefined
+                  ? payload.uom_conversions
+                  : existing.uomConversions || [],
             approvalStatus: payload.nameChanged
               ? "PENDING"
               : existing.approvalStatus,
@@ -98,23 +112,32 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
           const existing = this.products.get(aggregateId);
           this.products.set(aggregateId, {
             ...existing,
-            approvalStatus: payload.approvalStatus,
+            approvalStatus: payload.approvalStatus || "APPROVED",
             validateId: payload.validateId || null,
-            aggregateVersion:
+            aggregateVersion: Number(
               event.aggregateVersion || existing.aggregateVersion || 1,
+            ),
           });
         }
         break;
       case "PRODUCT_ARCHIVED":
         if (this.products.has(aggregateId)) {
-          this.products.get(aggregateId).status = "Arsip";
-          this.products.get(aggregateId).isActive = false;
+          const p = this.products.get(aggregateId);
+          p.status = "Arsip";
+          p.isActive = false;
+          if (event.aggregateVersion) {
+            p.aggregateVersion = Number(event.aggregateVersion);
+          }
         }
         break;
       case "PRODUCT_RESTORED":
         if (this.products.has(aggregateId)) {
-          this.products.get(aggregateId).status = "Aktif";
-          this.products.get(aggregateId).isActive = true;
+          const p = this.products.get(aggregateId);
+          p.status = "Aktif";
+          p.isActive = true;
+          if (event.aggregateVersion) {
+            p.aggregateVersion = Number(event.aggregateVersion);
+          }
         }
         break;
 
@@ -123,7 +146,6 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
       // =====================================================================
       case "RECEIVING_CREATED":
       case "RECEIVING_UPDATED": {
-        // <--- HAPUS RECEIVING_COMPLETED DARI SINI
         const p = payload;
         const documentType =
           p.reference?.documentType || p.documentType || p.type;
@@ -133,10 +155,6 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
         const outletId = p.location?.outletId || p.outletId;
         const vendorSource =
           p.data?.vendorSource || p.reference?.vendorSource || p.vendorSource;
-
-        // =====================================================================
-        // ATURAN MUTLAK HARGA FLUKTUATIF (ANTI-COMPOUNDING & ANTI-BYPASS)
-        // =====================================================================
 
         // 1. BLOKIR MUTLAK jika transaksi PIUTANG (Distribusi)
         if (documentType === "PIUTANG") break;
@@ -149,7 +167,6 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
         if (isInternal) break;
 
         // 3. KUNCI SCOPE LEVEL (Pemisahan Tegas Region vs Outlet)
-        // Jika outletId ada, ubah HANYA harga Outlet. Jika tidak, ubah Region.
         const scopeKey = outletId ? outletId : regionId ? regionId : "DEFAULT";
         const items = p.data?.items || p.items || [];
 
@@ -215,10 +232,14 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
     this.products.clear();
   }
 
+  /**
+   * Menerima Snapshot Fisik langsung dari tabel PostgreSQL server (Zero-Replay)
+   */
   public restoreState(state: ItemState): void {
     this.categories.clear();
     this.uoms.clear();
     this.products.clear();
+
     if (state) {
       state.categories?.forEach((c: any) => {
         const isAct =
@@ -233,6 +254,7 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
           isActive: isAct,
         });
       });
+
       state.uoms?.forEach((u: any) => {
         const isAct =
           u.isActive !== undefined
@@ -246,6 +268,7 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
           isActive: isAct,
         });
       });
+
       state.products?.forEach((p: any) => {
         const isAct =
           p.isActive !== undefined
@@ -253,11 +276,29 @@ export class ItemProjection implements ProjectionHandler<ItemState> {
             : p.is_active !== undefined
               ? Boolean(p.is_active)
               : p.status !== "Arsip";
+
+        // Normalisasi versi agregat dari DB PostgreSQL
+        const normVersion = Number(
+          p.aggregateVersion ?? p.aggregate_version ?? 1,
+        );
+
+        // Parsing defensif untuk objek pricing
+        let parsedPricing = p.pricing;
+        if (typeof parsedPricing === "string") {
+          try {
+            parsedPricing = JSON.parse(parsedPricing);
+          } catch {
+            parsedPricing = {};
+          }
+        }
+
         this.products.set(p.id, {
           ...p,
           status: isAct ? "Aktif" : "Arsip",
           isActive: isAct,
           isExpense: Boolean(p.isExpense ?? p.is_expense),
+          pricing: parsedPricing || {},
+          aggregateVersion: normVersion,
           uomConversions: Array.isArray(p.uomConversions)
             ? p.uomConversions
             : Array.isArray(p.uom_conversions)

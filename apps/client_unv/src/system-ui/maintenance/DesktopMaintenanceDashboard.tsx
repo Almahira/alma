@@ -1,4 +1,4 @@
-// File: apps/client_unv/src/system-ui/maintenance/DesktopMaintenanceDashboard.tsx
+// File: apps/client_unv/src/features/maintenance/DesktopMaintenanceDashboard.tsx
 import React, { useState } from "react";
 import {
   Server,
@@ -64,13 +64,22 @@ export const DesktopMaintenanceDashboard: React.FC<{
   });
 
   const handleBroadcastResync = async () => {
-    if (
-      !window.confirm(
-        "PERINGATAN: Perintah ini akan menerbitkan Stempel Epoch Baru. Seluruh perangkat cabang (baik yang sedang ONLINE maupun yang nanti dinyalakan setelah OFFLINE) akan otomatis me-reset database lokalnya dan menarik data segar dari server.\n\nLanjutkan reset masal?",
-      )
-    ) {
+    const confirmationMessage =
+      "🚨 PERINGATAN BROADCAST RE-SYNC MASAL (NON-OPERASIONAL) 🚨\n\n" +
+      "1. WAKTU EKSEKUSI:\n" +
+      "Pastikan proses ini dilakukan pada WAKTU NON-OPERASIONAL (saat outlet/kasir sudah tutup).\n\n" +
+      "2. DAMPAK PADA TABLET CABANG:\n" +
+      "• Seluruh data lokal IndexedDB di 16 cabang akan DIBERSIHKAN TOTAL.\n" +
+      "• Setiap tablet otomatis mengunduh SNAPSHOT FISIK TERBARU dari PostgreSQL (Data 1:1 identik).\n" +
+      "• Seluruh user cabang akan otomatis di-LOGOUT ke Halaman Login Standar.\n\n" +
+      "3. KEAMANAN PERANGKAT:\n" +
+      "• Kredensial mesin, Device ID, dan Lisensi Ed25519 TETAP AMAN (Perangkat TIDAK AKAN terlempar ke Setup Wizard).\n\n" +
+      "Lanjutkan penerbitan sinyal Broadcast Re-Sync sekarang?";
+
+    if (!window.confirm(confirmationMessage)) {
       return;
     }
+
     setIsBroadcasting(true);
     try {
       const res = await fetch(
@@ -79,16 +88,21 @@ export const DesktopMaintenanceDashboard: React.FC<{
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            reason: "Reset & Penyelarasan Masal Database Pusat",
+            reason:
+              "Penyelarasan Masal Non-Operasional & Rehidrasi Snapshot Fisik 1:1",
           }),
         },
       );
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      alert("SUKSES!\n" + data.message);
+      alert(
+        "✅ SUKSES!\n" +
+          data.message +
+          "\n\nSinyal telah disiarkan ke seluruh cabang.",
+      );
       onRefresh();
     } catch (err: any) {
-      alert("Gagal menerbitkan sinyal reset masal: " + err.message);
+      alert("❌ Gagal menerbitkan sinyal broadcast: " + err.message);
     } finally {
       setIsBroadcasting(false);
     }
@@ -96,7 +110,7 @@ export const DesktopMaintenanceDashboard: React.FC<{
 
   return (
     <div className="h-screen flex flex-col bg-slate-950 text-slate-100 font-sans overflow-hidden relative">
-      {/* Subtle background gradient overlay */}
+      {/* Background gradient overlay */}
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(249,115,22,0.08),transparent_70%),radial-gradient(ellipse_at_bottom_left,rgba(59,130,246,0.05),transparent_70%)] pointer-events-none" />
 
       {/* HEADER COCKPIT */}
@@ -149,284 +163,368 @@ export const DesktopMaintenanceDashboard: React.FC<{
             <RefreshCw
               className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin text-orange-400" : ""}`}
             />
-            Refresh Status
+            {isRefreshing ? "Refreshing..." : "Refresh Status"}
           </button>
         </div>
       </header>
 
-      {/* TOP STATS BAR */}
-      <div className="p-6 pb-3 grid grid-cols-5 gap-4 shrink-0 relative z-10">
-        {/* PostgreSQL */}
-        <div className="p-4 bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-800 hover:border-slate-700 transition-colors shadow-lg shadow-black/10 group">
-          <div className="flex justify-between items-center text-xs font-bold text-slate-400 mb-1">
-            <span>PostgreSQL DB</span>
-            <Database className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition-transform" />
-          </div>
-          <div className="text-lg font-black font-mono text-emerald-400">
-            {dbInfo?.status || "ONLINE"}
-          </div>
-          <div className="text-[10px] text-slate-500 font-mono mt-1">
-            Ping: {dbInfo?.latencyMs || 0}ms | Sys:{" "}
-            {dbInfo?.totalSystemEvents || 0} | Tx: {dbInfo?.totalTxEvents || 0}
-          </div>
-        </div>
-
-        {/* NATS JetStream */}
-        <div className="p-4 bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-800 hover:border-slate-700 transition-colors shadow-lg shadow-black/10 group">
-          <div className="flex justify-between items-center text-xs font-bold text-slate-400 mb-1">
-            <span>NATS JetStream</span>
-            <Radio className="w-4 h-4 text-blue-400 group-hover:scale-110 transition-transform" />
-          </div>
-          <div className="text-lg font-black font-mono text-blue-400">
-            {natsInfo?.status || "ONLINE"}
-          </div>
-          <div className="text-[10px] text-slate-500 font-mono mt-1">
-            Messages: {natsInfo?.streamMessages?.toLocaleString() || 0}
-          </div>
-        </div>
-
-        {/* Quarantine DLQ */}
-        <div className="p-4 bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-800 hover:border-slate-700 transition-colors shadow-lg shadow-black/10 group">
-          <div className="flex justify-between items-center text-xs font-bold text-slate-400 mb-1">
-            <span>Karantina (DLQ)</span>
-            <ShieldAlert className="w-4 h-4 text-rose-400 group-hover:scale-110 transition-transform" />
-          </div>
-          <div
-            className={`text-lg font-black font-mono ${qInfo?.totalQuarantined ? "text-rose-400" : "text-emerald-400"}`}
-          >
-            {qInfo?.totalQuarantined || 0} Event
-          </div>
-          <div className="text-[10px] text-slate-500 font-mono mt-1">
-            {qInfo?.totalQuarantined
-              ? "⚠️ Butuh tindakan admin!"
-              : "Semua transaksi tersinkron"}
-          </div>
-        </div>
-
-        {/* RAM Usage */}
-        <div className="p-4 bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-800 hover:border-slate-700 transition-colors shadow-lg shadow-black/10 group">
-          <div className="flex justify-between items-center text-xs font-bold text-slate-400 mb-1">
-            <span>Heap / RSS Memory</span>
-            <Gauge className="w-4 h-4 text-orange-400 group-hover:scale-110 transition-transform" />
-          </div>
-          <div className="text-lg font-black font-mono text-orange-400">
-            {hwInfo?.heapUsedMb || 0} MB
-          </div>
-          <div className="text-[10px] text-slate-500 font-mono mt-1">
-            Total Heap: {hwInfo?.heapTotalMb || 0} MB | RSS:{" "}
-            {hwInfo?.rssMb || 0} MB
-          </div>
-        </div>
-
-        {/* Mesin Edge */}
-        <div className="p-4 bg-slate-900/60 backdrop-blur-sm rounded-2xl border border-slate-800 hover:border-slate-700 transition-colors shadow-lg shadow-black/10 group">
-          <div className="flex justify-between items-center text-xs font-bold text-slate-400 mb-1">
-            <span>Mesin Kasir Cabang</span>
-            <Laptop className="w-4 h-4 text-teal-400 group-hover:scale-110 transition-transform" />
-          </div>
-          <div className="text-lg font-black font-mono text-white">
-            <span className="text-emerald-400">
-              {overview?.devices?.active || 0}
-            </span>{" "}
-            / {overview?.devices?.total || 0}
-          </div>
-          <div className="text-[10px] text-slate-500 font-mono mt-1">
-            Offline: {overview?.devices?.offline || 0} unit
-          </div>
-        </div>
-      </div>
-
-      {/* 2 MAIN PANELS: QUARANTINE DLQ INSPECTOR + DEVICE RADAR */}
-      <div className="flex-1 px-6 pb-6 grid grid-cols-12 gap-6 min-h-0 overflow-hidden relative z-10">
-        {/* PANEL KIRI: DLQ QUARANTINE INSPECTOR (7 COLS) */}
-        <div className="col-span-7 bg-slate-900/60 backdrop-blur-sm rounded-3xl border border-slate-800 flex flex-col min-h-0 overflow-hidden shadow-xl shadow-black/20">
-          <div className="p-4 border-b border-slate-800 flex justify-between items-center shrink-0 bg-slate-900/50">
-            <div className="flex items-center gap-2">
-              <ShieldAlert className="w-4 h-4 text-rose-500" />
-              <h2 className="font-black text-xs uppercase tracking-wider text-white">
-                INSPEKSI KARANTINA PERISTIWA (DLQ MONITOR)
-              </h2>
-            </div>
-            {quarantine.length > 0 && (
-              <button
-                onClick={() => onPurgeQuarantine("", true)}
-                className="px-3 py-1 bg-rose-500/10 text-rose-400 border border-rose-500/30 rounded-lg text-xs font-bold hover:bg-rose-500/20 cursor-pointer transition-colors"
+      {/* DASHBOARD BODY */}
+      <main className="flex-1 overflow-y-auto p-6 space-y-6 relative z-10 custom-scrollbar">
+        {/* ROW 1: METRICS TOP CARDS */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Card 1: PostgreSQL */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-lg backdrop-blur-xs flex flex-col justify-between">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                <Database className="w-4 h-4 text-emerald-400" />
+                PostgreSQL Primary
+              </span>
+              <span
+                className={`px-2 py-0.5 rounded-full text-[10px] font-black tracking-wider ${
+                  dbInfo?.status === "CONNECTED"
+                    ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                    : "bg-rose-500/10 text-rose-400 border border-rose-500/20 animate-pulse"
+                }`}
               >
-                Hapus Semua DLQ
-              </button>
-            )}
+                {dbInfo?.status || "UNKNOWN"}
+              </span>
+            </div>
+            <div className="my-3">
+              <div className="text-2xl font-black text-white">
+                {dbInfo?.latencyMs ?? 0}{" "}
+                <span className="text-xs font-medium text-slate-400">
+                  ms latency
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">
+                Sys Events:{" "}
+                <strong className="text-slate-200">
+                  {dbInfo?.totalSystemEvents ?? 0}
+                </strong>{" "}
+                | Tx Events:{" "}
+                <strong className="text-slate-200">
+                  {dbInfo?.totalTxEvents ?? 0}
+                </strong>
+              </p>
+            </div>
+            <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
+              <div
+                className={`h-full ${dbInfo?.status === "CONNECTED" ? "bg-emerald-500" : "bg-rose-500"}`}
+                style={{ width: "100%" }}
+              />
+            </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 custom-scrollbar space-y-3">
-            {quarantine.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-slate-500 space-y-2">
-                <CheckCircle2 className="w-12 h-12 text-emerald-500/40" />
-                <p className="text-xs font-bold">
-                  Luar biasa! Tidak ada antrean karantina data.
-                </p>
-                <p className="text-[10px] text-slate-600">
-                  Seluruh transaksi 3-Way Merge berjalan sempurna.
-                </p>
+          {/* Card 2: NATS JetStream */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-lg backdrop-blur-xs flex flex-col justify-between">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                <Radio className="w-4 h-4 text-cyan-400" />
+                NATS JetStream (ERP_STREAM)
+              </span>
+              <span
+                className={`px-2 py-0.5 rounded-full text-[10px] font-black tracking-wider ${
+                  natsInfo?.status === "CONNECTED"
+                    ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20"
+                    : "bg-rose-500/10 text-rose-400 border border-rose-500/20 animate-pulse"
+                }`}
+              >
+                {natsInfo?.status || "UNKNOWN"}
+              </span>
+            </div>
+            <div className="my-3">
+              <div className="text-2xl font-black text-white">
+                {natsInfo?.streamMessages ?? 0}{" "}
+                <span className="text-xs font-medium text-slate-400">
+                  queued msgs
+                </span>
               </div>
-            ) : (
-              quarantine.map((q) => (
-                <div
-                  key={q.id}
-                  className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-2.5 hover:border-slate-700 transition-colors"
-                >
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <span className="font-black text-xs text-rose-400 font-mono block">
-                        {q.type}
-                      </span>
-                      <span className="text-[10px] text-slate-400 font-mono">
-                        EventID: {q.id} | AggID: {q.aggregateId}
-                      </span>
-                    </div>
-                    <span className="text-[10px] text-slate-500 font-mono">
-                      {new Date(q.quarantinedAt).toLocaleString("id-ID")}
-                    </span>
-                  </div>
-                  <div className="p-2.5 bg-rose-950/20 border border-rose-900/40 rounded-xl text-xs text-rose-300 font-mono">
-                    <strong className="text-rose-400">
-                      Penyebab Karantina:
-                    </strong>{" "}
-                    {q.errorReason}
-                  </div>
-                  <div className="flex justify-between items-center pt-1">
-                    <button
-                      onClick={() => setInspectEvent(q)}
-                      className="text-xs text-blue-400 hover:text-blue-300 font-bold flex items-center gap-1 cursor-pointer transition-colors"
-                    >
-                      <Eye className="w-3.5 h-3.5" /> Lihat Isi JSON Payload
-                    </button>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => onPurgeQuarantine(q.id)}
-                        className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-black uppercase cursor-pointer flex items-center gap-1 transition-colors"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" /> Buang
-                      </button>
-                      <button
-                        onClick={() => onRetryQuarantine(q.id)}
-                        className="px-4 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-xs font-black uppercase cursor-pointer flex items-center gap-1 shadow-md hover:shadow-lg transition-all active:scale-95"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5" /> Retry Sync
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
+              <p className="text-[11px] text-slate-400 mt-1">
+                Realtime Event Distribution Bus
+              </p>
+            </div>
+            <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
+              <div
+                className={`h-full ${natsInfo?.status === "CONNECTED" ? "bg-cyan-500" : "bg-rose-500"}`}
+                style={{ width: "100%" }}
+              />
+            </div>
+          </div>
+
+          {/* Card 3: Quarantine DLQ */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-lg backdrop-blur-xs flex flex-col justify-between">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                <ShieldAlert className="w-4 h-4 text-amber-400" />
+                Quarantine DLQ
+              </span>
+              <span
+                className={`px-2 py-0.5 rounded-full text-[10px] font-black tracking-wider ${
+                  qInfo?.totalQuarantined > 0
+                    ? "bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse"
+                    : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                }`}
+              >
+                {qInfo?.totalQuarantined > 0 ? "ALERT" : "CLEAR"}
+              </span>
+            </div>
+            <div className="my-3">
+              <div className="text-2xl font-black text-white">
+                {qInfo?.totalQuarantined ?? 0}{" "}
+                <span className="text-xs font-medium text-slate-400">
+                  events stuck
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">
+                {qInfo?.totalQuarantined > 0
+                  ? "Ada transaksi yang ditahan di karantina"
+                  : "Semua event mengalir lancar"}
+              </p>
+            </div>
+            <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
+              <div
+                className={`h-full ${qInfo?.totalQuarantined > 0 ? "bg-amber-500" : "bg-emerald-500"}`}
+                style={{ width: "100%" }}
+              />
+            </div>
+          </div>
+
+          {/* Card 4: Hardware & Edge POS Mesh */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-lg backdrop-blur-xs flex flex-col justify-between">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                <Cpu className="w-4 h-4 text-purple-400" />
+                Edge Devices Mesh
+              </span>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-black tracking-wider bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                {overview?.devices?.active || 0} /{" "}
+                {overview?.devices?.total || 0} ACTIVE
+              </span>
+            </div>
+            <div className="my-3">
+              <div className="text-2xl font-black text-white">
+                {hwInfo?.heapUsedMb ?? 0}{" "}
+                <span className="text-xs font-medium text-slate-400">
+                  MB RAM Used
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">
+                Heap Total: {hwInfo?.heapTotalMb ?? 0}MB | RSS:{" "}
+                {hwInfo?.rssMb ?? 0}MB
+              </p>
+            </div>
+            <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-purple-500"
+                style={{
+                  width: `${Math.min(100, Math.round(((hwInfo?.heapUsedMb || 1) / (hwInfo?.heapTotalMb || 100)) * 100))}%`,
+                }}
+              />
+            </div>
           </div>
         </div>
 
-        {/* PANEL KANAN: RADAR PERANGKAT & OFFLINE DIAGNOSTICS (5 COLS) */}
-        <div className="col-span-5 bg-slate-900/60 backdrop-blur-sm rounded-3xl border border-slate-800 flex flex-col min-h-0 overflow-hidden shadow-xl shadow-black/20">
-          <div className="p-4 border-b border-slate-800 flex justify-between items-center shrink-0 bg-slate-900/50">
-            <div className="flex items-center gap-2">
-              <Laptop className="w-4 h-4 text-teal-400" />
-              <h2 className="font-black text-xs uppercase tracking-wider text-white">
-                RADAR PERANGKAT ({devices.length})
+        {/* ROW 2: EDGE DEVICE MESH REGISTRY */}
+        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 shadow-lg backdrop-blur-xs">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                <Laptop className="w-4 h-4 text-orange-400" />
+                Edge POS Mesh Devices (16 Cabang &amp; Perangkat Terdaftar)
               </h2>
+              <p className="text-xs text-slate-400">
+                Monitoring status koneksi real-time, telemetry, dan lisensi
+                perangkat kasir
+              </p>
             </div>
-            <div className="flex bg-slate-950 border border-slate-800 rounded-lg p-0.5 text-[10px] font-bold">
+            <div className="flex items-center gap-2">
               <button
                 onClick={() => setDeviceFilter("ALL")}
-                className={`px-2 py-1 rounded transition-colors ${deviceFilter === "ALL" ? "bg-slate-800 text-white" : "text-slate-400 hover:text-slate-200"}`}
+                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  deviceFilter === "ALL"
+                    ? "bg-orange-500 text-white"
+                    : "bg-slate-800 text-slate-400 hover:text-white"
+                }`}
               >
-                Semua
+                All ({devices.length})
               </button>
               <button
                 onClick={() => setDeviceFilter("ONLINE")}
-                className={`px-2 py-1 rounded transition-colors ${deviceFilter === "ONLINE" ? "bg-emerald-500/20 text-emerald-400" : "text-slate-400 hover:text-slate-200"}`}
+                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  deviceFilter === "ONLINE"
+                    ? "bg-emerald-500 text-white"
+                    : "bg-slate-800 text-slate-400 hover:text-white"
+                }`}
               >
-                Online
+                Online ({devices.filter((d) => d.isOnline).length})
               </button>
               <button
                 onClick={() => setDeviceFilter("OFFLINE")}
-                className={`px-2 py-1 rounded transition-colors ${deviceFilter === "OFFLINE" ? "bg-rose-500/20 text-rose-400" : "text-slate-400 hover:text-slate-200"}`}
+                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  deviceFilter === "OFFLINE"
+                    ? "bg-rose-500 text-white"
+                    : "bg-slate-800 text-slate-400 hover:text-white"
+                }`}
               >
-                Offline
+                Offline ({devices.filter((d) => !d.isOnline).length})
               </button>
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 custom-scrollbar space-y-2.5">
-            {filteredDevices.map((d) => (
-              <div
-                key={d.id}
-                className="p-3 bg-slate-950 rounded-2xl border border-slate-800 flex items-start gap-3 hover:border-slate-700 transition-colors"
-              >
-                <div
-                  className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
-                    d.isOnline
-                      ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                      : "bg-slate-800 text-slate-500"
-                  }`}
-                >
-                  {d.isOnline ? (
-                    <Wifi className="w-4 h-4" />
-                  ) : (
-                    <WifiOff className="w-4 h-4" />
-                  )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-xs text-white truncate">
-                      {d.name}
-                    </span>
-                    <span
-                      className={`px-2 py-0.5 rounded text-[8px] font-black uppercase ${
-                        d.isOnline
-                          ? "bg-emerald-500/10 text-emerald-400"
-                          : "bg-slate-800 text-slate-400"
-                      }`}
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-slate-800 text-slate-400 font-semibold uppercase tracking-wider text-[10px]">
+                  <th className="py-2.5 px-3">Device Name &amp; Model</th>
+                  <th className="py-2.5 px-3">Branch Scope</th>
+                  <th className="py-2.5 px-3">License Tier</th>
+                  <th className="py-2.5 px-3">Network Status</th>
+                  <th className="py-2.5 px-3">Last Seen</th>
+                  <th className="py-2.5 px-3">Device State</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60 font-mono text-[11px]">
+                {filteredDevices.map((d) => (
+                  <tr
+                    key={d.id}
+                    className="hover:bg-slate-800/30 transition-colors"
+                  >
+                    <td className="py-2.5 px-3 font-bold text-white flex items-center gap-2">
+                      <span
+                        className={`w-2 h-2 rounded-full ${
+                          d.isOnline
+                            ? "bg-emerald-400 animate-pulse"
+                            : "bg-slate-600"
+                        }`}
+                      />
+                      {d.deviceName || d.id}
+                      <span className="text-[10px] text-slate-500 font-normal">
+                        ({d.deviceModel || "Browser"})
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-3 text-slate-300">
+                      {d.outletId || d.regionId || "HEAD_OFFICE"}
+                    </td>
+                    <td className="py-2.5 px-3">
+                      <span className="px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 text-[10px] font-bold">
+                        {d.licenseTier || "STANDARD"}
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-3">
+                      {d.isOnline ? (
+                        <span className="text-emerald-400 font-bold flex items-center gap-1">
+                          <Wifi className="w-3 h-3" /> ONLINE
+                        </span>
+                      ) : (
+                        <span className="text-slate-500 flex items-center gap-1">
+                          <WifiOff className="w-3 h-3 text-rose-400" /> OFFLINE
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-2.5 px-3 text-slate-400">
+                      {d.minutesAgo !== undefined
+                        ? `${d.minutesAgo} menit lalu`
+                        : "-"}
+                    </td>
+                    <td className="py-2.5 px-3">
+                      <span
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          d.status === "ACTIVE"
+                            ? "bg-emerald-500/10 text-emerald-400"
+                            : "bg-rose-500/10 text-rose-400"
+                        }`}
+                      >
+                        {d.status || "ACTIVE"}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+                {filteredDevices.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={6}
+                      className="text-center py-6 text-slate-500 italic"
                     >
-                      {d.isOnline ? "ONLINE" : "OFFLINE"}
-                    </span>
-                  </div>
-                  <span className="text-[10px] text-slate-400 font-mono block mt-0.5">
-                    Tier: {d.licenseTier}
-                  </span>
-                  {!d.isOnline && (
-                    <div className="mt-1 text-[10px] text-rose-400 bg-rose-950/20 p-1.5 rounded-lg border border-rose-900/30">
-                      <strong>Diagnosa:</strong> {d.offlineReason}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
+                      Tidak ada perangkat yang sesuai filter.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
-      </div>
 
-      {/* MODAL JSON PAYLOAD INSPECTOR */}
-      {inspectEvent && (
-        <div className="fixed inset-0 z-100 flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-sm">
-          <div className="bg-slate-900 rounded-3xl border border-slate-800 max-w-2xl w-full p-6 space-y-4 shadow-2xl">
-            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+        {/* ROW 3: QUARANTINE DLQ SECTION */}
+        {quarantine.length > 0 && (
+          <div className="bg-slate-900/80 border border-amber-900/40 rounded-2xl p-5 shadow-lg backdrop-blur-xs">
+            <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-sm font-black text-white uppercase font-mono">
-                  Payload {inspectEvent.type}
-                </h3>
-                <span className="text-xs text-slate-400 font-mono">
-                  {inspectEvent.id}
-                </span>
+                <h2 className="text-sm font-bold text-amber-400 uppercase tracking-wider flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 animate-pulse" />
+                  Quarantine Dead-Letter Queue ({quarantine.length} Events
+                  Ditahan)
+                </h2>
+                <p className="text-xs text-slate-400">
+                  Event yang tertahan karena kegagalan JSON atau crash sistem
+                </p>
               </div>
               <button
-                onClick={() => setInspectEvent(null)}
-                className="text-slate-400 hover:text-white cursor-pointer transition-colors"
+                onClick={() => onPurgeQuarantine("", true)}
+                className="px-3 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all"
               >
-                Tutup
+                <Trash2 className="w-3.5 h-3.5" /> Purge All DLQ
               </button>
             </div>
-            <pre className="p-4 bg-slate-950 rounded-2xl border border-slate-800 text-emerald-400 font-mono text-xs max-h-96 overflow-y-auto custom-scrollbar">
-              {JSON.stringify(inspectEvent.payload, null, 2)}
-            </pre>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-slate-800 text-slate-400 font-semibold uppercase tracking-wider text-[10px]">
+                    <th className="py-2.5 px-3">Event ID</th>
+                    <th className="py-2.5 px-3">Type</th>
+                    <th className="py-2.5 px-3">Aggregate ID</th>
+                    <th className="py-2.5 px-3">Error Reason</th>
+                    <th className="py-2.5 px-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 font-mono text-[11px]">
+                  {quarantine.map((q) => (
+                    <tr
+                      key={q.id}
+                      className="hover:bg-slate-800/30 transition-colors"
+                    >
+                      <td className="py-2.5 px-3 text-slate-300 font-bold">
+                        {q.id}
+                      </td>
+                      <td className="py-2.5 px-3 text-orange-400">{q.type}</td>
+                      <td className="py-2.5 px-3 text-slate-400">
+                        {q.aggregateId}
+                      </td>
+                      <td className="py-2.5 px-3 text-rose-400">
+                        {q.errorReason}
+                      </td>
+                      <td className="py-2.5 px-3 text-right space-x-2">
+                        <button
+                          onClick={() => onRetryQuarantine(q.id)}
+                          className="px-2.5 py-1 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 rounded text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <RotateCcw className="w-3 h-3" /> Retry Sync
+                        </button>
+                        <button
+                          onClick={() => onPurgeQuarantine(q.id)}
+                          className="px-2.5 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <Trash2 className="w-3 h-3" /> Dismiss
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </main>
     </div>
   );
 };

@@ -29,6 +29,7 @@ import { globalCircuitBreaker } from "../io/CircuitBreaker";
 import { getServerUrl, getApiUrl } from "../config/env";
 import { LicenseManager } from "./licenseManager";
 import { notifyStateUpdated } from "../cqrs/EventBus";
+import { globalRegistry } from "../cqrs/UniversalRegistry";
 
 if (typeof window !== "undefined" && (import.meta as any).env?.DEV) {
   disableWarnings();
@@ -192,8 +193,6 @@ export class UniversalLedger {
               localStorage.getItem("__unv_sync_epoch") || 0,
             );
 
-            // Jika server memiliki stempel epoch yang lebih baru dari stempel lokal perangkat:
-            // Segera reset database lokal, bersihkan sesi, dan lempar ke halaman login!
             if (serverEpoch > 0 && serverEpoch > localEpoch) {
               console.log(
                 `[AUTO-EPOCH CATCHUP] Terdeteksi reset masal saat perangkat offline (Server: ${serverEpoch} > Lokal: ${localEpoch}). Melakukan reset lokal otomatis...`,
@@ -275,8 +274,6 @@ export class UniversalLedger {
         }
       });
 
-      // JARING PENGAMAN: Rekonsiliasi berkala setiap 5 menit saat sedang online
-      // Memastikan klien tidak pernah tertinggal data jika sinyal socket sempat terlewat
       // JARING PENGAMAN: Cek stempel epoch dan jalankan sinkronisasi delta otomatis setiap 5 menit
       setInterval(
         async () => {
@@ -284,11 +281,9 @@ export class UniversalLedger {
             console.log(
               "[HEARTBEAT 5-MIN] Memeriksa stempel epoch server & sinkronisasi data...",
             );
-            // 1. Cek Epoch: Jika ada reset masal saat offline, auto-reset & logout
             const hasReset = await verifyServerEpoch();
             if (hasReset) return;
 
-            // 2. Cek Sync: Tarik delta data transaksi maupun sistem yang baru
             await this.syncInitial();
           }
         },
@@ -312,7 +307,6 @@ export class UniversalLedger {
   public async syncInitial() {
     if (this.isSyncing) return;
     this.isSyncing = true;
-    let isBackpressureHold = false;
 
     // Pancarkan sinyal ke Footer UI: Mulai Sinkronisasi
     if (typeof window !== "undefined") {
@@ -347,7 +341,6 @@ export class UniversalLedger {
         if (rawUser) activeRole = JSON.parse(rawUser).role || "";
       } catch {}
 
-      // Jika BUKAN Super Admin, kirimkan filter cabang yang menjadi haknya
       if (activeRole !== "SUPER_ADMIN") {
         let multiOutlets: string[] = [];
         try {
@@ -362,60 +355,97 @@ export class UniversalLedger {
         }
       }
 
-      // ---> OPTIMASI SNAPSHOT PUSAT: Jika database lokal masih kosong (Klien Baru / Habis Reset) <---
-      const localEventCount = await this.db.collections.events.count().exec();
-      if (localEventCount === 0) {
-        try {
-          const snapRes = await fetch(
-            getApiUrl(
-              `/api/system-health/snapshot/system/latest?companyId=${companyId || ""}`,
-            ),
-          ).catch(() => null);
+      let snapshotCutoffTime: number | null = null;
 
-          if (snapRes && snapRes.ok) {
-            const snapJson = await snapRes.json();
-            if (snapJson.hasSnapshot && snapJson.snapshot) {
-              const s = snapJson.snapshot;
-              console.log(
-                `[COLD-START INSTAN] Menerima Snapshot Master Data dari Server (Sequence #${s.lastSeq}). Memulihkan tanpa download 8.000 event...`,
-              );
-              // Simpan snapshot ke database lokal & rehidrasi UI seketika
-              await this.db.collections.snapshots.upsert({
-                id: "GLOBAL_SNAPSHOT",
-                lastSeq: s.lastSeq,
-                data: s.data,
-                updatedAt: s.updatedAt,
-              });
-              // Pasang sequence dasar
-              this.memCurrentSeq = s.lastSeq;
-              // Minta server hanya mengirim event yang terjadi setelah snapshot ini dibuat!
-              if (s.updatedAt) {
-                queryParams.append("since", String(s.updatedAt));
+      try {
+        console.log(
+          "[SYNC INITIAL] Mengambil Snapshot Ground Truth Fisik dari server...",
+        );
+        const snapRes = await fetch(
+          getApiUrl(
+            `/api/system-health/snapshot/system/latest?companyId=${companyId || ""}`,
+          ),
+        ).catch(() => null);
+
+        if (snapRes && snapRes.ok) {
+          const snapJson = await snapRes.json();
+          if (snapJson.hasSnapshot && snapJson.snapshot) {
+            const s = snapJson.snapshot;
+            console.log(
+              `[GROUND TRUTH] Berhasil memuat Snapshot Fisik Server (Sequence #${s.lastSeq}). Memulihkan tabel fisik ke memori...`,
+            );
+
+            // 1. Simpan snapshot resmi ke IndexedDB lokal
+            await this.db.collections.snapshots.upsert({
+              id: "GLOBAL_SNAPSHOT",
+              lastSeq: s.lastSeq,
+              data: s.data,
+              updatedAt: s.updatedAt,
+            });
+
+            // 2. Pasang Sequence dasar lokal
+            this.memCurrentSeq = s.lastSeq;
+
+            // 3. Rehidrasi memori CQRS Read Model seketika dari tabel fisik
+            if (s.data) {
+              const payload =
+                typeof s.data === "string" ? JSON.parse(s.data) : s.data;
+              globalRegistry.restoreAllStates(payload);
+
+              // 4. Seeding versi agregat ke ledger lokal
+              if (payload.ITEM_DOMAIN?.products) {
+                payload.ITEM_DOMAIN.products.forEach((p: any) => {
+                  const v = p.aggregateVersion ?? p.aggregate_version ?? 1;
+                  this.setAggregateVersion(p.id, Number(v) || 1);
+                });
+              }
+              if (payload.ORGANIZATION?.outlets) {
+                payload.ORGANIZATION.outlets.forEach((o: any) => {
+                  const v = o.aggregateVersion ?? o.aggregate_version ?? 1;
+                  this.setAggregateVersion(o.id, Number(v) || 1);
+                });
               }
             }
+
+            // Picu pembaruan antarmuka (UI re-render seketika)
+            notifyStateUpdated();
+
+            // Tetapkan batas waktu penarikan delta event hanya setelah snapshot ini dibuat
+            if (s.updatedAt) {
+              snapshotCutoffTime = new Date(s.updatedAt).getTime();
+            }
           }
-        } catch (snapErr) {
-          console.warn(
-            "[COLD-START] Gagal memuat snapshot server, beralih ke sinkronisasi biasa.",
-            snapErr,
-          );
         }
+      } catch (snapErr) {
+        console.warn(
+          "[SNAPSHOT SYNC] Gagal menghubungi endpoint snapshot server, beralih ke delta sync lokal.",
+          snapErr,
+        );
       }
 
-      // Siapkan cursor checkpoint inkremental (kurangi buffer 2 detik untuk toleransi latensi jam)
-      const lastCursorSystem = localStorage.getItem("__unv_cursor_system");
-      const lastCursorTx = localStorage.getItem("__unv_cursor_tx");
-
+      // Siapkan cursor checkpoint inkremental
       const queryParamsSystem = new URLSearchParams(queryParams);
-      if (lastCursorSystem && localEventCount > 0) {
-        const safeSystemSince = Math.max(0, Number(lastCursorSystem) - 2000);
-        queryParamsSystem.set("since", String(safeSystemSince));
-      }
-
       const queryParamsTx = new URLSearchParams(queryParams);
-      if (lastCursorTx && localEventCount > 0) {
-        const safeTxSince = Math.max(0, Number(lastCursorTx) - 2000);
-        queryParamsTx.set("since", String(safeTxSince));
+
+      if (snapshotCutoffTime) {
+        // Jika snapshot berhasil dimuat, hanya tarik event yang lahir SETELAH snapshot dibekukan
+        queryParamsSystem.set("since", String(snapshotCutoffTime));
+        queryParamsTx.set("since", String(snapshotCutoffTime));
+        localStorage.setItem("__unv_cursor_system", String(snapshotCutoffTime));
+        localStorage.setItem("__unv_cursor_tx", String(snapshotCutoffTime));
+      } else {
+        // Fallback jika server snapshot offline: gunakan cursor lokal
+        const lastCursorSystem = localStorage.getItem("__unv_cursor_system");
+        const lastCursorTx = localStorage.getItem("__unv_cursor_tx");
+
+        if (lastCursorSystem) {
+          const safeSystemSince = Math.max(0, Number(lastCursorSystem) - 2000);
+          queryParamsSystem.set("since", String(safeSystemSince));
+        }
+        if (lastCursorTx) {
+          const safeTxSince = Math.max(0, Number(lastCursorTx) - 2000);
+          queryParamsTx.set("since", String(safeTxSince));
+        }
       }
 
       const serverEvents = await globalCircuitBreaker.fire(async () => {
@@ -434,7 +464,6 @@ export class UniversalLedger {
         let eventsTx: any[] = [];
         if (resSystem && resSystem.ok) {
           eventsSys = await resSystem.json();
-          // Update cursor system jika ada event baru
           if (eventsSys.length > 0) {
             const maxSysTime = Math.max(
               ...eventsSys.map((e: any) =>
@@ -446,7 +475,6 @@ export class UniversalLedger {
         }
         if (resTx && resTx.ok) {
           eventsTx = await resTx.json();
-          // Update cursor tx jika ada event baru
           if (eventsTx.length > 0) {
             const maxTxTime = Math.max(
               ...eventsTx.map((e: any) =>
@@ -529,7 +557,6 @@ export class UniversalLedger {
     } finally {
       this.isSyncing = false;
 
-      // Catat Tanggal & Waktu Lengkap (Contoh: 25/09/2026, 16.30.00)
       const nowFormatted = new Date().toLocaleString("id-ID", {
         day: "2-digit",
         month: "2-digit",
@@ -540,7 +567,6 @@ export class UniversalLedger {
       });
       localStorage.setItem("__unv_last_sync_datetime", nowFormatted);
 
-      // Pancarkan sinyal ke Footer UI: Sinkronisasi Selesai
       if (typeof window !== "undefined") {
         window.dispatchEvent(
           new CustomEvent("UNV_SYNC_STATUS", {
@@ -548,6 +574,31 @@ export class UniversalLedger {
           }),
         );
       }
+    }
+  }
+
+  /**
+   * Mendaftarkan versi agregat langsung ke memori (digunakan saat restorasi snapshot fisik)
+   */
+  public setAggregateVersion(aggregateId: string, version: number): void {
+    this.memAggregateVersions.set(
+      aggregateId,
+      Math.max(1, Number(version) || 1),
+    );
+  }
+
+  /**
+   * Mendaftarkan banyak versi agregat sekaligus dari snapshot
+   */
+  public bulkSetAggregateVersions(
+    versions: Record<string, number> | Map<string, number>,
+  ): void {
+    if (versions instanceof Map) {
+      versions.forEach((v, k) => this.setAggregateVersion(k, v));
+    } else if (typeof versions === "object" && versions !== null) {
+      Object.entries(versions).forEach(([k, v]) =>
+        this.setAggregateVersion(k, v),
+      );
     }
   }
 
@@ -574,7 +625,6 @@ export class UniversalLedger {
     const job = async () => {
       if (!this.initialized) await this.init();
 
-      // 1. Kumpulkan seluruh ID dan cek deduplikasi sekali jalan
       const eventIds = rawPayloads.map((p) => p.id);
       const existingEvents = await this.db.collections.events
         .find({
@@ -587,7 +637,6 @@ export class UniversalLedger {
 
       const eventDocsToInsert: LedgerEventDoc[] = [];
 
-      // 2. Bangun rantai hash dan sequence untuk setiap event baru
       for (const rawPayload of rawPayloads) {
         const eventId = rawPayload.id;
         if (existingIdSet.has(eventId)) continue;
@@ -636,7 +685,6 @@ export class UniversalLedger {
         eventDocsToInsert.push(eventDoc);
       }
 
-      // 3. Simpan seluruh batch ke IndexedDB dalam 1 kali transaksi
       if (eventDocsToInsert.length > 0) {
         await this.db.collections.events.bulkInsert(eventDocsToInsert);
         notifyStateUpdated();
@@ -671,6 +719,22 @@ export class UniversalLedger {
       const eventId = `EVT_${ulid()}`;
       const hlc = HLC.generate(this.nodeId);
 
+      // KUNCI: TIMESTAMP(6) Mikrodetik untuk Resolusi Rebase Deterministik
+      const nowMs = Date.now();
+      const microFraction =
+        typeof performance !== "undefined"
+          ? Math.floor((performance.now() % 1) * 1000)
+          : Math.floor(Math.random() * 1000);
+      const clientTimestampIso = new Date(nowMs)
+        .toISOString()
+        .replace("Z", `${String(microFraction).padStart(3, "0")}Z`);
+
+      const enrichedPayload = {
+        ...payload,
+        updatedAt: payload.updatedAt || clientTimestampIso,
+        client_timestamp: clientTimestampIso,
+      };
+
       const dddMetadata = {
         eventId,
         aggregateId,
@@ -678,6 +742,7 @@ export class UniversalLedger {
         aggregateVersion: expectedVersion,
         eventVersion: 1,
         businessDate: new Date().toISOString().split("T")[0],
+        clientTimestamp: clientTimestampIso,
         actor,
       };
 
@@ -685,7 +750,7 @@ export class UniversalLedger {
         seq: nextSeq,
         prevHash: prevHash,
         type,
-        payload,
+        payload: enrichedPayload,
         dddMetadata,
         hlc,
       };
@@ -695,7 +760,7 @@ export class UniversalLedger {
       const eventDoc: LedgerEventDoc = {
         id: eventId,
         isTx: isTransactionAggregate(aggregateType),
-        createdAt: Date.now(),
+        createdAt: nowMs,
         aggregateId,
         aggregateVersion: expectedVersion,
         seq: nextSeq,
@@ -703,7 +768,7 @@ export class UniversalLedger {
         hash,
         hlc,
         type,
-        payload,
+        payload: enrichedPayload,
         dddMetadata,
         nodeMetadata: { originDeviceId: this.nodeId, signature },
       };
@@ -720,7 +785,7 @@ export class UniversalLedger {
           eventPayload: eventDoc,
           status: "PENDING",
           retryCount: 0,
-          createdAt: Date.now(),
+          createdAt: nowMs,
         });
       } catch (error) {
         if (insertedEvent) {
@@ -737,8 +802,6 @@ export class UniversalLedger {
       return eventDoc;
     };
 
-    // Tangkap kegagalan sebelumnya dengan .catch() agar antrean tidak macet,
-    // namun tetap meneruskan hasil/error ke pemanggil appendEvent
     const nextPromise = this.appendQueue.catch(() => {}).then(job);
     this.appendQueue = nextPromise;
     return nextPromise;

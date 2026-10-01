@@ -1,19 +1,20 @@
+// File: modules/mdl_whatsapp/src/server/baileysService.ts
 import makeWASocketRaw, {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
   Browsers,
+  downloadMediaMessage,
+  extractMessageContent,
+  getContentType,
 } from "@whiskeysockets/baileys";
 import QRCode from "qrcode";
 import path from "path";
 import fs from "fs";
 import pino from "pino";
 import { Server } from "socket.io";
-import { db } from "../../../../apps/server_unv/src/config/db.js";
-import { waMessages } from "./schema.js";
 
-// ESM / CJS Guard
 const makeWASocket: any = (makeWASocketRaw as any).default || makeWASocketRaw;
 
 export class WhatsAppService {
@@ -24,7 +25,8 @@ export class WhatsAppService {
   private qrCode: string | null = null;
   private phone: string | null = null;
   private authDir = path.join(process.cwd(), "uploads", "wa_auth");
-  private isConnecting = false; // Penjaga agar tidak dobel inisialisasi
+  private mediaDir = path.join(process.cwd(), "uploads", "wa_media");
+  private isConnecting = false;
 
   private constructor() {}
 
@@ -57,9 +59,11 @@ export class WhatsAppService {
   }
 
   public async init() {
-    // Mencegah penumpukan request jika sedang proses konek
     if (this.isConnecting || this.status === "CONNECTED") return;
     this.isConnecting = true;
+    if (!fs.existsSync(this.mediaDir)) {
+      fs.mkdirSync(this.mediaDir, { recursive: true });
+    }
 
     try {
       const { version } = await fetchLatestBaileysVersion().catch(() => ({
@@ -74,7 +78,6 @@ export class WhatsAppService {
         browser: Browsers.macOS("Chrome"),
         auth: {
           creds: state.creds,
-          // Ini WAJIB untuk versi Baileys terbaru agar koneksi stabil
           keys: makeCacheableSignalKeyStore(
             state.keys,
             pino({ level: "silent" }),
@@ -86,14 +89,13 @@ export class WhatsAppService {
 
       this.sock.ev.on("creds.update", saveCreds);
 
-      // 1. HANDLER KONEKSI
       this.sock.ev.on("connection.update", async (update: any) => {
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
           this.qrCode = await QRCode.toDataURL(qr);
           this.status = "SCAN_QR";
-          this.isConnecting = false; // Buka kunci setelah QR siap
+          this.isConnecting = false;
           console.log("[WA] QR Code siap di-scan.");
           this.broadcastStatus();
         }
@@ -106,10 +108,23 @@ export class WhatsAppService {
           this.broadcastStatus();
 
           if (code === DisconnectReason.loggedOut || code === 401) {
-            fs.rmSync(this.authDir, { recursive: true, force: true });
-            console.log("[WA] Device Logout. Hapus sesi.");
+            // Bersihkan sesi auth & berkas media sementara di server
+            if (fs.existsSync(this.authDir))
+              fs.rmSync(this.authDir, { recursive: true, force: true });
+            if (fs.existsSync(this.mediaDir))
+              fs.rmSync(this.mediaDir, { recursive: true, force: true });
+            console.log(
+              "[WA] Device Logout / Putus Permanen. Berkas lokal server dibersihkan.",
+            );
+
+            // Beri tahu client agar membersihkan Local Storage
+            if (this.io) {
+              this.io.emit("WA_SESSION_LOGOUT", { reason: "LOGGED_OUT" });
+            }
           } else {
-            console.log(`[WA] Terputus (Code: ${code}). Reconnecting...`);
+            console.log(
+              `[WA] Terputus sementara (Code: ${code}). Reconnecting...`,
+            );
             setTimeout(() => this.init(), 3000);
           }
         } else if (connection === "open") {
@@ -123,49 +138,106 @@ export class WhatsAppService {
         }
       });
 
-      // 2. HANDLER PESAN MASUK
       this.sock.ev.on("messages.upsert", async (m: any) => {
         if (m.type !== "notify" && m.type !== "append") return;
 
-        for (const msg of m.messages) {
+        for (let idx = 0; idx < m.messages.length; idx++) {
+          const msg = m.messages[idx];
           if (!msg.message || msg.key.remoteJid === "status@broadcast")
             continue;
 
+          const rawContent = extractMessageContent(msg.message);
+          if (!rawContent) continue;
+
+          const contentType = getContentType(rawContent);
           const remoteJid = msg.key.remoteJid;
-          const fromMe = msg.key.fromMe;
-          const id = msg.key.id;
+          const fromMe = msg.key.fromMe || false;
+          const id = msg.key.id || `MSG_${Date.now()}_${idx}`;
 
-          const text =
-            msg.message.conversation ||
-            msg.message.extendedTextMessage?.text ||
-            "";
-          if (!text) continue;
+          let mediaType: "text" | "image" | "document" | "sticker" = "text";
+          let text = "";
+          let mediaUrl: string | null = null;
+          let mediaFileName: string | null = null;
+          let mediaMimeType: string | null = null;
 
-          const senderName = msg.pushName || "User";
+          if (contentType === "conversation") {
+            text = rawContent.conversation || "";
+          } else if (contentType === "extendedTextMessage") {
+            text = rawContent.extendedTextMessage?.text || "";
+          } else if (contentType === "imageMessage") {
+            mediaType = "image";
+            text = rawContent.imageMessage?.caption || "";
+            mediaMimeType = rawContent.imageMessage?.mimetype || "image/jpeg";
+          } else if (contentType === "documentMessage") {
+            mediaType = "document";
+            text = rawContent.documentMessage?.caption || "";
+            mediaFileName = rawContent.documentMessage?.fileName || "dokumen";
+            mediaMimeType =
+              rawContent.documentMessage?.mimetype ||
+              "application/octet-stream";
+          } else if (contentType === "stickerMessage") {
+            mediaType = "sticker";
+            mediaMimeType = "image/webp";
+          } else {
+            // Audio, Video, dsb dilewati sesuai instruksi
+            continue;
+          }
 
+          // Unduh dan simpan media jika berupa image, sticker, atau document
+          if (mediaType !== "text") {
+            try {
+              const buffer = (await downloadMediaMessage(
+                msg,
+                "buffer",
+                {},
+                {
+                  logger: pino({ level: "silent" }),
+                  reuploadRequest: this.sock?.updateMediaMessage,
+                },
+              )) as Buffer;
+
+              if (buffer) {
+                let ext = "bin";
+                if (mediaType === "image") ext = "jpg";
+                else if (mediaType === "sticker") ext = "webp";
+                else if (mediaType === "document") {
+                  ext = mediaFileName?.split(".").pop() || "pdf";
+                }
+
+                const filename = `${id}.${ext}`;
+                const savePath = path.join(this.mediaDir, filename);
+                fs.writeFileSync(savePath, buffer);
+                mediaUrl = `/api/whatsapp/media/${filename}`;
+              }
+            } catch (dlErr) {
+              console.warn(`[WA MEDIA] Gagal mengunduh media ${id}:`, dlErr);
+            }
+          }
+
+          const baseTimestampMs =
+            (msg.messageTimestamp || Math.floor(Date.now() / 1000)) * 1000;
+          const preciseTimestamp = new Date(
+            baseTimestampMs + idx,
+          ).toISOString();
+
+          // Objek pesan sementara (tanpa INSERT database)
           const messageData = {
-            id: id,
-            companyId: "DEFAULT",
-            remoteJid: remoteJid,
+            id,
+            remoteJid,
             senderJid: fromMe ? this.sock.user?.id || remoteJid : remoteJid,
-            senderName: fromMe ? "Saya" : senderName,
-            text: text,
-            fromMe: fromMe,
-            timestamp: new Date(
-              (msg.messageTimestamp || Math.floor(Date.now() / 1000)) * 1000,
-            ),
+            senderName: fromMe ? "Saya" : msg.pushName || "Pengirim",
+            text,
+            fromMe,
+            mediaType,
+            mediaUrl,
+            mediaFileName,
+            mediaMimeType,
+            timestamp: preciseTimestamp,
           };
 
-          try {
-            await db
-              .insert(waMessages)
-              .values(messageData)
-              .onConflictDoNothing();
-            if (this.io) {
-              this.io.emit("WA_NEW_MESSAGE", messageData);
-            }
-          } catch (err) {
-            console.error("[WA DB Error]:", err);
+          // Broadcast realtime ke client via Socket.IO
+          if (this.io) {
+            this.io.emit("WA_NEW_MESSAGE", messageData);
           }
         }
       });

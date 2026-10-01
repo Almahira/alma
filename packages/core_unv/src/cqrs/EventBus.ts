@@ -99,27 +99,25 @@ export class EventBus {
 
   /**
    * =========================================================================
-   * PILAR 1 & 2: PEMBERSIHAN PINTAR & PENYELARASAN 100% IDENTIK DENGAN SERVER
+   * BROADCAST RE-SYNC RESMI: PEMBERSIHAN BERSIH TOTAL & SNAPSHOT FISIK 1:1
    * =========================================================================
-   * Aman: Menjaga identitas perangkat, token lisensi, dan konfigurasi mesin.
-   * Hanya membuang event lokal usang lalu menarik data sah dari server.
+   * Dijalankan pada waktu non-operasional saat Admin Pusat memicu Broadcast Re-Sync.
    */
   public static async executeSafeLocalResync(): Promise<void> {
     console.log(
-      "[RESYNC ENGINE] Memulai penyelarasan bersih total dengan server...",
+      "[RESYNC ENGINE] Memulai penyelarasan bersih total non-operasional dengan server...",
     );
     const rxdb = globalLedger.getRxDatabase();
     if (!rxdb) return;
+
     try {
-      // 1. Bersihkan antrean Inbox & Outbox lama secara instan (1 batch transaction)
+      // 1. PEMBERSIHAN DATA LOKAL TOTAL (Wajib Bersih)
       if (rxdb.collections.inbox) {
         await rxdb.collections.inbox.find().remove();
       }
       if (rxdb.collections.outbox) {
         await rxdb.collections.outbox.find().remove();
       }
-
-      // 2. Bersihkan snapshots & events lokal usang secara instan
       if (rxdb.collections.snapshots) {
         await rxdb.collections.snapshots.find().remove();
       }
@@ -127,12 +125,12 @@ export class EventBus {
         await rxdb.collections.events.find().remove();
       }
 
-      // 3. KUNCI ANTI-KORUP: Reset memori sequence & hash chain di RAM
+      // 2. RESET SEQUENCE & HASH CHAIN RAM KE 0
       globalLedger.resetMemoryChain();
       localStorage.removeItem("__unv_cursor_system");
       localStorage.removeItem("__unv_cursor_tx");
 
-      // 4. Perbarui stempel epoch lokal agar tidak memicu reload ganda saat boot
+      // 3. AMBIL DAN SIMPAN STEMPEL EPOCH TERBARU DARI SERVER
       try {
         const { getApiUrl } = await import("../config/env");
         const epochRes = await fetch(
@@ -146,21 +144,30 @@ export class EventBus {
         }
       } catch {}
 
-      // 5. Kosongkan state tampilan UI
+      // 4. KOSONGKAN SELURUH STATE TAMPILAN MEMORI LOKAL
       globalRegistry.hardReset();
 
-      // 6. Tarik data segar dari Server (Master Data & Transaksi)
-      await globalLedger.syncInitial();
+      // 5. WAJIB GUNAKAN SNAPSHOT FISIK AGAR 1:1 DATANYA CLIENT VS SERVER
+      console.log(
+        "[RESYNC ENGINE] Mengunduh Snapshot Fisik Ground Truth dari PostgreSQL...",
+      );
+      const snapshotLoaded = await SnapshotEngine.syncFromServer();
+      if (!snapshotLoaded) {
+        console.warn(
+          "[RESYNC ENGINE] Gagal memuat snapshot server, menjalankan fallback syncInitial...",
+        );
+        await globalLedger.syncInitial();
+      }
 
-      // 7. Putar ulang proyeksi dari sequence 1 yang sah
+      // 6. PASTIKAN SELURUH READ MODEL SUDAH SESUAI DENGAN DATA FISIK
       await this.rebuildState();
 
       console.log(
-        "[RESYNC ENGINE] Penyelarasan sukses 100%. Database lokal identik dengan server!",
+        "[RESYNC ENGINE] SUKSES: Database lokal bersih 100% dan identik 1:1 dengan server pusat!",
       );
       notifyStateUpdated();
 
-      // 8. PEMBERSIHAN SESI USER & LEMPAR KE HALAMAN LOGIN
+      // 7. PEMBERSIHAN SESI USER & RELOAD WAJIB KE HALAMAN LOGIN
       this.clearUserSession();
     } catch (error) {
       console.error("[RESYNC ENGINE] Gagal melakukan safe resync:", error);
@@ -172,25 +179,28 @@ export class EventBus {
    * =========================================================================
    * PEMBERSIHAN SESI USER TERARAH (TARGETED & NON-DESTRUCTIVE)
    * =========================================================================
-   * Menghapus sesi user aktif agar aplikasi kembali ke halaman login.
-   * Tetap MELINDUNGI:
+   * Menghapus sesi login kasir/admin agar kembali bersih ke halaman login.
+   * KETAT MELINDUNGI KREDENSIAL PERANGKAT (Mencegah terlempar ke Setup Wizard):
    *  - __unv_deviceToken      (Identitas mesin di server)
-   *  - __unv_nodeId           (ID node perangkat)
+   *  - __unv_nodeId           (ID node perangkat unik)
    *  - __unv_secretKey        (Kunci privat kriptografi Ed25519)
-   *  - __unv_license_tier     (Paket lisensi)
-   *  - __unv_license_token    (Kunci lisensi sah Ed25519)
-   *  - __unv_allowed_modules  (Daftar modul yang diaktifkan)
-   *  - __unv_companyId/regionId/outletId (Hierarki spasial mesin)
+   *  - __unv_license_tier     (Paket lisensi resmi)
+   *  - __unv_license_token    (Token lisensi sah)
+   *  - __unv_allowed_modules  (Daftar modul yang aktif)
+   *  - __unv_companyId        (Perusahaan terdaftar)
+   *  - __unv_regionId         (Wilayah terdaftar)
+   *  - __unv_outletId         (Cabang terdaftar)
+   *  - __unv_sync_epoch       (Stempel sinkronisasi server)
    */
   private static clearUserSession(): void {
     if (typeof window === "undefined") return;
     try {
-      // 1. Hapus kredensial sesi user spesifik ALMA
+      // 1. Hapus kredensial sesi user aktif
       localStorage.removeItem("__unv_activeUser");
       localStorage.removeItem("__unv_user_allowed_outlets");
       localStorage.removeItem("__unv_recent_logins");
 
-      // 2. Bersihkan token generik dari localStorage & sessionStorage
+      // 2. Bersihkan token sesi generik
       const GENERIC_SESSION_KEYS = [
         "token",
         "authToken",
@@ -207,10 +217,10 @@ export class EventBus {
       // 3. Segarkan cache RAM sesi
       RuntimeSession.refresh();
       console.log(
-        "[RESYNC ENGINE] Sesi user dibersihkan. Memaksa kembali ke halaman login...",
+        "[RESYNC ENGINE] Sesi user dibersihkan. Memaksa reload ke halaman login...",
       );
 
-      // 4. Arahkan URL ke rute utama dan pastikan aplikasi reload bersih
+      // 4. STANDAR: Reload wajib ke halaman login utama (/)
       if (window.location.pathname === "/") {
         window.location.reload();
       } else {
@@ -233,11 +243,10 @@ if (typeof window !== "undefined") {
     try {
       const serverEpoch = e.detail?.epoch;
       console.log(
-        `[OTA SINKRON] Menerima instruksi reset masal seketika (Epoch: ${serverEpoch || "N/A"})...`,
+        `[OTA SINKRON] Menerima instruksi reset masal non-operasional (Epoch: ${serverEpoch || "N/A"})...`,
       );
 
-      // Simpan stempel epoch TERLEBIH DAHULU sebelum resync & reload
-      // agar saat reload tidak terjadi resync ganda
+      // Simpan stempel epoch terlebih dahulu sebelum proses resync
       if (serverEpoch) {
         localStorage.setItem("__unv_sync_epoch", String(serverEpoch));
       }

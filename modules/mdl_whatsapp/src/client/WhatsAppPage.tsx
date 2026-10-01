@@ -27,9 +27,6 @@ import { UniversalCombobox } from "../../../../apps/client_unv/src/shared-ui/Uni
 import { getApiUrl } from "../../../../packages/core_unv/src/config/env";
 import { ulid } from "ulidx";
 
-// =========================================================================
-// HELPER: SANITASI ANGKA PINTAR (Mendukung Titik & Koma Desimal)
-// =========================================================================
 export function parseSmartNumber(val: string | number): number {
   if (typeof val === "number") return isNaN(val) ? 0 : val;
   if (!val) return 0;
@@ -49,9 +46,6 @@ export function parseSmartNumber(val: string | number): number {
   return isNaN(parsed) ? 0 : parsed;
 }
 
-// =========================================================================
-// HELPER: PARSER TANGGAL FLEKSIBEL INDONESIA
-// =========================================================================
 function parseFlexibleDate(text: string): string | null {
   if (!text) return null;
   const monthMap: Record<string, string> = {
@@ -110,9 +104,6 @@ function parseFlexibleDate(text: string): string | null {
   return null;
 }
 
-// =========================================================================
-// HELPER: LEVENSHTEIN DISTANCE
-// =========================================================================
 function similarity(s1: string, s2: string): number {
   if (!s1 || !s2) return 0;
   const str1 = String(s1).toLowerCase().trim();
@@ -148,9 +139,6 @@ export interface ParsedLineItem {
   rawUnit: string;
 }
 
-// =========================================================================
-// KOMPONEN ROW KERANJANG
-// =========================================================================
 const CartItemRow: React.FC<{
   item: {
     id: string;
@@ -253,9 +241,6 @@ const CartItemRow: React.FC<{
   );
 };
 
-// =========================================================================
-// KOMPONEN UTAMA
-// =========================================================================
 export function WhatsAppPage() {
   const { products, uoms } = useItemStore();
   const { vendors } = useVendorStore();
@@ -322,7 +307,6 @@ export function WhatsAppPage() {
 
   const [isSaving, setIsSaving] = useState(false);
 
-  // 1. Ambil Kamus Alias DB
   const fetchAliases = async () => {
     try {
       const res = await fetch(
@@ -354,7 +338,6 @@ export function WhatsAppPage() {
     fetchAliases();
   }, [localCompanyId]);
 
-  // 2. Parser Multi-Pesan
   const { parsedLines, detectedDate, detectedOutlet } = useMemo(() => {
     if (!importedMessages || importedMessages.length === 0) {
       return { parsedLines: [], detectedDate: null, detectedOutlet: null };
@@ -365,22 +348,29 @@ export function WhatsAppPage() {
     let foundOutletCandidate: string | null = null;
 
     importedMessages.forEach((msg, msgIdx) => {
-      const textLines = (msg.text || "").split("\n");
+      const normalizedText = (msg.text || "")
+        .replace(/\r\n/g, "\n")
+        .replace(/\r/g, "\n");
+      const textLines = normalizedText.split("\n");
 
-      for (let rawLine of textLines) {
-        const line = rawLine.trim();
-        if (!line || line.startsWith("#")) continue;
+      let pendingItemName: string | null = null;
+
+      for (let i = 0; i < textLines.length; i++) {
+        const rawLine = textLines[i].replace(/[ \t]+/g, " ").trim();
+        if (!rawLine || rawLine.startsWith("#")) {
+          continue;
+        }
 
         if (
-          line.includes("@") &&
-          line.length < 50 &&
-          !line.match(/\d+\s*(kg|ekor|pcs|pack|dus)/i)
+          rawLine.includes("@") &&
+          rawLine.length < 50 &&
+          !rawLine.match(/\d+\s*(kg|ekor|pcs|pack|dus|btg|ikat)/i)
         ) {
           continue;
         }
 
         if (!foundDate) {
-          const parsedD = parseFlexibleDate(line);
+          const parsedD = parseFlexibleDate(rawLine);
           if (parsedD) {
             foundDate = parsedD;
             continue;
@@ -388,12 +378,13 @@ export function WhatsAppPage() {
         }
 
         if (!foundOutletCandidate) {
-          const outletMatch = line.match(
+          const outletMatch = rawLine.match(
             /^(?:po|orderan|tambahan|pesanan)\s+([a-zA-Z0-9\s\(\)]+)/i,
           );
           if (outletMatch) {
             foundOutletCandidate = outletMatch[1]
               .replace(/\(.*?\)/g, "")
+              .replace(/[ \t]+/g, " ")
               .trim()
               .toUpperCase();
             continue;
@@ -401,29 +392,54 @@ export function WhatsAppPage() {
         }
 
         const itemRegex =
-          /^[-*•\d\.\)\s]*([a-zA-Z0-9\s]+?)\s*[:=]?\s*([\d,\.]+)\s*([a-zA-Z]*)$/;
-        const m = line.match(itemRegex);
-        if (m) {
-          const [, rawName, rawQty, rawUnit] = m;
-          if (rawName && rawQty) {
-            const cleanName = rawName.trim().toUpperCase();
-            if (
-              cleanName.startsWith("PO ") ||
-              cleanName.startsWith("ORDERAN ") ||
-              cleanName.startsWith("TAMBAHAN ")
-            ) {
-              continue;
-            }
-            if (parseFlexibleDate(cleanName)) continue;
+          /^[-*•\d\.\)\s]*([a-zA-Z0-9\s/]+?)\s*[:=–-]?\s*([\d,\.]+)\s*([a-zA-Z]*)$/;
+        const m = rawLine.match(itemRegex);
 
+        if (m && m[1] && m[2]) {
+          const cleanName = m[1]
+            .replace(/[ \t]+/g, " ")
+            .trim()
+            .toUpperCase();
+          if (
+            !cleanName.startsWith("PO ") &&
+            !cleanName.startsWith("ORDERAN ") &&
+            !parseFlexibleDate(cleanName)
+          ) {
             linesFound.push({
               id: `line_${msgIdx}_${linesFound.length}_${Date.now()}`,
-              raw: line,
+              raw: rawLine,
               rawItemName: cleanName,
-              rawQty: parseSmartNumber(rawQty) || 1,
-              rawUnit: (rawUnit || "").trim().toLowerCase(),
+              rawQty: parseSmartNumber(m[2]) || 1,
+              rawUnit: (m[3] || "").trim().toLowerCase(),
             });
+            pendingItemName = null;
+            continue;
           }
+        }
+
+        const qtyOnlyRegex = /^[:=–-]?\s*([\d,\.]+)\s*([a-zA-Z]*)$/;
+        const qtyMatch = rawLine.match(qtyOnlyRegex);
+        if (qtyMatch && pendingItemName) {
+          linesFound.push({
+            id: `line_${msgIdx}_${linesFound.length}_${Date.now()}`,
+            raw: `${pendingItemName} ${rawLine}`,
+            rawItemName: pendingItemName,
+            rawQty: parseSmartNumber(qtyMatch[1]) || 1,
+            rawUnit: (qtyMatch[2] || "").trim().toLowerCase(),
+          });
+          pendingItemName = null;
+          continue;
+        }
+
+        if (
+          /^[a-zA-Z\s]+$/.test(rawLine) &&
+          rawLine.length > 2 &&
+          rawLine.length < 50
+        ) {
+          pendingItemName = rawLine
+            .replace(/[ \t]+/g, " ")
+            .trim()
+            .toUpperCase();
         }
       }
     });
@@ -435,7 +451,6 @@ export function WhatsAppPage() {
     };
   }, [importedMessages]);
 
-  // 3. Auto-linking Item
   useEffect(() => {
     if (parsedLines.length === 0) return;
 
@@ -467,7 +482,6 @@ export function WhatsAppPage() {
     setLinks(newLinks);
   }, [parsedLines, dbItemAliases, products]);
 
-  // 4. Sinkronisasi Tanggal & Outlet
   useEffect(() => {
     if (detectedDate) {
       setHeader((prev) => ({
@@ -632,7 +646,6 @@ export function WhatsAppPage() {
 
   const currentRegion = regions.find((r) => r.id === localRegionId);
 
-  // Keranjang Belanja Live
   const cart = useMemo(() => {
     return Object.entries(links)
       .map(([lineId, productId]) => {
@@ -788,7 +801,28 @@ export function WhatsAppPage() {
     }
   };
 
-  const handleSubmitReceiving = async (e?: React.FormEvent) => {
+  const resetWorkspaceState = () => {
+    clearImport();
+    setLinks({});
+    setEdits({});
+    setLinkingLineId(null);
+    setSearchCatalog("");
+    setDetectedOutletCandidate(null);
+    setIsLinkingOutletManual(false);
+    setHeader({
+      companyId: localCompanyId,
+      regionId: localRegionId,
+      outletId: isOutletMachine ? localOutletId : "",
+      vendorId: "",
+      invoiceNumber: "",
+      date: new Date().toISOString().split("T")[0],
+      isTempo: true,
+      dueDate: new Date(Date.now() + 7 * 864e5).toISOString().split("T")[0],
+      paymentMethod: defaultPaymentMethod,
+    });
+  };
+
+  const handleSaveReceiving = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
 
     if (cart.length === 0) {
@@ -875,7 +909,7 @@ export function WhatsAppPage() {
       });
 
       if (messageIds.length > 0) {
-        await fetch(getApiUrl("/api/whatsapp/mark-parsed"), {
+        await fetch(getApiUrl("/api/whatsapp/messages/link-receiving"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -883,15 +917,22 @@ export function WhatsAppPage() {
             receivingId: transactionId,
           }),
         });
+
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent("UNV_WA_MESSAGES_PROCESSED", {
+              detail: { messageIds },
+            }),
+          );
+        }
       }
 
       sysToast.success(
         "Berhasil Disimpan",
         `Dokumen ${activeDocType} berhasil diterbitkan.`,
       );
-      clearImport();
-      setLinks({});
-      setEdits({});
+
+      resetWorkspaceState();
     } catch (err: any) {
       console.error("[RECEIVING SUBMIT ERROR]:", err);
       sysToast.error(
@@ -910,11 +951,7 @@ export function WhatsAppPage() {
 
   return (
     <div className="flex h-full w-full bg-slate-900 text-white font-sans overflow-hidden">
-      {/* ===================================================================
-          PANEL KIRI (32%) — PESAN WHATSAPP & TOMBOL AKSI STICKY
-      =================================================================== */}
       <div className="w-[32%] min-w-[320px] max-w-105 border-r border-slate-700 flex flex-col bg-slate-950 h-full min-h-0 overflow-hidden shrink-0">
-        {/* Header Panel Kiri (Fixed) */}
         <div className="px-3 py-2 bg-slate-800 border-b border-slate-700 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2 font-black text-emerald-400 text-xs tracking-wide">
             <MessageSquare className="w-4 h-4" />
@@ -925,7 +962,6 @@ export function WhatsAppPage() {
           </span>
         </div>
 
-        {/* Body Panel Kiri (No Scroll — Only Inner List Scrolls) */}
         <div className="flex-1 min-h-0 p-3 flex flex-col">
           {importedMessages.length === 0 ? (
             <div className="p-6 text-center text-slate-500 italic text-xs border-2 border-dashed border-slate-800 rounded-xl">
@@ -938,7 +974,6 @@ export function WhatsAppPage() {
             </div>
           ) : (
             <div className="bg-[#202c33] rounded-xl shadow-xl border border-white/5 flex flex-col flex-1 min-h-0 overflow-hidden">
-              {/* Header Pengirim (Fixed) */}
               <div className="px-3 py-2 border-b border-white/10 flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-2">
                   <div className="w-6 h-6 rounded-full bg-emerald-600 flex items-center justify-center text-[10px] font-black">
@@ -958,7 +993,6 @@ export function WhatsAppPage() {
                 </span>
               </div>
 
-              {/* Blok Tanggal & Cabang Terdeteksi (Fixed) */}
               <div className="p-2.5 border-b border-white/10 shrink-0">
                 <div className="bg-slate-900/90 p-2.5 rounded-lg border border-white/5 text-[11px] space-y-2">
                   <div>
@@ -1058,12 +1092,10 @@ export function WhatsAppPage() {
                 </div>
               </div>
 
-              {/* Label Daftar Baris Pesanan (Fixed) */}
               <div className="px-3 py-1.5 text-[10px] font-black text-slate-400 uppercase tracking-wider border-b border-white/5 shrink-0">
                 Daftar Baris Pesanan:
               </div>
 
-              {/* List Item (Scrollable) */}
               <div className="flex-1 min-h-0 overflow-y-auto p-2.5 space-y-1.5 custom-scrollbar">
                 {parsedLines.map((line) => {
                   const linkedProductId = links[line.id];
@@ -1169,12 +1201,11 @@ export function WhatsAppPage() {
           )}
         </div>
 
-        {/* Action Bar Sticky Bawah Panel Kiri (Fixed) */}
         <div className="p-3 bg-slate-900 border-t border-slate-800 shrink-0">
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => handleSubmitReceiving()}
+              onClick={() => handleSaveReceiving()}
               disabled={isSaving || cart.length === 0}
               className="flex-1 py-2.5 px-4 text-xs font-black text-white bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 rounded-xl shadow-lg flex items-center justify-center gap-2 cursor-pointer transition active:scale-[0.99]"
             >
@@ -1192,9 +1223,7 @@ export function WhatsAppPage() {
             <button
               type="button"
               onClick={() => {
-                clearImport();
-                setLinks({});
-                setEdits({});
+                resetWorkspaceState();
                 sysToast.info(
                   "Dikosongkan",
                   "Data kloning berhasil dibersihkan.",
@@ -1208,11 +1237,7 @@ export function WhatsAppPage() {
         </div>
       </div>
 
-      {/* ===================================================================
-          PANEL KANAN (68%) — FORM RECEIVING 1:1 DENGAN CART DESIMAL
-      =================================================================== */}
       <div className="flex-1 flex flex-col bg-slate-900 h-full min-h-0 overflow-hidden">
-        {/* Header Tabs Dinamis (Thinner Padding) */}
         <div className="px-3 py-2 bg-slate-800 border-b border-slate-700 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
             <Receipt className="w-4 h-4 text-orange-500" />
@@ -1298,9 +1323,7 @@ export function WhatsAppPage() {
           </div>
         </div>
 
-        {/* Scrollable Body Form Kanan */}
         <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 custom-scrollbar">
-          {/* HEADER FORM */}
           <div className="bg-slate-800/60 p-3.5 rounded-xl border border-slate-700">
             {isInternalB2B ? (
               <div className="grid grid-cols-2 gap-3 items-start">
@@ -1484,7 +1507,6 @@ export function WhatsAppPage() {
             )}
           </div>
 
-          {/* TABEL KERANJANG ITEM — FIXED HEIGHT, INNER SCROLL, STICKY GRAND TOTAL */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <div className="text-blue-400 font-black text-xs uppercase flex items-center gap-2 tracking-wide">
@@ -1497,7 +1519,6 @@ export function WhatsAppPage() {
             </div>
 
             <div className="border border-slate-700 rounded-xl overflow-hidden bg-slate-950 flex flex-col max-h-105">
-              {/* Scrollable Area (Header Tabel + Body) */}
               <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
                 <table className="w-full text-left border-collapse">
                   <thead className="sticky top-0 z-10">
@@ -1546,7 +1567,6 @@ export function WhatsAppPage() {
                 </table>
               </div>
 
-              {/* FOOTER GRAND TOTAL (Fixed, Compact) */}
               <div className="bg-slate-800 px-3 py-2 border-t border-slate-700 flex justify-between items-center shrink-0">
                 <span className="font-bold text-slate-400 text-[10px] tracking-wider uppercase">
                   Grand Total Pembelian

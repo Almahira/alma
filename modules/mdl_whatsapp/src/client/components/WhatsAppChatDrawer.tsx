@@ -1,4 +1,3 @@
-// File: modules/mdl_whatsapp/src/client/components/WhatsAppChatDrawer.tsx
 import React, { useState, useEffect, useRef } from "react";
 import {
   Send,
@@ -11,15 +10,22 @@ import {
   Truck,
   Building2,
   MessageSquare,
+  Trash2,
 } from "lucide-react";
 import { getApiUrl } from "../../../../../packages/core_unv/src/config/env";
 import { useNavigate } from "react-router-dom";
 import { sysToast } from "../../../../../apps/client_unv/src/shared-ui/useToastStore";
 import { useWhatsAppImportStore } from "../useWhatsAppImportStore";
+import {
+  pruneWhatsAppLocalStorage,
+  getStoredMessages,
+  saveStoredMessage,
+  getStoredInbox,
+} from "../utils/waStorage";
 
 export const WhatsAppChatDrawer: React.FC<{
   isOpen: boolean;
-  isInline?: boolean; // Jika true, render berdampingan. Jika false, render melayang (absolute/fixed)
+  isInline?: boolean;
   onClose: () => void;
 }> = ({ isOpen, isInline, onClose }) => {
   const [status, setStatus] = useState<any>({ status: "DISCONNECTED" });
@@ -29,7 +35,6 @@ export const WhatsAppChatDrawer: React.FC<{
   const [inputText, setInputText] = useState("");
   const [isRequesting, setIsRequesting] = useState(false);
 
-  // State untuk Keranjang PO (Checkbox)
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(
     new Set(),
   );
@@ -38,43 +43,29 @@ export const WhatsAppChatDrawer: React.FC<{
   const chatEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
 
-  // State Paginasi Infinite Scroll
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
 
-  // Deteksi Tipe Mesin (Outlet Cabang vs Gudang Region)
   const localRegionId = localStorage.getItem("__unv_regionId") || "";
   const localOutletId = localStorage.getItem("__unv_outletId") || "";
   const isOutletMachine = Boolean(localOutletId);
 
   const fetchInbox = () => {
-    fetch(getApiUrl("/api/whatsapp/inbox"))
-      .then((res) => res.json())
-      .then((data) => setInbox(data))
-      .catch(() => {});
+    setInbox(getStoredInbox());
   };
 
-  // 1. Ambil 30 pesan terbaru saat kontak dipilih
   const fetchMessages = () => {
     if (!selectedJid) return;
-    setHasMore(true);
-    fetch(getApiUrl(`/api/whatsapp/messages?jid=${selectedJid}&limit=30`))
-      .then((res) => res.json())
-      .then((data) => {
-        if (Array.isArray(data)) {
-          setMessages(data);
-          if (data.length < 30) setHasMore(false);
-          setTimeout(() => chatEndRef.current?.scrollIntoView(), 100);
-        }
-      })
-      .catch(() => {});
+    setHasMore(false);
+    const localMsgs = getStoredMessages(selectedJid);
+    setMessages(localMsgs);
+    setTimeout(() => chatEndRef.current?.scrollIntoView(), 100);
   };
 
   useEffect(() => {
     fetchMessages();
   }, [selectedJid]);
 
-  // 2. Muat pesan lebih lama saat user scroll mendekati bagian atas (Infinite Scroll)
   const loadOlderMessages = async () => {
     if (!selectedJid || isLoadingMore || !hasMore || messages.length === 0)
       return;
@@ -103,7 +94,6 @@ export const WhatsAppChatDrawer: React.FC<{
           if (olderData.length < 30) setHasMore(false);
           setMessages((prev) => [...olderData, ...prev]);
 
-          // Pertahankan posisi scroll agar tampilan tidak meloncat
           requestAnimationFrame(() => {
             if (container) {
               container.scrollTop = container.scrollHeight - prevScrollHeight;
@@ -146,25 +136,53 @@ export const WhatsAppChatDrawer: React.FC<{
     };
     checkStatus();
 
-    const handleStatus = (e: any) => setStatus(e.detail);
+    const handleStatus = (e: any) => {
+      const newStatus = e.detail;
+      setStatus(newStatus);
+
+      if (newStatus?.status === "DISCONNECTED") {
+        pruneWhatsAppLocalStorage();
+        setInbox([]);
+        setMessages([]);
+        setSelectedJid("");
+      }
+    };
+
     const handleNewMsg = (e: any) => {
       const msg = e.detail;
+      saveStoredMessage(msg);
       fetchInbox();
+
       if (
         msg.remoteJid === selectedJid ||
         msg.remoteJid.includes(selectedJid)
       ) {
         setMessages((prev) => {
+          // 1. Jika ID pesan resmi ini sudah ada di state, abaikan
           if (prev.some((m) => m.id === msg.id)) return prev;
+
+          // 2. Jika pesan dari diri kita sendiri (fromMe), cari pesan TEMP_ yang cocok dan GANTIKAN
+          if (msg.fromMe) {
+            const tempIndex = prev.findIndex(
+              (m) => m.id.startsWith("TEMP_") && m.text === msg.text,
+            );
+            if (tempIndex !== -1) {
+              const updated = [...prev];
+              updated[tempIndex] = msg; // Timpa pesan TEMP dengan pesan resmi WhatsApp
+              return updated;
+            }
+          }
+
+          // 3. Pesan baru dari lawan bicara
           return [...prev, msg];
         });
+
         setTimeout(
           () => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }),
           100,
         );
       }
     };
-
     window.addEventListener("UNV_WA_STATUS", handleStatus);
     window.addEventListener("UNV_WA_MESSAGE", handleNewMsg);
 
@@ -175,24 +193,50 @@ export const WhatsAppChatDrawer: React.FC<{
     };
   }, [isOpen, selectedJid]);
 
-  const handleSend = async (e: React.FormEvent) => {
+  useEffect(() => {
+    const handleMessagesProcessed = (e: any) => {
+      const processedIds: string[] = e.detail?.messageIds || [];
+      if (processedIds.length > 0) {
+        setMessages((prev) =>
+          prev.map((m) =>
+            processedIds.includes(m.id)
+              ? { ...m, isPoParsed: true, is_po_parsed: true }
+              : m,
+          ),
+        );
+      }
+    };
+
+    window.addEventListener(
+      "UNV_WA_MESSAGES_PROCESSED",
+      handleMessagesProcessed,
+    );
+    return () => {
+      window.removeEventListener(
+        "UNV_WA_MESSAGES_PROCESSED",
+        handleMessagesProcessed,
+      );
+    };
+  }, []);
+
+  const handleSend = async (e: React.FormEvent | React.KeyboardEvent) => {
     e.preventDefault();
     if (!inputText.trim() || !selectedJid) return;
     const textToSend = inputText.trim();
     setInputText("");
 
     const tempId = `TEMP_${Date.now()}`;
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: tempId,
-        remoteJid: selectedJid,
-        senderName: "Saya",
-        text: textToSend,
-        fromMe: true,
-        timestamp: new Date().toISOString(),
-      },
-    ]);
+    const outgoingMsg = {
+      id: tempId,
+      remoteJid: selectedJid,
+      senderName: "Saya",
+      text: textToSend,
+      fromMe: true,
+      timestamp: new Date().toISOString(),
+    };
+
+    setMessages((prev) => [...prev, outgoingMsg]);
+
     setTimeout(
       () => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }),
       50,
@@ -204,13 +248,17 @@ export const WhatsAppChatDrawer: React.FC<{
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ targetJid: selectedJid, text: textToSend }),
       });
-      fetchInbox();
     } catch (err) {
       console.error("Gagal kirim pesan:", err);
     }
   };
 
   const handleRequestQR = () => {
+    pruneWhatsAppLocalStorage();
+    setInbox([]);
+    setMessages([]);
+    setSelectedJid("");
+
     setIsRequesting(true);
     fetch(getApiUrl("/api/whatsapp/connect"), { method: "POST" }).catch(() =>
       setIsRequesting(false),
@@ -226,12 +274,10 @@ export const WhatsAppChatDrawer: React.FC<{
     });
   };
 
-  // Kloning isi teks pesan terpilih ke WhatsAppPage tanpa menutup Drawer
   const handleImportToReceiving = () => {
     const selectedMsgs = messages.filter((m) => selectedMessageIds.has(m.id));
     if (selectedMsgs.length === 0) return;
 
-    // 1. Simpan pesan terpilih ke store kloning
     useWhatsAppImportStore.getState().setImportPayload({
       messageIds: Array.from(selectedMessageIds),
       messages: selectedMsgs,
@@ -244,11 +290,46 @@ export const WhatsAppChatDrawer: React.FC<{
       `${selectedMsgs.length} pesan PO berhasil disalin ke lembar kerja Receiving.`,
     );
 
-    // 2. Navigasi ke halaman utama integrasi WhatsApp
     navigate("/integrasi/whatsapp");
 
-    // 3. Reset centangan di drawer (CATATAN: Drawer TETAP TERBUKA, onClose() TIDAK dipanggil)
     setSelectedMessageIds(new Set());
+  };
+
+  const handleClearChatHistory = async () => {
+    if (!selectedJid) return;
+    if (
+      !window.confirm(
+        "Apakah Anda yakin ingin membersihkan seluruh riwayat chat kontak ini?",
+      )
+    ) {
+      return;
+    }
+
+    try {
+      // 1. Bersihkan dari Local Storage klien
+      const raw = localStorage.getItem("unv_wa_messages");
+      if (raw) {
+        const all = JSON.parse(raw);
+        delete all[selectedJid];
+        localStorage.setItem("unv_wa_messages", JSON.stringify(all));
+      }
+
+      // 2. Kosongkan state di antarmuka
+      setMessages([]);
+      setSelectedMessageIds(new Set());
+      fetchInbox();
+
+      // 3. Fallback request ke server
+      await fetch(getApiUrl("/api/whatsapp/messages/clear"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jid: selectedJid, clearAll: true }),
+      }).catch(() => {});
+
+      sysToast.success("Sukses", "Riwayat chat berhasil dibersihkan.");
+    } catch (err: any) {
+      sysToast.error("Gagal", err.message || "Gagal membersihkan chat.");
+    }
   };
 
   if (!isOpen) return null;
@@ -259,7 +340,6 @@ export const WhatsAppChatDrawer: React.FC<{
         isInline ? "w-100 shrink-0" : "fixed top-16 bottom-0 right-0 w-100"
       }`}
     >
-      {/* HEADER DRAWER */}
       <div className="flex items-center justify-between px-4 py-3 bg-(--surface-hover) border-b border-(--border-color) shrink-0">
         <div className="flex items-center gap-2 text-(--text-primary) font-black text-sm">
           <MessageSquare className="w-4 h-4 text-emerald-500" />
@@ -273,7 +353,6 @@ export const WhatsAppChatDrawer: React.FC<{
         </button>
       </div>
 
-      {/* KONDISI 1: BELUM CONNECT */}
       {status.status !== "CONNECTED" ? (
         <div className="flex-1 flex flex-col items-center justify-center p-6 space-y-6 text-center">
           <h2 className="text-sm font-bold text-(--text-primary)">
@@ -307,9 +386,7 @@ export const WhatsAppChatDrawer: React.FC<{
           </p>
         </div>
       ) : (
-        /* KONDISI 2: CONNECTED */
         <div className="flex-1 flex flex-col overflow-hidden relative">
-          {/* TAMPILAN INBOX (Jika belum pilih chat) */}
           {!selectedJid ? (
             <div className="flex-1 overflow-y-auto custom-scrollbar">
               <div className="px-4 py-2 bg-emerald-500/10 border-b border-emerald-500/20 text-[10px] font-black text-emerald-600 uppercase tracking-wider flex items-center gap-2">
@@ -337,14 +414,12 @@ export const WhatsAppChatDrawer: React.FC<{
               )}
             </div>
           ) : (
-            /* TAMPILAN DALAM CHAT */
             <div className="flex-1 flex flex-col relative min-h-0 overflow-hidden">
-              {/* Header Chat */}
               <div className="px-3 py-2 bg-(--surface-hover) border-b border-(--border-color) flex items-center gap-3 shrink-0">
                 <button
                   onClick={() => {
                     setSelectedJid("");
-                    setSelectedMessageIds(new Set()); // Bersihkan seleksi saat kembali
+                    setSelectedMessageIds(new Set());
                   }}
                   className="p-1.5 rounded-md hover:bg-(--bg-card) text-(--text-secondary) hover:text-(--text-primary) transition cursor-pointer"
                 >
@@ -356,15 +431,22 @@ export const WhatsAppChatDrawer: React.FC<{
                       selectedJid.split("@")[0]}
                   </div>
                 </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={handleClearChatHistory}
+                    title="Bersihkan riwayat chat kontak ini"
+                    className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
 
-              {/* AREA CHAT LIST (INFINITE SCROLL) */}
               <div
                 ref={chatContainerRef}
                 onScroll={handleScroll}
                 className="flex-1 overflow-y-auto min-h-0 p-4 space-y-3 custom-scrollbar"
               >
-                {/* Indikator Loading Pesan Riwayat Lama */}
                 {isLoadingMore && (
                   <div className="flex items-center justify-center py-2 text-[10px] text-emerald-500 font-bold gap-1.5 animate-pulse">
                     <RefreshCw className="w-3 h-3 animate-spin" />
@@ -381,7 +463,6 @@ export const WhatsAppChatDrawer: React.FC<{
                       className={`flex ${m.fromMe ? "justify-end" : "justify-start"} group`}
                     >
                       <div className="flex items-center gap-2 max-w-[85%]">
-                        {/* Area Checkbox PO */}
                         {!m.fromMe && (
                           <div className="shrink-0 w-5 flex justify-center mt-1">
                             {isAlreadyParsed ? (
@@ -407,19 +488,80 @@ export const WhatsAppChatDrawer: React.FC<{
                           </div>
                         )}
 
-                        {/* Bubble Pesan */}
                         <div
-                          className={`p-2.5 text-xs shadow-sm transition-all ${
-                            m.fromMe
-                              ? "bg-emerald-600 text-white rounded-2xl rounded-tr-sm"
-                              : "bg-(--bg-input) border border-(--border-color) text-(--text-primary) rounded-2xl rounded-tl-sm"
+                          className={`text-xs transition-all ${
+                            m.mediaType === "sticker"
+                              ? "bg-transparent border-0 shadow-none p-0"
+                              : `p-2.5 shadow-sm rounded-2xl ${
+                                  m.fromMe
+                                    ? "bg-emerald-600 text-white rounded-tr-sm"
+                                    : "bg-(--bg-input) border border-(--border-color) text-(--text-primary) rounded-tl-sm"
+                                }`
                           } ${isSelected ? "ring-2 ring-orange-500 shadow-[0_0_15px_rgba(244,121,62,0.3)]" : ""}`}
                         >
-                          <p className="whitespace-pre-wrap leading-relaxed">
-                            {m.text}
-                          </p>
+                          {/* GAMBAR */}
+                          {m.mediaType === "image" && m.mediaUrl && (
+                            <div className="mb-1 rounded-lg overflow-hidden border border-black/10 max-w-65">
+                              <img
+                                src={getApiUrl(m.mediaUrl)}
+                                alt="WA Image"
+                                className="w-full h-auto object-cover cursor-pointer hover:opacity-90 transition"
+                                onClick={() =>
+                                  window.open(getApiUrl(m.mediaUrl), "_blank")
+                                }
+                              />
+                            </div>
+                          )}
+
+                          {/* STIKER (Transparan, tanpa background bubble) */}
+                          {m.mediaType === "sticker" && m.mediaUrl && (
+                            <div className="p-1">
+                              <img
+                                src={getApiUrl(m.mediaUrl)}
+                                alt="Sticker"
+                                className="w-28 h-28 object-contain"
+                              />
+                            </div>
+                          )}
+
+                          {/* DOKUMEN */}
+                          {m.mediaType === "document" && m.mediaUrl && (
+                            <a
+                              href={getApiUrl(m.mediaUrl)}
+                              download={m.mediaFileName || "dokumen"}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="flex items-center gap-3 p-2.5 mb-1.5 rounded-lg bg-black/5 hover:bg-black/10 transition border border-black/10"
+                            >
+                              <div className="p-2 rounded bg-rose-500/10 text-rose-600 font-bold text-[10px] uppercase">
+                                {m.mediaFileName?.split(".").pop() || "FILE"}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="text-xs font-semibold truncate text-(--text-primary)">
+                                  {m.mediaFileName || "Unduh Dokumen"}
+                                </div>
+                                <div className="text-[10px] text-(--text-secondary)">
+                                  Klik untuk mengunduh
+                                </div>
+                              </div>
+                            </a>
+                          )}
+
+                          {/* TEKS (Hanya render jika ada teks) */}
+                          {m.text ? (
+                            <p className="whitespace-pre-wrap leading-relaxed">
+                              {m.text}
+                            </p>
+                          ) : null}
+
                           <span
-                            className={`text-[9px] block mt-1 text-right font-mono ${m.fromMe ? "text-emerald-100" : "text-(--text-secondary)"}`}
+                            className={`text-[9px] block mt-1 text-right font-mono ${
+                              m.mediaType === "sticker"
+                                ? "text-(--text-secondary)"
+                                : m.fromMe
+                                  ? "text-emerald-100"
+                                  : "text-(--text-secondary)"
+                            }`}
                           >
                             {new Date(m.timestamp).toLocaleTimeString([], {
                               hour: "2-digit",
@@ -434,7 +576,6 @@ export const WhatsAppChatDrawer: React.FC<{
                 <div ref={chatEndRef} />
               </div>
 
-              {/* ACTION BAR PO TERPILIH (Floating/Sticky) */}
               {selectedMessageIds.size > 0 ? (
                 <div className="absolute bottom-0 left-0 right-0 p-3 bg-(--surface-hover) border-t border-orange-500/50 shadow-[0_-10px_20px_rgba(0,0,0,0.2)] animate-in slide-in-from-bottom-5 backdrop-blur-md">
                   <div className="flex items-center justify-between mb-2.5 px-1">
@@ -457,7 +598,6 @@ export const WhatsAppChatDrawer: React.FC<{
                   </div>
                 </div>
               ) : (
-                /* Form Input Normal */
                 <form
                   onSubmit={handleSend}
                   className="p-3 bg-(--bg-card) border-t border-(--border-color) flex items-end gap-2 shrink-0"
