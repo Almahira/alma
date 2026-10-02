@@ -573,19 +573,17 @@ export const SetupWizard: React.FC<{ onComplete: () => void }> = ({
       if (licenseKey) localStorage.setItem("__unv_license_token", licenseKey);
 
       addLog(
-        `[RAPID RECOVERY] Menarik Master Data & Transaksi 24 Jam Terakhir...`,
+        "[RAPID RECOVERY] Snapshot fisik akan dimuat setelah inisialisasi perangkat.",
       );
-      const pullQuery = new URLSearchParams({
-        deviceId: nodeId,
-        window: "24h",
+      const snapshotSyncSucceeded = await globalLedger.syncInitial({
+        recovery: true,
+        exactCursor: true,
+        requireSnapshot: true,
       });
-      if (data.outletId) pullQuery.append("outletId", data.outletId);
-      const pullRes = await fetch(
-        getApiUrl(`/api/events/pull/system?${pullQuery.toString()}`),
-      );
-      if (pullRes.ok) {
-        const events = await pullRes.json();
-        addLog(`[SYNC] Menerima ${events.length} event instan dari server.`);
+      if (!snapshotSyncSucceeded) {
+        throw new Error(
+          "Snapshot server gagal dimuat. Perangkat belum siap digunakan; silakan ulangi sinkronisasi.",
+        );
       }
 
       addLog(`[READY] Perangkat resmi aktif dan siap melayani transaksi!`);

@@ -14,6 +14,7 @@ import {
 import { DesktopDashboard } from "./desktop_dashboard";
 import { TabDashboard } from "./tab_dashboard";
 import { PhoneDashboard } from "./phone_dashboard";
+import { getCurrentMonthKey } from "../../../../packages/core_unv/src/utils/dateUtils";
 
 export default function ExecutiveDashboard() {
   // 1. Tarik Data Langsung dari In-Memory Projection Store Lokal (Zero HTTP Request)
@@ -41,7 +42,7 @@ export default function ExecutiveDashboard() {
   const activeCompanyId = localStorage.getItem("__unv_companyId") || "";
 
   const [filters, setFilters] = useState<DashboardFilterState>({
-    month: new Date().toISOString().slice(0, 7),
+    month: getCurrentMonthKey(),
     companyId: activeCompanyId,
     regionId: "",
     outletId: "",

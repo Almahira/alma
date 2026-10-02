@@ -21,6 +21,10 @@ import { globalCommandBus } from "../../../../packages/core_unv/src/cqrs/Command
 import { sysToast } from "../../../../apps/client_unv/src/shared-ui/useToastStore";
 import { UniversalCombobox } from "../../../../apps/client_unv/src/shared-ui/UniversalCombobox";
 import { useUniversalModal } from "../../../../apps/client_unv/src/shared-ui/UniversalLayoutSM";
+import {
+  getCurrentMonthDateRange,
+  isDateWithinRange,
+} from "../../../../packages/core_unv/src/utils/dateUtils";
 import { printDistributionReportPdf } from "./features/pdf-warehouse";
 import { exportExcelDistribution } from "./features/excel-warehouse";
 
@@ -40,8 +44,12 @@ export function WarehousePageSM() {
 
   // State Filter & UI
   const [viewStatus, setViewStatus] = useState<"AKTIF" | "ARSIP">("AKTIF");
-  const [dateStart, setDateStart] = useState("");
-  const [dateEnd, setDateEnd] = useState("");
+  const [dateStart, setDateStart] = useState(
+    () => getCurrentMonthDateRange().start,
+  );
+  const [dateEnd, setDateEnd] = useState(
+    () => getCurrentMonthDateRange().end,
+  );
   const [filterDivisionId, setFilterDivisionId] = useState("");
   const [filterOutletId, setFilterOutletId] = useState(""); // Tambahan filter outlet
   const [isFilterOpen, setIsFilterOpen] = useState(false);
@@ -231,10 +239,9 @@ export function WarehousePageSM() {
 
       const matchDivision =
         !filterDivisionId || d.divisionId === filterDivisionId;
-      const matchStart = !dateStart || new Date(d.date) >= new Date(dateStart);
-      const matchEnd = !dateEnd || new Date(d.date) <= new Date(dateEnd);
+      const matchDate = isDateWithinRange(d.date, dateStart, dateEnd);
 
-      return matchStatus && matchDivision && matchStart && matchEnd;
+      return matchStatus && matchDivision && matchDate;
     });
   }, [
     distributions,

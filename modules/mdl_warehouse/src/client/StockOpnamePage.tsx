@@ -28,6 +28,10 @@ import {
   printStockOpnameReportPdf,
 } from "./features/pdf-warehouse";
 import { exportExcelStockOpname } from "./features/excel-warehouse";
+import {
+  getCurrentMonthDateRange,
+  isDateWithinRange,
+} from "../../../../packages/core_unv/src/utils/dateUtils";
 
 // Komponen Input Stok Awal Cepat
 const InitialStockModal: React.FC<{
@@ -206,6 +210,12 @@ export function StockOpnamePage() {
     new Date().toISOString().split("T")[0],
   );
   const [searchTerm, setSearchTerm] = useState("");
+  const [historyDateStart, setHistoryDateStart] = useState(
+    () => getCurrentMonthDateRange().start,
+  );
+  const [historyDateEnd, setHistoryDateEnd] = useState(
+    () => getCurrentMonthDateRange().end,
+  );
   const localCompanyId = localStorage.getItem("__unv_companyId") || "";
   const localRegionId = localStorage.getItem("__unv_regionId") || "";
   const localOutletId = localStorage.getItem("__unv_outletId") || "";
@@ -410,9 +420,16 @@ export function StockOpnamePage() {
         return false;
       if (localCompanyId && o.companyId && o.companyId !== localCompanyId)
         return false;
-      return true;
+      return isDateWithinRange(o.date, historyDateStart, historyDateEnd);
     });
-  }, [opnames, localOutletId, localRegionId, localCompanyId]);
+  }, [
+    opnames,
+    localOutletId,
+    localRegionId,
+    localCompanyId,
+    historyDateStart,
+    historyDateEnd,
+  ]);
 
   // =========================================================================
   // PAGINASI: potong data maksimal 50 baris per halaman
@@ -1041,6 +1058,24 @@ export function StockOpnamePage() {
         ) : (
           /* TAB 2: RIWAYAT BERITA ACARA TERSEKAT PER CABANG */
           <div className="bg-(--bg-card) border border-(--border-color) rounded-2xl shadow-xs overflow-hidden">
+            <div className="flex flex-wrap items-center gap-2 p-3 border-b border-(--border-color)">
+              <Calendar className="w-4 h-4 text-(--text-secondary)" />
+              <input
+                type="date"
+                value={historyDateStart}
+                onChange={(e) => setHistoryDateStart(e.target.value)}
+                className="text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none"
+                aria-label="Tanggal mulai riwayat opname"
+              />
+              <span className="text-xs text-(--text-secondary)">-</span>
+              <input
+                type="date"
+                value={historyDateEnd}
+                onChange={(e) => setHistoryDateEnd(e.target.value)}
+                className="text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none"
+                aria-label="Tanggal akhir riwayat opname"
+              />
+            </div>
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-(--surface-hover) border-b border-(--border-color) text-[10px] uppercase font-black text-(--text-secondary) tracking-wider">

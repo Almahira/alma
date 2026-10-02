@@ -16,6 +16,10 @@ import { globalCommandBus } from "../../../../packages/core_unv/src/cqrs/Command
 import { sysToast } from "../../../../apps/client_unv/src/shared-ui/useToastStore";
 import { UniversalCombobox } from "../../../../apps/client_unv/src/shared-ui/UniversalCombobox";
 import { calculatePackagingLossCost } from "../shared/uomConverter";
+import {
+  getCurrentMonthDateRange,
+  isDateWithinRange,
+} from "../../../../packages/core_unv/src/utils/dateUtils";
 
 const MEASURE_UOMS = [
   { value: "GRAM", label: "Gram (g)" },
@@ -46,6 +50,12 @@ export function SpoilWastePageSM() {
     "ALL",
   );
   const [filterOutletId, setFilterOutletId] = useState(""); // Tambahan untuk filter outlet (region/company)
+  const [dateStart, setDateStart] = useState(
+    () => getCurrentMonthDateRange().start,
+  );
+  const [dateEnd, setDateEnd] = useState(
+    () => getCurrentMonthDateRange().end,
+  );
   const [isAddFormOpen, setIsAddFormOpen] = useState(true);
 
   // Sticky State Form
@@ -419,12 +429,15 @@ export function SpoilWastePageSM() {
         sw.isActive !== undefined ? sw.isActive : sw.isActive;
       const matchStatus = isItemActive !== false; // hanya tampilkan aktif
       const matchType = filterType === "ALL" ? true : sw.type === filterType;
+      const matchDate = isDateWithinRange(sw.date, dateStart, dateEnd);
 
-      return matchStatus && matchType;
+      return matchStatus && matchType && matchDate;
     });
   }, [
     spoilWastes,
     filterType,
+    dateStart,
+    dateEnd,
     localOutletId,
     localRegionId,
     localCompanyId,
@@ -736,6 +749,23 @@ export function SpoilWastePageSM() {
               ))}
           </select>
         )}
+        <div className="flex items-center gap-2 w-full">
+          <input
+            type="date"
+            value={dateStart}
+            onChange={(e) => setDateStart(e.target.value)}
+            className="flex-1 min-w-0 text-xs font-bold p-1.5 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none"
+            aria-label="Tanggal mulai"
+          />
+          <span className="text-xs text-(--text-secondary)">-</span>
+          <input
+            type="date"
+            value={dateEnd}
+            onChange={(e) => setDateEnd(e.target.value)}
+            className="flex-1 min-w-0 text-xs font-bold p-1.5 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none"
+            aria-label="Tanggal akhir"
+          />
+        </div>
       </div>
 
       {/* DAFTAR DATA KERUGIAN (KARTU MOBILE) */}

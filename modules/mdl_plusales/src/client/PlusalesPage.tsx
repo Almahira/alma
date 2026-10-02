@@ -21,6 +21,7 @@ import { useExecutivePanelStore } from "../../../mdl_executivepanel/src/client/s
 import { globalCommandBus } from "../../../../packages/core_unv/src/cqrs/CommandBus";
 import { useUniversalModal } from "../../../../apps/client_unv/src/shared-ui/UniversalLayout";
 import { sysToast } from "../../../../apps/client_unv/src/shared-ui/useToastStore";
+import { getCurrentMonthKey } from "../../../../packages/core_unv/src/utils/dateUtils";
 import { PlusalesFormModal } from "./form-plusales";
 import {
   printModReportPdf,
@@ -173,7 +174,7 @@ export function PlusalesPage() {
   const [budgetInputName, setBudgetInputName] = useState("");
   const [budgetInputPct, setBudgetInputPct] = useState<number | "">("");
 
-  const currentMonthStr = new Date().toISOString().slice(0, 7);
+  const currentMonthStr = getCurrentMonthKey();
   const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthStr);
 
   const localCompanyId = localStorage.getItem("__unv_companyId") || "";

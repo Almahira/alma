@@ -13,7 +13,6 @@ import {
 } from "../../../packages/core_unv/src/runtime";
 import { globalLedger } from "../../../packages/core_unv/src/ledger/UniversalLedger";
 import { globalBlobManager } from "../../../packages/core_unv/src/io/BlobManager";
-import { globalPruningManager } from "../../../packages/core_unv/src/ledger/PruningManager";
 import { EventBus } from "../../../packages/core_unv/src/cqrs/EventBus";
 import { globalFileDaemon } from "../../../packages/core_unv/src/io/FileDaemon";
 import { globalInboxDaemon } from "../../../packages/core_unv/src/ledger/InboxDaemon";
@@ -28,37 +27,6 @@ import { InitialLoadingScreen } from "./shared-ui/InitialLoadingScreen";
 import { getApiUrl } from "../../../packages/core_unv/src/config/env";
 import { RuntimeSession } from "../../../packages/core_unv/src/config/session";
 import { Layers } from "lucide-react";
-
-// =========================================================================
-// AUTO-PURGE DATABASE LOKAL (JIKA SERVER DI-RESET / VIRGIN STATE)
-// =========================================================================
-async function purgeLocalDataAndRedirect(
-  targetUrl: string = "https://alma-client-unv.vercel.app/",
-) {
-  console.warn(
-    "[SYSTEM RESET] Terdeteksi server virgin. Membersihkan storage lokal...",
-  );
-  try {
-    const rxdb = globalLedger.getRxDatabase();
-    if (rxdb) {
-      await rxdb.remove().catch(() => {});
-    }
-  } catch {}
-
-  // Hapus database lokal secara fisik
-  if (typeof window !== "undefined" && window.indexedDB) {
-    indexedDB.deleteDatabase("alma_unv_ledger");
-    indexedDB.deleteDatabase("alma_demo_ledger");
-    indexedDB.deleteDatabase("ALMA_unv_blob_queue");
-  }
-
-  // Bersihkan Sesi LocalStorage
-  if (typeof localStorage !== "undefined") {
-    localStorage.clear();
-  }
-
-  window.location.href = targetUrl;
-}
 
 // =========================================================================
 // GLOBAL LOG INTERCEPTOR (PRODUKSI BERSIH & ROUTING KE ACTIVITY DRAWER)
@@ -147,14 +115,13 @@ dictionaryCommandHandlers.forEach((h) => globalCommandBus.register(h));
 // Registrasi Scheduler Pemeliharaan Storage Klien
 globalScheduler.register({
   id: "daily-storage-housekeeping",
-  name: "Daily Pruning & Storage Cleanup",
+  name: "Daily Storage Cleanup",
   type: "daily_midnight",
   enabled: true,
   task: async () => {
     await StorageHousekeeper.executeDailyMaintenance(
       globalLedger,
       globalBlobManager,
-      globalPruningManager,
     );
   },
 });
@@ -255,12 +222,11 @@ function SystemBootstrapper() {
 
             if (res.ok) {
               const statusData = await res.json();
-              // Server ONLINE dan database-nya kosong (Virgin State)
+              // A virgin server is not authorization to erase the device's offline data.
               if (statusData.isVirgin === true) {
-                await purgeLocalDataAndRedirect(
-                  "https://alma-client-unv.vercel.app/",
+                console.warn(
+                  "[BOOT] Server melaporkan state kosong. Data lokal dipertahankan sampai admin menjalankan broadcast resync resmi.",
                 );
-                return;
               }
             }
           } catch (netErr) {

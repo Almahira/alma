@@ -111,7 +111,7 @@ export class EventBus {
     if (!rxdb) return;
 
     try {
-      // 1. Buang cache committed lama, tetapi pertahankan event lokal yang belum terkirim.
+      // Keep current local data intact unless the canonical server snapshot is available.
       const pendingOutbox = rxdb.collections.outbox
         ? await rxdb.collections.outbox
             .find({ selector: { status: { $in: ["PENDING", "SENT"] } } })
@@ -121,24 +121,42 @@ export class EventBus {
         pendingOutbox.map((doc) => doc.eventPayload.id),
       );
 
-      if (rxdb.collections.snapshots) {
-        await rxdb.collections.snapshots.find().remove();
+      const syncSucceeded = await globalLedger.syncInitial({
+        recovery: true,
+        exactCursor: true,
+        requireSnapshot: true,
+        resetChain: true,
+      });
+      if (!syncSucceeded) {
+        throw new Error(
+          "Snapshot server tidak tersedia; data lokal dipertahankan dan broadcast sync dibatalkan.",
+        );
       }
+
+      const snapshotDoc = await rxdb.collections.snapshots
+        .findOne("GLOBAL_SNAPSHOT")
+        .exec();
+      if (!snapshotDoc) {
+        throw new Error(
+          "Snapshot fisik tidak ditemukan di penyimpanan lokal setelah sinkronisasi.",
+        );
+      }
+      const snapshotSeq = snapshotDoc.lastSeq;
+
+      // Remove committed journal rows represented by the snapshot; retain delta and unsent events.
       if (rxdb.collections.events) {
         const localEvents = await rxdb.collections.events.find().exec();
         for (const eventDoc of localEvents) {
-          if (!pendingEventIds.has(eventDoc.id)) {
+          if (
+            !pendingEventIds.has(eventDoc.id) &&
+            eventDoc.seq <= snapshotSeq
+          ) {
             await eventDoc.remove();
           }
         }
       }
 
-      // 2. RESET SEQUENCE & HASH CHAIN RAM KE 0
-      globalLedger.resetMemoryChain();
-      localStorage.removeItem("__unv_cursor_system");
-      localStorage.removeItem("__unv_cursor_tx");
-
-      // 3. AMBIL DAN SIMPAN STEMPEL EPOCH TERBARU DARI SERVER
+      // AMBIL DAN SIMPAN STEMPEL EPOCH TERBARU DARI SERVER
       try {
         const { getApiUrl } = await import("../config/env");
         const epochRes = await fetch(
@@ -152,26 +170,9 @@ export class EventBus {
         }
       } catch {}
 
-      // 4. KOSONGKAN SELURUH STATE TAMPILAN MEMORI LOKAL
-      globalRegistry.hardReset();
-
-      // 5. WAJIB GUNAKAN SNAPSHOT FISIK AGAR 1:1 DATANYA CLIENT VS SERVER
-      console.log(
-        "[RESYNC ENGINE] Mengunduh Snapshot Fisik Ground Truth dari PostgreSQL...",
-      );
-      const snapshotLoaded = await SnapshotEngine.syncFromServer();
-      if (!snapshotLoaded) {
-        console.warn(
-          "[RESYNC ENGINE] Gagal memuat snapshot server, menjalankan fallback syncInitial...",
-        );
-        await globalLedger.syncInitial({ recovery: true });
-      } else {
-        await globalLedger.syncInitial({ exactCursor: true });
-      }
-
-      // 6. PASTIKAN SELURUH READ MODEL SUDAH SESUAI DENGAN DATA FISIK
+      // PASTIKAN READ MODEL SUDAH SESUAI DENGAN SNAPSHOT + DELTA
       await this.rebuildState();
-      await globalLedger.reapplyPendingLocalEvents(false);
+      await globalLedger.reapplyPendingLocalEvents(true);
 
       console.log(
         "[RESYNC ENGINE] SUKSES: Database lokal bersih 100% dan identik 1:1 dengan server pusat!",

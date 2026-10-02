@@ -26,11 +26,8 @@ export interface ScheduledTask {
 
 export interface StorageCleanupReport {
   timestamp: string;
-  prunedEventsCount: number;
   prunedBlobsCount: number;
   freedBytes: number;
-  skippedSystemCount: number;
-  skippedActiveCount: number;
 }
 
 // ============================================================================

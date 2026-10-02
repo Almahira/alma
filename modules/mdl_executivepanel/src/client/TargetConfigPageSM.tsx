@@ -12,11 +12,12 @@ import { useExecutivePanelStore } from "./store";
 import { useOrgStore } from "../../../mdl_organization/src/client/store";
 import { globalCommandBus } from "../../../../packages/core_unv/src/cqrs/CommandBus";
 import { sysToast } from "../../../../apps/client_unv/src/shared-ui/useToastStore";
+import { getCurrentMonthKey } from "../../../../packages/core_unv/src/utils/dateUtils";
 
 export function TargetConfigPageSM() {
   const { targets } = useExecutivePanelStore();
   const { outlets } = useOrgStore();
-  const currentMonthStr = new Date().toISOString().slice(0, 7);
+  const currentMonthStr = getCurrentMonthKey();
   const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthStr);
   const [selectedOutletId, setSelectedOutletId] = useState<string>(
     outlets[0]?.id || "",

@@ -30,6 +30,10 @@ import { globalCommandBus } from "../../../../packages/core_unv/src/cqrs/Command
 import { useUniversalModal } from "../../../../apps/client_unv/src/shared-ui/UniversalLayoutSM";
 import { sysToast } from "../../../../apps/client_unv/src/shared-ui/useToastStore";
 import { UniversalCombobox } from "../../../../apps/client_unv/src/shared-ui/UniversalCombobox";
+import {
+  getCurrentMonthDateRange,
+  isDateWithinRange,
+} from "../../../../packages/core_unv/src/utils/dateUtils";
 
 import {
   ReceivingForm,
@@ -72,8 +76,12 @@ export function ReceivingPageSM() {
   >("HUTANG");
   const [viewStatus, setViewStatus] = useState<"AKTIF" | "ARSIP">("AKTIF");
   const [filterEntityId, setFilterEntityId] = useState("");
-  const [dateStart, setDateStart] = useState("");
-  const [dateEnd, setDateEnd] = useState("");
+  const [dateStart, setDateStart] = useState(
+    () => getCurrentMonthDateRange().start,
+  );
+  const [dateEnd, setDateEnd] = useState(
+    () => getCurrentMonthDateRange().end,
+  );
   const [filterStatus, setFilterStatus] = useState("ALL");
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
     {},
@@ -207,8 +215,7 @@ export function ReceivingPageSM() {
         // ==============================================================
         // 4. FILTER TANGGAL & STATUS LUNAS
         // ==============================================================
-        if (dateStart && new Date(doc.date) < new Date(dateStart)) return false;
-        if (dateEnd && new Date(doc.date) > new Date(dateEnd)) return false;
+        if (!isDateWithinRange(doc.date, dateStart, dateEnd)) return false;
 
         const sisa = (doc.totalAmount || 0) - (doc.paidAmount || 0);
         const isPaid = sisa <= 0;

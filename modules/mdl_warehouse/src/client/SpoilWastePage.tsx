@@ -14,6 +14,10 @@ import { globalCommandBus } from "../../../../packages/core_unv/src/cqrs/Command
 import { sysToast } from "../../../../apps/client_unv/src/shared-ui/useToastStore";
 import { UniversalCombobox } from "../../../../apps/client_unv/src/shared-ui/UniversalCombobox";
 import { calculatePackagingLossCost } from "../shared/uomConverter";
+import {
+  getCurrentMonthDateRange,
+  isDateWithinRange,
+} from "../../../../packages/core_unv/src/utils/dateUtils";
 
 // SATUAN UKUR MURNI MATEMATIS (BERSIH DARI SATUAN KEMASAN)
 const MEASURE_UOMS = [
@@ -63,7 +67,12 @@ export function SpoilWastePage() {
   const [filterType, setFilterType] = useState<"ALL" | "SPOIL" | "WASTE">(
     "ALL",
   );
-
+  const [dateStart, setDateStart] = useState(
+    () => getCurrentMonthDateRange().start,
+  );
+  const [dateEnd, setDateEnd] = useState(
+    () => getCurrentMonthDateRange().end,
+  );
   const [filterOutletId, setFilterOutletId] = useState("");
 
   const divisionOptions = useMemo(() => {
@@ -435,13 +444,16 @@ export function SpoilWastePage() {
           ? isItemActive !== false
           : isItemActive === false;
       const matchType = filterType === "ALL" ? true : sw.type === filterType;
+      const matchDate = isDateWithinRange(sw.date, dateStart, dateEnd);
 
-      return matchStatus && matchType;
+      return matchStatus && matchType && matchDate;
     });
   }, [
     spoilWastes,
     viewStatus,
     filterType,
+    dateStart,
+    dateEnd,
     localOutletId,
     localRegionId,
     localCompanyId,
@@ -748,6 +760,23 @@ export function SpoilWastePage() {
                 ))}
             </select>
           )}
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={dateStart}
+              onChange={(e) => setDateStart(e.target.value)}
+              className="text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-xl outline-none"
+              aria-label="Tanggal mulai"
+            />
+            <span className="text-xs text-(--text-secondary)">-</span>
+            <input
+              type="date"
+              value={dateEnd}
+              onChange={(e) => setDateEnd(e.target.value)}
+              className="text-xs font-bold p-2 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-xl outline-none"
+              aria-label="Tanggal akhir"
+            />
+          </div>
         </div>
 
         <div className="text-xs font-black text-(--text-secondary)">

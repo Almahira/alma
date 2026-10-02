@@ -56,7 +56,7 @@ Alma ERP mengusung paradigma **Local-First Distributed Event Sourcing with CQRS 
 - **NATS JetStream**: Mesin antrean pesan terdistribusi berkinerja tinggi dengan jaminan pengiriman At-Least-Once.
 - **3-Way Merge Conflict Resolution**: Mesin rekonsiliasi benturan data otomatis antara Base State (N-1), Server State (N), dan Client State (N).
 - **Quarantine Journal (DLQ)**: Penampung otomatis event yang rusak fatal agar tidak memacetkan antrean utama.
-- **Smart Pruning Engine**: Pembersihan cerdas yang memilah data aktif bulan berjalan vs data historis yang telah berstatus terminal/completed.
+- **Event Ledger Retention**: Event transaksi tidak dipangkas; riwayat tetap tersimpan offline, sementara daftar transaksi dibatasi ke bulan berjalan dengan filter tanggal untuk membuka periode lama.
 - **Circuit Breaker**: Pemutus arus jaringan otomatis jika server gagal merespons 3 kali berturut-turut (mencegah DDoS internal).
 - **Backpressure Guard**: Pembatas beban server (maks 50 koneksi sinkronisasi serentak) dengan instruksi penundaan HTTP 503 ke klien.
 - **PostgreSQL Advisory Lock**: Kunci terdistribusi tingkat database untuk mencegah server multi-instance menjalankan cron scheduler yang sama bersamaan.

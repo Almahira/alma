@@ -17,10 +17,10 @@ export function setupClientTasks() {
     },
   });
 
-  // 2. Task: Storage Housekeeper & Pruning (Berjalan setiap pergantian hari)
+  // 2. Task: Storage Housekeeper (Berjalan setiap pergantian hari)
   globalScheduler.register({
     id: "storage-housekeeper",
-    name: "Storage Housekeeper & Data Pruning",
+    name: "Storage Housekeeper",
     type: "date_change", // Otomatis trigger saat hari berganti
     enabled: true,
     task: async () => {

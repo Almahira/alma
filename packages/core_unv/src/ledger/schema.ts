@@ -1,6 +1,6 @@
 // File: packages/core_unv/src/ledger/schema.ts
 import { RxJsonSchema } from "rxdb";
-import { isTransactionAggregate } from "../utils/pruningUtils";
+import { isTransactionAggregate } from "../utils/transactionUtils";
 
 export interface LedgerEventDoc {
   id: string;

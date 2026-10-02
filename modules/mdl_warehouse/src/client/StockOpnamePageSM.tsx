@@ -31,6 +31,10 @@ import {
   printStockOpnameReportPdf,
 } from "./features/pdf-warehouse";
 import { exportExcelStockOpname } from "./features/excel-warehouse";
+import {
+  getCurrentMonthDateRange,
+  isDateWithinRange,
+} from "../../../../packages/core_unv/src/utils/dateUtils";
 
 // =========================================================================
 // KONSTANTA PAGINASI (MAKSIMAL 50 BARIS / HALAMAN)
@@ -172,6 +176,12 @@ export function StockOpnamePageSM() {
     new Date().toISOString().split("T")[0],
   );
   const [searchTerm, setSearchTerm] = useState("");
+  const [historyDateStart, setHistoryDateStart] = useState(
+    () => getCurrentMonthDateRange().start,
+  );
+  const [historyDateEnd, setHistoryDateEnd] = useState(
+    () => getCurrentMonthDateRange().end,
+  );
 
   // === [STATE & HANDLER SELEKSI MOBILE] ===
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
@@ -376,9 +386,16 @@ export function StockOpnamePageSM() {
         return false;
       if (localCompanyId && o.companyId && o.companyId !== localCompanyId)
         return false;
-      return true;
+      return isDateWithinRange(o.date, historyDateStart, historyDateEnd);
     });
-  }, [opnames, localOutletId, localRegionId, localCompanyId]);
+  }, [
+    opnames,
+    localOutletId,
+    localRegionId,
+    localCompanyId,
+    historyDateStart,
+    historyDateEnd,
+  ]);
 
   // =========================================================================
   // PAGINASI: potong data maksimal 50 baris per halaman
@@ -972,6 +989,23 @@ export function StockOpnamePageSM() {
         ) : (
           /* TAB 2: RIWAYAT BERITA ACARA */
           <>
+            <div className="flex items-center gap-2 bg-(--bg-card) border border-(--border-color) rounded-lg p-2">
+              <input
+                type="date"
+                value={historyDateStart}
+                onChange={(e) => setHistoryDateStart(e.target.value)}
+                className="flex-1 min-w-0 text-xs font-bold p-1.5 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none"
+                aria-label="Tanggal mulai riwayat opname"
+              />
+              <span className="text-xs text-(--text-secondary)">-</span>
+              <input
+                type="date"
+                value={historyDateEnd}
+                onChange={(e) => setHistoryDateEnd(e.target.value)}
+                className="flex-1 min-w-0 text-xs font-bold p-1.5 bg-(--bg-input) text-(--text-primary) border border-(--border-color) rounded-lg outline-none"
+                aria-label="Tanggal akhir riwayat opname"
+              />
+            </div>
             {pagedOpnames.map((doc) => (
               <div
                 key={doc.id}

@@ -13,10 +13,6 @@ import {
   systemEventJournal,
   txEventJournal,
 } from "../../../packages/db-schema/index.js";
-import {
-  isTransactionCompleted,
-  getStartOfCurrentMonth,
-} from "../../../packages/core_unv/src/utils/pruningUtils.js";
 import { storageRouter } from "./routes/storage.js";
 import {
   globalServerScheduler,
@@ -32,6 +28,8 @@ import { whatsappRouter } from "./routes/whatsapp.js";
 import { globalWhatsAppService } from "../../../modules/mdl_whatsapp/src/server/baileysService.js";
 
 dotenv.config();
+
+const JOURNAL_PULL_BATCH_SIZE = 500;
 
 // ============================================================
 // 1. DYNAMIC CORS ORIGIN RESOLVER
@@ -231,16 +229,30 @@ app.get("/api/events/pull/system", async (req, res) => {
     }
 
     const filterCompanyId = req.query.companyId as string | undefined;
+    const pageOffset = Math.max(0, Number(req.query.offset) || 0);
     const requestedEventIds = (
       Array.isArray(req.query.eventId) ? req.query.eventId : [req.query.eventId]
     )
       .filter((id): id is string => typeof id === "string")
       .slice(0, 100);
+    const sinceTimestamp = Number(sinceParam);
+    const hasDeltaCursor =
+      sinceParam !== undefined &&
+      Number.isFinite(sinceTimestamp) &&
+      sinceTimestamp > 0;
+
+    if (!hasDeltaCursor && requestedEventIds.length === 0) {
+      return res.status(400).json({
+        error: "SNAPSHOT_OR_CURSOR_REQUIRED",
+        message:
+          "Full journal pulls are disabled. Load a physical snapshot or provide a delta cursor.",
+      });
+    }
 
     // Pastikan event master data SELALU berurutan dari waktu paling awal ke terbaru
-    let systemEventsRaw: any[];
-    if (requestedEventIds.length > 0 && sinceParam && !isNaN(Number(sinceParam))) {
-      const sinceDate = new Date(Number(sinceParam));
+    let systemEventsRaw: any[] = [];
+    if (requestedEventIds.length > 0 && hasDeltaCursor) {
+      const sinceDate = new Date(sinceTimestamp);
       systemEventsRaw = await db
         .select()
         .from(systemEventJournal)
@@ -250,30 +262,38 @@ app.get("/api/events/pull/system", async (req, res) => {
             sql`${systemEventJournal.createdAt} > ${sinceDate}`,
           ),
         )
-        .orderBy(systemEventJournal.createdAt);
+        .orderBy(systemEventJournal.createdAt, systemEventJournal.id)
+        .limit(JOURNAL_PULL_BATCH_SIZE + 1)
+        .offset(pageOffset);
     } else if (requestedEventIds.length > 0) {
       systemEventsRaw = await db
         .select()
         .from(systemEventJournal)
         .where(inArray(systemEventJournal.id, requestedEventIds))
-        .orderBy(systemEventJournal.createdAt);
-    } else if (sinceParam && !isNaN(Number(sinceParam))) {
-      const sinceDate = new Date(Number(sinceParam));
+        .orderBy(systemEventJournal.createdAt, systemEventJournal.id)
+        .limit(JOURNAL_PULL_BATCH_SIZE + 1)
+        .offset(pageOffset);
+    } else if (hasDeltaCursor) {
+      const sinceDate = new Date(sinceTimestamp);
       console.log(
         `[HTTP] PULL System Delta dari device ${deviceId} sejak waktu: ${sinceDate.toISOString()}`,
       );
       systemEventsRaw = await db
         .select()
         .from(systemEventJournal)
-        .where(sql`${systemEventJournal.createdAt} > ${sinceDate}`)
-        .orderBy(systemEventJournal.createdAt);
-    } else {
-      console.log(`[HTTP] PULL Full System Events dari device: ${deviceId}`);
-      systemEventsRaw = await db
-        .select()
-        .from(systemEventJournal)
-        .orderBy(systemEventJournal.createdAt);
+        .where(
+          sql`${systemEventJournal.createdAt} > ${sinceDate}`,
+        )
+        .orderBy(systemEventJournal.createdAt, systemEventJournal.id)
+        .limit(JOURNAL_PULL_BATCH_SIZE + 1)
+        .offset(pageOffset);
     }
+    const systemHasMore = systemEventsRaw.length > JOURNAL_PULL_BATCH_SIZE;
+    systemEventsRaw = systemEventsRaw.slice(0, JOURNAL_PULL_BATCH_SIZE);
+    const systemLastEvent = systemEventsRaw[systemEventsRaw.length - 1];
+    const systemCursor = systemLastEvent
+      ? { createdAt: new Date(systemLastEvent.createdAt).getTime() }
+      : { createdAt: sinceTimestamp || 0 };
 
     // Filter multi-tenant: jika companyId dikirim, jangan kirim master data perusahaan lain
     if (filterCompanyId) {
@@ -300,7 +320,11 @@ app.get("/api/events/pull/system", async (req, res) => {
       payload:
         typeof ev.payload === "string" ? JSON.parse(ev.payload) : ev.payload,
     }));
-    res.status(200).json(formattedEvents);
+    res.status(200).json({
+      events: formattedEvents,
+      cursor: systemCursor,
+      hasMore: systemHasMore,
+    });
   } catch (error: any) {
     console.error("[HTTP PULL SYSTEM ERROR]:", error);
     res.status(500).json({ error: error.message });
@@ -338,26 +362,39 @@ app.get("/api/events/pull/tx", async (req, res) => {
       }
     }
 
-    const windowMode = req.query.window as string | undefined; // '24h' untuk Rapid Recovery
     const filterCompanyId = req.query.companyId as string | undefined;
     const filterRegionId = req.query.regionId as string | undefined;
     const filterOutletId = req.query.outletId as string | undefined;
     const filterOutletIds = req.query.outletIds as string | undefined; // <--- DUKUNGAN MULTI-OUTLET
     const sinceParam = req.query.since as string | undefined;
+    const pageOffset = Math.max(0, Number(req.query.offset) || 0);
     const requestedEventIds = (
       Array.isArray(req.query.eventId) ? req.query.eventId : [req.query.eventId]
     )
       .filter((id): id is string => typeof id === "string")
       .slice(0, 100);
+    const sinceTimestamp = Number(sinceParam);
+    const hasDeltaCursor =
+      sinceParam !== undefined &&
+      Number.isFinite(sinceTimestamp) &&
+      sinceTimestamp > 0;
+
+    if (!hasDeltaCursor && requestedEventIds.length === 0) {
+      return res.status(400).json({
+        error: "SNAPSHOT_OR_CURSOR_REQUIRED",
+        message:
+          "Full journal pulls are disabled. Load a physical snapshot or provide a delta cursor.",
+      });
+    }
 
     console.log(
-      `[HTTP] PULL Tx Events dari device: ${deviceId} (Outlet: ${filterOutletId || "ALL"}, Region: ${filterRegionId || "ALL"}, Since: ${sinceParam || "FULL"})`,
+      `[HTTP] PULL Tx Delta dari device: ${deviceId} (Outlet: ${filterOutletId || "ALL"}, Region: ${filterRegionId || "ALL"}, Since: ${sinceParam || "EVENT IDS"})`,
     );
 
     // Kueri inkremental berindeks: hanya ambil baris yang terjadi setelah stempel waktu cursor
-    let txEventsRaw: any[];
-    if (requestedEventIds.length > 0 && sinceParam && !isNaN(Number(sinceParam))) {
-      const sinceDate = new Date(Number(sinceParam));
+    let txEventsRaw: any[] = [];
+    if (requestedEventIds.length > 0 && hasDeltaCursor) {
+      const sinceDate = new Date(sinceTimestamp);
       txEventsRaw = await db
         .select()
         .from(txEventJournal)
@@ -367,34 +404,37 @@ app.get("/api/events/pull/tx", async (req, res) => {
             sql`${txEventJournal.createdAt} > ${sinceDate}`,
           ),
         )
-        .orderBy(txEventJournal.createdAt);
+        .orderBy(txEventJournal.createdAt, txEventJournal.id)
+        .limit(JOURNAL_PULL_BATCH_SIZE + 1)
+        .offset(pageOffset);
     } else if (requestedEventIds.length > 0) {
       txEventsRaw = await db
         .select()
         .from(txEventJournal)
         .where(inArray(txEventJournal.id, requestedEventIds))
-        .orderBy(txEventJournal.createdAt);
-    } else if (sinceParam && !isNaN(Number(sinceParam))) {
-      const sinceDate = new Date(Number(sinceParam));
+        .orderBy(txEventJournal.createdAt, txEventJournal.id)
+        .limit(JOURNAL_PULL_BATCH_SIZE + 1)
+        .offset(pageOffset);
+    } else if (hasDeltaCursor) {
+      const sinceDate = new Date(sinceTimestamp);
       txEventsRaw = await db
         .select()
         .from(txEventJournal)
-        .where(sql`${txEventJournal.createdAt} > ${sinceDate}`)
-        .orderBy(txEventJournal.createdAt);
-    } else {
-      txEventsRaw = await db
-        .select()
-        .from(txEventJournal)
-        .orderBy(txEventJournal.createdAt);
+        .where(
+          sql`${txEventJournal.createdAt} > ${sinceDate}`,
+        )
+        .orderBy(txEventJournal.createdAt, txEventJournal.id)
+        .limit(JOURNAL_PULL_BATCH_SIZE + 1)
+        .offset(pageOffset);
     }
-    const now = Date.now();
-    const startOfCurrentMonth = getStartOfCurrentMonth();
-    const twentyFourHoursAgo = now - 24 * 60 * 60 * 1000;
-    const timeThreshold =
-      windowMode === "24h" ? twentyFourHoursAgo : startOfCurrentMonth;
-
+    const txHasMore = txEventsRaw.length > JOURNAL_PULL_BATCH_SIZE;
+    const txPage = txEventsRaw.slice(0, JOURNAL_PULL_BATCH_SIZE);
+    const txLastEvent = txPage[txPage.length - 1];
+    const txCursor = txLastEvent
+      ? { createdAt: new Date(txLastEvent.createdAt).getTime() }
+      : { createdAt: sinceTimestamp || 0 };
+    txEventsRaw = txPage;
     const validTxEvents: any[] = [];
-    const txAggregateMap = new Map<string, any[]>();
 
     txEventsRaw.forEach((evt) => {
       // ============================================================
@@ -462,46 +502,8 @@ app.get("/api/events/pull/tx", async (req, res) => {
         }
       }
 
-      if (!txAggregateMap.has(evt.aggregateId)) {
-        txAggregateMap.set(evt.aggregateId, []);
-      }
-      txAggregateMap.get(evt.aggregateId)!.push(evt);
+      validTxEvents.push(evt);
     });
-
-    for (const [aggId, eventsOfAgg] of txAggregateMap.entries()) {
-      eventsOfAgg.sort((a, b) => a.aggregateVersion - b.aggregateVersion);
-      const latestEvt = eventsOfAgg[eventsOfAgg.length - 1];
-      const payloadObj =
-        typeof latestEvt.payload === "string"
-          ? JSON.parse(latestEvt.payload)
-          : latestEvt.payload;
-
-      const eventTime = new Date(latestEvt.createdAt).getTime();
-      const isOld = eventTime < timeThreshold;
-      const isDone = isTransactionCompleted(payloadObj);
-
-      // JANGAN PERNAH MEMBUANG EVENT STOK OPNAME & INITIAL STOCK:
-      // Saldo acuan stok fisik gudang wajib selalu utuh di semua perangkat!
-      const isStockBaseline =
-        latestEvt.type.includes("OPNAME") ||
-        latestEvt.type.includes("INITIAL_STOCK") ||
-        latestEvt.type.includes("RECIPE");
-      const containsRequestedEvent = eventsOfAgg.some((evt) =>
-        requestedEventIds.includes(evt.id),
-      );
-
-      // Smart Pruning: buang transaksi operasional lama (misal nota kasir selesai bulan lalu)
-      if (
-        isOld &&
-        isDone &&
-        !isStockBaseline &&
-        !containsRequestedEvent
-      ) {
-        continue;
-      }
-
-      validTxEvents.push(...eventsOfAgg);
-    }
 
     // KUNCI SINKRONISASI: Urutkan seluruh event transaksi secara kronologis nyata
     validTxEvents.sort(
@@ -515,7 +517,11 @@ app.get("/api/events/pull/tx", async (req, res) => {
         typeof ev.payload === "string" ? JSON.parse(ev.payload) : ev.payload,
     }));
 
-    res.status(200).json(formattedEvents);
+    res.status(200).json({
+      events: formattedEvents,
+      cursor: txCursor,
+      hasMore: txHasMore,
+    });
   } catch (error: any) {
     console.error("[HTTP PULL TX ERROR]:", error);
     res.status(500).json({ error: error.message });

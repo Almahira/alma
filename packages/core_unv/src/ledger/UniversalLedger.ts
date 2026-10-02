@@ -1,6 +1,6 @@
 // File: packages/core_unv/src/ledger/UniversalLedger.ts
 import { addRxPlugin, createRxDatabase, RxCollection, RxDatabase } from "rxdb";
-import { isTransactionAggregate } from "../utils/pruningUtils";
+import { isTransactionAggregate } from "../utils/transactionUtils";
 import { getRxStorageDexie } from "rxdb/plugins/storage-dexie";
 import { RxDBDevModePlugin } from "rxdb/plugins/dev-mode";
 import { wrappedValidateZSchemaStorage } from "rxdb/plugins/validate-z-schema";
@@ -56,10 +56,12 @@ export class UniversalLedger {
   private memAggregateVersions = new Map<string, number>();
   private socket!: Socket;
   private isSyncing = false;
-  private syncPromise: Promise<void> | null = null;
+  private syncPromise: Promise<boolean> | null = null;
   private syncRequested = false;
   private syncRecoveryRequested = false;
   private syncExactCursorRequested = false;
+  private syncRequireSnapshotRequested = false;
+  private syncResetChainRequested = false;
   private readonly pendingSyncEventIds = new Set<string>();
   private appendQueue: Promise<unknown> = Promise.resolve();
 
@@ -330,8 +332,18 @@ export class UniversalLedger {
       recovery?: boolean;
       exactCursor?: boolean;
       eventIds?: string[];
+      requireSnapshot?: boolean;
+      resetChain?: boolean;
     } = {},
-  ): Promise<void> {
+  ): Promise<boolean> {
+    if (this.socket?.connected) {
+      this.socket.emit("UPDATE_SPATIAL_ROOMS", {
+        companyId: localStorage.getItem("__unv_companyId"),
+        regionId: localStorage.getItem("__unv_regionId"),
+        outletId: localStorage.getItem("__unv_outletId"),
+      });
+    }
+
     options.eventIds?.forEach((eventId) => {
       if (eventId) this.pendingSyncEventIds.add(eventId);
     });
@@ -342,36 +354,56 @@ export class UniversalLedger {
         this.syncRecoveryRequested || options.recovery === true;
       this.syncExactCursorRequested =
         this.syncExactCursorRequested || options.exactCursor === true;
+      this.syncRequireSnapshotRequested =
+        this.syncRequireSnapshotRequested || options.requireSnapshot === true;
+      this.syncResetChainRequested =
+        this.syncResetChainRequested || options.resetChain === true;
+      this.syncRequested = true;
       return this.syncPromise;
     }
 
     const syncPromise = (async () => {
+      let lastSyncSucceeded = true;
       let recoveryRequested = options.recovery === true;
       let exactCursorRequested = options.exactCursor === true;
+      let requireSnapshotRequested = options.requireSnapshot === true;
+      let resetChainRequested = options.resetChain === true;
       do {
         this.syncRequested = false;
         const recovery = recoveryRequested || this.syncRecoveryRequested;
         const exactCursor =
           exactCursorRequested || this.syncExactCursorRequested;
+        const requireSnapshot =
+          requireSnapshotRequested || this.syncRequireSnapshotRequested;
+        const resetChain =
+          resetChainRequested || this.syncResetChainRequested;
         recoveryRequested = false;
         exactCursorRequested = false;
+        requireSnapshotRequested = false;
+        resetChainRequested = false;
         this.syncRecoveryRequested = false;
         this.syncExactCursorRequested = false;
+        this.syncRequireSnapshotRequested = false;
+        this.syncResetChainRequested = false;
         const eventIds = [...this.pendingSyncEventIds].slice(0, 100);
         eventIds.forEach((eventId) => this.pendingSyncEventIds.delete(eventId));
         const syncSucceeded = await this.performInitialSync(
           recovery,
           exactCursor,
           eventIds,
+          requireSnapshot,
+          resetChain,
         );
+        lastSyncSucceeded = syncSucceeded;
         if (syncSucceeded && this.pendingSyncEventIds.size > 0) {
           this.syncRequested = true;
         }
       } while (this.syncRequested);
+      return lastSyncSucceeded;
     })();
     this.syncPromise = syncPromise;
     try {
-      await syncPromise;
+      return await syncPromise;
     } finally {
       if (this.syncPromise === syncPromise) this.syncPromise = null;
     }
@@ -381,6 +413,8 @@ export class UniversalLedger {
     recovery: boolean,
     exactCursor: boolean,
     eventIds: string[],
+    requireSnapshot: boolean,
+    resetChain: boolean,
   ): Promise<boolean> {
     this.isSyncing = true;
     let syncSucceeded = true;
@@ -403,6 +437,12 @@ export class UniversalLedger {
       const companyId = localStorage.getItem("__unv_companyId");
       const regionId = localStorage.getItem("__unv_regionId");
       const outletId = localStorage.getItem("__unv_outletId");
+      if (!companyId && !regionId && !outletId) {
+        console.warn(
+          "[SYNC] Lingkup perusahaan/wilayah/outlet belum tersedia; penarikan data dilewati.",
+        );
+        return false;
+      }
 
       // Siapkan Query Params Spasial yang Menghargai Wewenang Akun Login
       const queryParams = new URLSearchParams({
@@ -433,6 +473,7 @@ export class UniversalLedger {
       }
 
       let snapshotCutoffTime: number | null = null;
+      let snapshotLoaded = false;
 
       try {
         if (recovery) {
@@ -453,6 +494,14 @@ export class UniversalLedger {
           const snapJson = await snapRes.json();
           if (snapJson.hasSnapshot && snapJson.snapshot) {
             const s = snapJson.snapshot;
+            const snapshotUpdatedAt = Number(s.updatedAt);
+            if (
+              !Number.isFinite(snapshotUpdatedAt) ||
+              snapshotUpdatedAt <= 0
+            ) {
+              throw new Error("Snapshot tidak memiliki watermark waktu valid.");
+            }
+            snapshotLoaded = true;
             console.log(
               `[GROUND TRUTH] Berhasil memuat Snapshot Fisik Server (Sequence #${s.lastSeq}). Memulihkan tabel fisik ke memori...`,
             );
@@ -467,6 +516,10 @@ export class UniversalLedger {
 
             // 2. Pasang Sequence dasar lokal
             this.memCurrentSeq = s.lastSeq;
+            if (resetChain) {
+              this.resetMemoryChain(true);
+              this.setSnapshotBaseSequence(s.lastSeq);
+            }
 
             // 3. Rehidrasi memori CQRS Read Model seketika dari tabel fisik
             if (s.data) {
@@ -493,16 +546,24 @@ export class UniversalLedger {
             notifyStateUpdated();
 
             // Tetapkan batas waktu penarikan delta event hanya setelah snapshot ini dibuat
-            if (s.updatedAt) {
-              snapshotCutoffTime = new Date(s.updatedAt).getTime();
-            }
+            snapshotCutoffTime = snapshotUpdatedAt;
           }
         }
       } catch (snapErr) {
         console.warn(
-          "[SNAPSHOT SYNC] Gagal menghubungi endpoint snapshot server, beralih ke delta sync lokal.",
+          "[SNAPSHOT SYNC] Gagal menghubungi endpoint snapshot server.",
           snapErr,
         );
+      }
+
+      if (
+        requireSnapshot &&
+        (!snapshotLoaded || snapshotCutoffTime === null)
+      ) {
+        console.error(
+          "[SYNC] Broadcast sync dibatalkan karena snapshot fisik tidak berhasil dimuat.",
+        );
+        return false;
       }
 
       // Siapkan cursor checkpoint inkremental
@@ -514,29 +575,47 @@ export class UniversalLedger {
       });
 
       if (snapshotCutoffTime) {
-        // Jika snapshot berhasil dimuat, hanya tarik event yang lahir SETELAH snapshot dibekukan
+        // Resume both journals only after the canonical snapshot watermark.
         queryParamsSystem.set("since", String(snapshotCutoffTime));
         queryParamsTx.set("since", String(snapshotCutoffTime));
         localStorage.setItem("__unv_cursor_system", String(snapshotCutoffTime));
         localStorage.setItem("__unv_cursor_tx", String(snapshotCutoffTime));
+        localStorage.removeItem("__unv_pull_system_offset");
+        localStorage.removeItem("__unv_pull_tx_offset");
       } else {
-        // Fallback jika server snapshot offline: gunakan cursor lokal
+        // Never issue an unbounded journal pull when the client has no snapshot/cursor.
         const lastCursorSystem = localStorage.getItem("__unv_cursor_system");
         const lastCursorTx = localStorage.getItem("__unv_cursor_tx");
 
-        if (lastCursorSystem) {
-          const safeSystemSince = exactCursor
-            ? Number(lastCursorSystem)
-            : Math.max(0, Number(lastCursorSystem) - 2000);
-          queryParamsSystem.set("since", String(safeSystemSince));
+        const systemCursor = Number(lastCursorSystem);
+        const txCursor = Number(lastCursorTx);
+        if (
+          !Number.isFinite(systemCursor) ||
+          systemCursor <= 0 ||
+          !Number.isFinite(txCursor) ||
+          txCursor <= 0
+        ) {
+          console.warn(
+            "[SYNC] Snapshot dan cursor belum tersedia; melewati penarikan jurnal agar tidak memuat seluruh riwayat.",
+          );
+          eventIds.forEach((eventId) =>
+            this.pendingSyncEventIds.add(eventId),
+          );
+          syncSucceeded = false;
+          return false;
         }
-        if (lastCursorTx) {
-          const safeTxSince = exactCursor
-            ? Number(lastCursorTx)
-            : Math.max(0, Number(lastCursorTx) - 2000);
-          queryParamsTx.set("since", String(safeTxSince));
-        }
+
+        queryParamsSystem.set("since", String(systemCursor));
+        queryParamsTx.set("since", String(txCursor));
       }
+      queryParamsSystem.set(
+        "offset",
+        localStorage.getItem("__unv_pull_system_offset") || "0",
+      );
+      queryParamsTx.set(
+        "offset",
+        localStorage.getItem("__unv_pull_tx_offset") || "0",
+      );
 
       const serverEvents = await globalCircuitBreaker.fire(async () => {
         const [resSystem, resTx] = await Promise.all([
@@ -553,40 +632,85 @@ export class UniversalLedger {
         let eventsSys: any[] = [];
         let eventsTx: any[] = [];
         if (resSystem && resSystem.ok) {
-          eventsSys = await resSystem.json();
-          if (eventsSys.length > 0) {
-            const maxEventTime = Math.max(
-              ...eventsSys.map((e: any) =>
-                new Date(e.createdAt || Date.now()).getTime(),
-              ),
+          const response = await resSystem.json();
+          eventsSys = Array.isArray(response) ? response : response.events || [];
+          const cursor = Array.isArray(response) ? null : response.cursor;
+          const hasMore = !Array.isArray(response) && response.hasMore === true;
+          if (hasMore) {
+            const currentOffset =
+              Number(
+                localStorage.getItem("__unv_pull_system_offset") || 0,
+              ) || 0;
+            localStorage.setItem(
+              "__unv_pull_system_offset",
+              String(currentOffset + 500),
             );
+            eventIds.forEach((eventId) =>
+              this.pendingSyncEventIds.add(eventId),
+            );
+            this.syncRequested = true;
+          } else {
+            const maxEventTime =
+              cursor?.createdAt ||
+              (eventsSys.length > 0
+                ? Math.max(
+                    ...eventsSys.map((event: any) =>
+                      new Date(event.createdAt).getTime(),
+                    ),
+                  )
+                : 0);
             const currentCursor =
               Number(localStorage.getItem("__unv_cursor_system")) || 0;
-            const maxSysTime = Math.max(currentCursor, maxEventTime);
-            localStorage.setItem("__unv_cursor_system", String(maxSysTime));
+            if (maxEventTime > currentCursor) {
+              localStorage.setItem(
+                "__unv_cursor_system",
+                String(maxEventTime),
+              );
+            }
+            localStorage.removeItem("__unv_pull_system_offset");
           }
         }
         if (resTx && resTx.ok) {
-          eventsTx = await resTx.json();
-          if (eventsTx.length > 0) {
-            const maxEventTime = Math.max(
-              ...eventsTx.map((e: any) =>
-                new Date(e.createdAt || Date.now()).getTime(),
-              ),
+          const response = await resTx.json();
+          eventsTx = Array.isArray(response) ? response : response.events || [];
+          const cursor = Array.isArray(response) ? null : response.cursor;
+          const hasMore = !Array.isArray(response) && response.hasMore === true;
+          if (hasMore) {
+            const currentOffset =
+              Number(localStorage.getItem("__unv_pull_tx_offset") || 0) || 0;
+            localStorage.setItem(
+              "__unv_pull_tx_offset",
+              String(currentOffset + 500),
             );
+            eventIds.forEach((eventId) =>
+              this.pendingSyncEventIds.add(eventId),
+            );
+            this.syncRequested = true;
+          } else {
+            const maxEventTime =
+              cursor?.createdAt ||
+              (eventsTx.length > 0
+                ? Math.max(
+                    ...eventsTx.map((event: any) =>
+                      new Date(event.createdAt).getTime(),
+                    ),
+                  )
+                : 0);
             const currentCursor =
               Number(localStorage.getItem("__unv_cursor_tx")) || 0;
-            const maxTxTime = Math.max(currentCursor, maxEventTime);
-            localStorage.setItem("__unv_cursor_tx", String(maxTxTime));
+            if (maxEventTime > currentCursor) {
+              localStorage.setItem("__unv_cursor_tx", String(maxEventTime));
+            }
+            localStorage.removeItem("__unv_pull_tx_offset");
           }
         }
-        if (eventIds.length > 0 && (!resSystem?.ok || !resTx?.ok)) {
+        if (!resSystem?.ok || !resTx?.ok) {
           eventIds.forEach((eventId) =>
             this.pendingSyncEventIds.add(eventId),
           );
           syncSucceeded = false;
         }
-        return [...(eventsSys || []), ...(eventsTx || [])];
+        return [...eventsSys, ...eventsTx];
       });
 
       if (!serverEvents || serverEvents.length === 0) {
@@ -972,10 +1096,12 @@ export class UniversalLedger {
   /**
    * Reset Memori RAM Kriptografi (Mencegah Sequence Rusak / Database Corrupted saat Reset)
    */
-  public resetMemoryChain(): void {
+  public resetMemoryChain(preserveAggregateVersions = false): void {
     this.memCurrentSeq = 0;
     this.memCurrentHash = "0";
-    this.memAggregateVersions.clear();
+    if (!preserveAggregateVersions) {
+      this.memAggregateVersions.clear();
+    }
     this.isSyncing = false;
     console.log(
       "[UNIVERSAL LEDGER] Memori sequence & hash chain berhasil di-reset ke 0 (Clean State).",

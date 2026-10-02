@@ -1,5 +1,4 @@
 // File: packages/core_unv/src/runtime/StorageHousekeeper.ts
-import { globalPruningManager, PruningManager } from "../ledger/PruningManager";
 import { globalLedger, UniversalLedger } from "../ledger/UniversalLedger";
 import { globalBlobManager, BlobManager } from "../io/BlobManager";
 import { IO_CONFIG } from "../io/config";
@@ -8,23 +7,16 @@ import { StorageCleanupReport } from "./types";
 export class StorageHousekeeper {
   /**
    * Menjalankan pembersihan berkala sesuai aturan:
-   * 1. HANYA hapus transaksi jurnal bulan lalu yang statusnya TERMINAL (via runCleanup).
-   * 2. JANGAN PERNAH sentuh System Journal dan transaksi yang masih aktif.
-   * 3. Hapus Cache File/Blob lokal dari transaksi yang event-nya sudah terhapus/tidak aktif.
-   * 4. Cache SYSTEM (IO_CONFIG.CACHE_NAMES.SYSTEM) DILINDUNGI PENUH (tidak disentuh).
+   * Hanya menghapus cache blob yatim. Event ledger dan cache SYSTEM tidak disentuh.
    */
   public static async executeDailyMaintenance(
     ledger: UniversalLedger = globalLedger,
     _blobManager: BlobManager = globalBlobManager,
-    pruningManager: PruningManager = globalPruningManager,
   ): Promise<StorageCleanupReport> {
     const report: StorageCleanupReport = {
       timestamp: new Date().toISOString(),
-      prunedEventsCount: 0,
       prunedBlobsCount: 0,
       freedBytes: 0,
-      skippedSystemCount: 0,
-      skippedActiveCount: 0,
     };
 
     console.log(
@@ -32,10 +24,7 @@ export class StorageHousekeeper {
     );
 
     try {
-      // 1. Eksekusi Pruning Transaksi Jurnal Lama
-      await pruningManager.runCleanup();
-
-      // 2. Eksekusi Pembersihan Cache Blob Transaksi yang Sudah Yatim
+      // Hapus hanya cache blob transaksi yang tidak lagi dirujuk oleh event lokal.
       if (
         typeof caches !== "undefined" &&
         IO_CONFIG?.CACHE_NAMES?.TRANSACTION
