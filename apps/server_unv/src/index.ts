@@ -2,7 +2,7 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, or, sql } from "drizzle-orm";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import { db } from "./config/db.js";
@@ -231,10 +231,33 @@ app.get("/api/events/pull/system", async (req, res) => {
     }
 
     const filterCompanyId = req.query.companyId as string | undefined;
+    const requestedEventIds = (
+      Array.isArray(req.query.eventId) ? req.query.eventId : [req.query.eventId]
+    )
+      .filter((id): id is string => typeof id === "string")
+      .slice(0, 100);
 
     // Pastikan event master data SELALU berurutan dari waktu paling awal ke terbaru
     let systemEventsRaw: any[];
-    if (sinceParam && !isNaN(Number(sinceParam))) {
+    if (requestedEventIds.length > 0 && sinceParam && !isNaN(Number(sinceParam))) {
+      const sinceDate = new Date(Number(sinceParam));
+      systemEventsRaw = await db
+        .select()
+        .from(systemEventJournal)
+        .where(
+          or(
+            inArray(systemEventJournal.id, requestedEventIds),
+            sql`${systemEventJournal.createdAt} > ${sinceDate}`,
+          ),
+        )
+        .orderBy(systemEventJournal.createdAt);
+    } else if (requestedEventIds.length > 0) {
+      systemEventsRaw = await db
+        .select()
+        .from(systemEventJournal)
+        .where(inArray(systemEventJournal.id, requestedEventIds))
+        .orderBy(systemEventJournal.createdAt);
+    } else if (sinceParam && !isNaN(Number(sinceParam))) {
       const sinceDate = new Date(Number(sinceParam));
       console.log(
         `[HTTP] PULL System Delta dari device ${deviceId} sejak waktu: ${sinceDate.toISOString()}`,
@@ -321,6 +344,11 @@ app.get("/api/events/pull/tx", async (req, res) => {
     const filterOutletId = req.query.outletId as string | undefined;
     const filterOutletIds = req.query.outletIds as string | undefined; // <--- DUKUNGAN MULTI-OUTLET
     const sinceParam = req.query.since as string | undefined;
+    const requestedEventIds = (
+      Array.isArray(req.query.eventId) ? req.query.eventId : [req.query.eventId]
+    )
+      .filter((id): id is string => typeof id === "string")
+      .slice(0, 100);
 
     console.log(
       `[HTTP] PULL Tx Events dari device: ${deviceId} (Outlet: ${filterOutletId || "ALL"}, Region: ${filterRegionId || "ALL"}, Since: ${sinceParam || "FULL"})`,
@@ -328,7 +356,25 @@ app.get("/api/events/pull/tx", async (req, res) => {
 
     // Kueri inkremental berindeks: hanya ambil baris yang terjadi setelah stempel waktu cursor
     let txEventsRaw: any[];
-    if (sinceParam && !isNaN(Number(sinceParam))) {
+    if (requestedEventIds.length > 0 && sinceParam && !isNaN(Number(sinceParam))) {
+      const sinceDate = new Date(Number(sinceParam));
+      txEventsRaw = await db
+        .select()
+        .from(txEventJournal)
+        .where(
+          or(
+            inArray(txEventJournal.id, requestedEventIds),
+            sql`${txEventJournal.createdAt} > ${sinceDate}`,
+          ),
+        )
+        .orderBy(txEventJournal.createdAt);
+    } else if (requestedEventIds.length > 0) {
+      txEventsRaw = await db
+        .select()
+        .from(txEventJournal)
+        .where(inArray(txEventJournal.id, requestedEventIds))
+        .orderBy(txEventJournal.createdAt);
+    } else if (sinceParam && !isNaN(Number(sinceParam))) {
       const sinceDate = new Date(Number(sinceParam));
       txEventsRaw = await db
         .select()
@@ -376,14 +422,29 @@ app.get("/api/events/pull/tx", async (req, res) => {
       // 2. JIKA PERANGKAT ADALAH CABANG OUTLET (Single Outlet maupun Multi-Outlet)
       if (filterOutletIds) {
         const allowedList = filterOutletIds.split(",");
-        if (!effectiveOutletId || !allowedList.includes(effectiveOutletId)) {
+        const isRegionSharedEvent =
+          !effectiveOutletId &&
+          Boolean(filterRegionId) &&
+          effectiveRegionId === filterRegionId;
+        const targetOutletId =
+          p?.reference?.destinationOutletId || p?.data?.destinationOutletId;
+        if (
+          !isRegionSharedEvent &&
+          !allowedList.includes(effectiveOutletId || "") &&
+          !allowedList.includes(targetOutletId || "")
+        ) {
           return;
         }
       } else if (filterOutletId) {
         // Loloskan jika outletId cocok atau transaksi distribusi gudang menuju ke outlet ini
         const targetOutletId =
           p?.reference?.destinationOutletId || p?.data?.destinationOutletId;
+        const isRegionSharedEvent =
+          !effectiveOutletId &&
+          Boolean(filterRegionId) &&
+          effectiveRegionId === filterRegionId;
         if (
+          !isRegionSharedEvent &&
           effectiveOutletId !== filterOutletId &&
           targetOutletId !== filterOutletId
         ) {
@@ -425,9 +486,17 @@ app.get("/api/events/pull/tx", async (req, res) => {
         latestEvt.type.includes("OPNAME") ||
         latestEvt.type.includes("INITIAL_STOCK") ||
         latestEvt.type.includes("RECIPE");
+      const containsRequestedEvent = eventsOfAgg.some((evt) =>
+        requestedEventIds.includes(evt.id),
+      );
 
       // Smart Pruning: buang transaksi operasional lama (misal nota kasir selesai bulan lalu)
-      if (isOld && isDone && !isStockBaseline) {
+      if (
+        isOld &&
+        isDone &&
+        !isStockBaseline &&
+        !containsRequestedEvent
+      ) {
         continue;
       }
 
@@ -498,6 +567,63 @@ app.post(
 io.on("connection", async (socket) => {
   const queryDeviceId = socket.handshake.query.deviceId as string;
 
+  socket.on("UPDATE_SPATIAL_ROOMS", async (data: any) => {
+    if (
+      !queryDeviceId ||
+      queryDeviceId === "UNKNOWN" ||
+      queryDeviceId === "SERVER"
+    ) {
+      return;
+    }
+
+    try {
+      const registeredDevices = await db
+        .select({
+          companyId: deviceRegistry.companyId,
+          regionId: deviceRegistry.regionId,
+          outletId: deviceRegistry.outletId,
+        })
+        .from(deviceRegistry)
+        .where(eq(deviceRegistry.id, queryDeviceId))
+        .limit(1);
+      const device = registeredDevices[0];
+
+      if (!device?.companyId || data?.companyId !== device.companyId) {
+        console.warn(
+          `[SOCKET SPATIAL] Ditolak update room lintas perusahaan untuk device ${queryDeviceId}`,
+        );
+        return;
+      }
+
+      for (const room of [...socket.rooms]) {
+        if (
+          room.startsWith("company:") ||
+          room.startsWith("region:") ||
+          room.startsWith("outlet:")
+        ) {
+          void socket.leave(room);
+        }
+      }
+
+      socket.join(`company:${device.companyId}`);
+      const regionId =
+        typeof data.regionId === "string" ? data.regionId : device.regionId;
+      const outletId =
+        typeof data.outletId === "string" ? data.outletId : device.outletId;
+      if (regionId) socket.join(`region:${regionId}`);
+      if (outletId) socket.join(`outlet:${outletId}`);
+
+      console.log(
+        `[SOCKET SPATIAL DYNAMIC] Socket ${socket.id} update room -> Company: ${device.companyId} | Region: ${regionId || "-"} | Outlet: ${outletId || "-"}`,
+      );
+    } catch (error) {
+      console.warn(
+        `[SOCKET SPATIAL] Gagal memperbarui room untuk device ${queryDeviceId}:`,
+        error,
+      );
+    }
+  });
+
   if (
     queryDeviceId &&
     queryDeviceId !== "UNKNOWN" &&
@@ -565,16 +691,6 @@ io.on("connection", async (socket) => {
   console.log(
     `[SOCKET] Client terhubung: ${socket.id} (Device: ${queryDeviceId || "N/A"})`,
   );
-  // Tangkap pembaruan room saat user berpindah cabang/outlet di antarmuka
-  socket.on("UPDATE_SPATIAL_ROOMS", (data: any) => {
-    if (data?.companyId) socket.join(`company:${data.companyId}`);
-    if (data?.regionId) socket.join(`region:${data.regionId}`);
-    if (data?.outletId) socket.join(`outlet:${data.outletId}`);
-    console.log(
-      `[SOCKET SPATIAL DYNAMIC] Socket ${socket.id} update room -> Company: ${data?.companyId} | Region: ${data?.regionId} | Outlet: ${data?.outletId}`,
-    );
-  });
-
   socket.on("SYNC_UP_EVENTS", async (event, callback) => {
     console.log(`[SOCKET] Menerima event dari client: ${event.type}`);
     try {

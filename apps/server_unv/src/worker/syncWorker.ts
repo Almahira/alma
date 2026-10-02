@@ -7,6 +7,7 @@ import {
   systemEventJournal,
   txEventJournal,
   quarantineEventJournal,
+  deviceRegistry,
 } from "../../../../packages/db-schema/index.js";
 import { threeWayMerge } from "./utils/threeWayMerge.js";
 import { Server } from "socket.io";
@@ -67,6 +68,110 @@ function broadcastSyncNeeded(
   }
 
   io.to(rooms).emit("SYNC_NEEDED", syncPayload);
+}
+
+async function resolveEventSpatialScope(
+  event: any,
+  payload: Record<string, any>,
+  aggregateId: string,
+  targetJournal: typeof systemEventJournal | typeof txEventJournal,
+  deviceId?: string,
+): Promise<{
+  companyId: string | null;
+  regionId: string | null;
+  outletId: string | null;
+}> {
+  let companyId =
+    payload.organization?.companyId ||
+    payload.companyId ||
+    payload.company_id ||
+    null;
+  let regionId =
+    payload.location?.regionId ||
+    payload.regionId ||
+    payload.region_id ||
+    null;
+  let outletId =
+    payload.location?.outletId ||
+    payload.outletId ||
+    payload.outlet_id ||
+    null;
+
+  const aggregateType =
+    event.dddMetadata?.aggregateType || event.aggregateType || "";
+  if (!companyId && aggregateType === "COMPANY") {
+    companyId = aggregateId;
+  }
+  if (!regionId && aggregateType === "REGION") {
+    regionId = aggregateId;
+  }
+  if (!outletId && aggregateType === "OUTLET") {
+    outletId = aggregateId;
+  }
+
+  if ((!companyId || !regionId || !outletId) && Number(event.aggregateVersion) > 1) {
+    const rootRows = await db
+      .select()
+      .from(targetJournal)
+      .where(
+        and(
+          eq(targetJournal.aggregateId, aggregateId),
+          eq(targetJournal.aggregateVersion, 1),
+        ),
+      )
+      .limit(1);
+
+    const root = rootRows[0];
+    if (root) {
+      regionId ||= root.regionId;
+      outletId ||= root.outletId;
+      if (root.payload) {
+        const rootPayload =
+          typeof root.payload === "string"
+            ? JSON.parse(root.payload)
+            : root.payload;
+        companyId ||=
+          rootPayload.organization?.companyId ||
+          rootPayload.companyId ||
+          rootPayload.company_id ||
+          null;
+        regionId ||=
+          rootPayload.location?.regionId ||
+          rootPayload.regionId ||
+          rootPayload.region_id ||
+          null;
+        outletId ||=
+          rootPayload.location?.outletId ||
+          rootPayload.outletId ||
+          rootPayload.outlet_id ||
+          null;
+      }
+    }
+  }
+
+  if (deviceId && (!companyId || !regionId || !outletId)) {
+    const deviceRows = await db
+      .select({
+        companyId: deviceRegistry.companyId,
+        regionId: deviceRegistry.regionId,
+        outletId: deviceRegistry.outletId,
+      })
+      .from(deviceRegistry)
+      .where(eq(deviceRegistry.id, deviceId))
+      .limit(1);
+    const device = deviceRows[0];
+    if (device) {
+      companyId ||= device.companyId;
+      regionId ||= device.regionId;
+      outletId ||= device.outletId;
+    }
+  }
+
+  return {
+    companyId: companyId || null,
+    regionId: regionId || null,
+    outletId: outletId || null,
+  };
 }
 
 function confirmOriginDevice(
@@ -130,46 +235,17 @@ export async function startSyncWorker(io: Server) {
 
         const targetJournal = isTxEvent ? txEventJournal : systemEventJournal;
 
-        // 1. Ekstraksi spasial awal dari payload event
-        effectiveRegionId =
-          payload.location?.regionId || payload.regionId || null;
-        effectiveOutletId =
-          payload.location?.outletId || payload.outletId || null;
-        effectiveCompanyId =
-          payload.organization?.companyId || payload.companyId || null;
-
-        // 2. SMART SPATIAL INHERITANCE:
-        // Jika event lanjutan (v > 1) tidak membawa lokasi (misal payload {} saat ARCHIVE/RESTORE),
-        // server otomatis mewarisinya dari event versi awal di database
-        if (
-          (!effectiveRegionId || !effectiveOutletId || !effectiveCompanyId) &&
-          (event.aggregateVersion || 1) > 1
-        ) {
-          try {
-            const rootEvents = await db
-              .select()
-              .from(targetJournal)
-              .where(eq(targetJournal.aggregateId, aggregateId))
-              .orderBy(asc(targetJournal.aggregateVersion))
-              .limit(1);
-
-            if (rootEvents.length > 0) {
-              const root = rootEvents[0];
-              if (!effectiveRegionId) effectiveRegionId = root.regionId;
-              if (!effectiveOutletId) effectiveOutletId = root.outletId;
-              if (!effectiveCompanyId && root.payload) {
-                const rootP =
-                  typeof root.payload === "string"
-                    ? JSON.parse(root.payload)
-                    : root.payload;
-                effectiveCompanyId =
-                  rootP.organization?.companyId || rootP.companyId || null;
-              }
-            }
-          } catch (inhErr) {
-            console.warn("[WORKER] Pewarisan spasial dilewati:", inhErr);
-          }
-        }
+        // Scope comes from the event/aggregate, falling back to the registered origin device.
+        const spatialScope = await resolveEventSpatialScope(
+          event,
+          payload,
+          aggregateId,
+          targetJournal,
+          event.nodeMetadata?.originDeviceId,
+        );
+        effectiveCompanyId = spatialScope.companyId;
+        effectiveRegionId = spatialScope.regionId;
+        effectiveOutletId = spatialScope.outletId;
 
         // 3. Simpan ke database dengan lokasi dan aggregateType yang lengkap
         await db.transaction(async (tx) => {
@@ -194,8 +270,6 @@ export async function startSyncWorker(io: Server) {
             );
           }
         });
-
-        m.ack();
 
         // ============================================================
         // TARGETED SPATIAL BROADCAST (SYNC_NEEDED)
@@ -234,6 +308,7 @@ export async function startSyncWorker(io: Server) {
           eventId,
           "SUCCESS",
         );
+        m.ack();
 
         // Tetap broadcast dashboard refresh secara global
         io.emit("EXECUTIVE_DASHBOARD_REFRESH", {

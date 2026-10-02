@@ -60,6 +60,7 @@ export class UniversalLedger {
   private syncRequested = false;
   private syncRecoveryRequested = false;
   private syncExactCursorRequested = false;
+  private readonly pendingSyncEventIds = new Set<string>();
   private appendQueue: Promise<unknown> = Promise.resolve();
 
   public async init(): Promise<void> {
@@ -218,6 +219,11 @@ export class UniversalLedger {
 
       // Saat socket tersambung kembali pasca-offline:
       this.socket.on("connect", async () => {
+        this.socket.emit("UPDATE_SPATIAL_ROOMS", {
+          companyId: localStorage.getItem("__unv_companyId"),
+          regionId: localStorage.getItem("__unv_regionId"),
+          outletId: localStorage.getItem("__unv_outletId"),
+        });
         const hasReset = await verifyServerEpoch();
         if (!hasReset) {
           this.syncInitial();
@@ -234,16 +240,6 @@ export class UniversalLedger {
         });
       }
 
-      // Daftarkan room spasial aktif saat ini ke server
-      const currentCompId = localStorage.getItem("__unv_companyId");
-      const currentRegId = localStorage.getItem("__unv_regionId");
-      const currentOutId = localStorage.getItem("__unv_outletId");
-      this.socket.emit("UPDATE_SPATIAL_ROOMS", {
-        companyId: currentCompId,
-        regionId: currentRegId,
-        outletId: currentOutId,
-      });
-
       // Kirim detak jantung berkala setiap 60 detik agar server mengetahui perangkat masih online
       setInterval(() => {
         if (this.socket && this.socket.connected) {
@@ -256,7 +252,10 @@ export class UniversalLedger {
           console.log(
             `[SOCKET PUSH] Menerima sinyal transaksi baru dari ${data?.originDeviceId || "Server"}. Mengambil delta...`,
           );
-          await this.syncInitial();
+          await this.syncInitial({
+            eventIds: data?.eventId ? [data.eventId] : [],
+            exactCursor: true,
+          });
           notifyStateUpdated();
         }
       });
@@ -327,8 +326,16 @@ export class UniversalLedger {
   }
 
   public async syncInitial(
-    options: { recovery?: boolean; exactCursor?: boolean } = {},
+    options: {
+      recovery?: boolean;
+      exactCursor?: boolean;
+      eventIds?: string[];
+    } = {},
   ): Promise<void> {
+    options.eventIds?.forEach((eventId) => {
+      if (eventId) this.pendingSyncEventIds.add(eventId);
+    });
+
     if (this.syncPromise) {
       this.syncRequested = true;
       this.syncRecoveryRequested =
@@ -350,7 +357,16 @@ export class UniversalLedger {
         exactCursorRequested = false;
         this.syncRecoveryRequested = false;
         this.syncExactCursorRequested = false;
-        await this.performInitialSync(recovery, exactCursor);
+        const eventIds = [...this.pendingSyncEventIds].slice(0, 100);
+        eventIds.forEach((eventId) => this.pendingSyncEventIds.delete(eventId));
+        const syncSucceeded = await this.performInitialSync(
+          recovery,
+          exactCursor,
+          eventIds,
+        );
+        if (syncSucceeded && this.pendingSyncEventIds.size > 0) {
+          this.syncRequested = true;
+        }
       } while (this.syncRequested);
     })();
     this.syncPromise = syncPromise;
@@ -364,8 +380,10 @@ export class UniversalLedger {
   private async performInitialSync(
     recovery: boolean,
     exactCursor: boolean,
-  ): Promise<void> {
+    eventIds: string[],
+  ): Promise<boolean> {
     this.isSyncing = true;
+    let syncSucceeded = true;
 
     // Pancarkan sinyal ke Footer UI: Mulai Sinkronisasi
     if (typeof window !== "undefined") {
@@ -490,6 +508,10 @@ export class UniversalLedger {
       // Siapkan cursor checkpoint inkremental
       const queryParamsSystem = new URLSearchParams(queryParams);
       const queryParamsTx = new URLSearchParams(queryParams);
+      eventIds.forEach((eventId) => {
+        queryParamsSystem.append("eventId", eventId);
+        queryParamsTx.append("eventId", eventId);
+      });
 
       if (snapshotCutoffTime) {
         // Jika snapshot berhasil dimuat, hanya tarik event yang lahir SETELAH snapshot dibekukan
@@ -533,24 +555,36 @@ export class UniversalLedger {
         if (resSystem && resSystem.ok) {
           eventsSys = await resSystem.json();
           if (eventsSys.length > 0) {
-            const maxSysTime = Math.max(
+            const maxEventTime = Math.max(
               ...eventsSys.map((e: any) =>
                 new Date(e.createdAt || Date.now()).getTime(),
               ),
             );
+            const currentCursor =
+              Number(localStorage.getItem("__unv_cursor_system")) || 0;
+            const maxSysTime = Math.max(currentCursor, maxEventTime);
             localStorage.setItem("__unv_cursor_system", String(maxSysTime));
           }
         }
         if (resTx && resTx.ok) {
           eventsTx = await resTx.json();
           if (eventsTx.length > 0) {
-            const maxTxTime = Math.max(
+            const maxEventTime = Math.max(
               ...eventsTx.map((e: any) =>
                 new Date(e.createdAt || Date.now()).getTime(),
               ),
             );
+            const currentCursor =
+              Number(localStorage.getItem("__unv_cursor_tx")) || 0;
+            const maxTxTime = Math.max(currentCursor, maxEventTime);
             localStorage.setItem("__unv_cursor_tx", String(maxTxTime));
           }
+        }
+        if (eventIds.length > 0 && (!resSystem?.ok || !resTx?.ok)) {
+          eventIds.forEach((eventId) =>
+            this.pendingSyncEventIds.add(eventId),
+          );
+          syncSucceeded = false;
         }
         return [...(eventsSys || []), ...(eventsTx || [])];
       });
@@ -560,7 +594,7 @@ export class UniversalLedger {
           await this.reapplyPendingLocalEvents(true);
         }
         this.isSyncing = false;
-        return;
+        return syncSucceeded;
       }
 
       const existingEvents = await this.db.collections.events
@@ -627,8 +661,11 @@ export class UniversalLedger {
       if (recovery && snapshotCutoffTime !== null) {
         await this.reapplyPendingLocalEvents(true);
       }
+      return syncSucceeded;
     } catch (error) {
+      eventIds.forEach((eventId) => this.pendingSyncEventIds.add(eventId));
       console.warn("[UNIVERSAL LEDGER] Gagal sinkronisasi awal:", error);
+      return false;
     } finally {
       this.isSyncing = false;
 
