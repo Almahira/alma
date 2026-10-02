@@ -619,7 +619,7 @@ export const WhatsAppChatDrawer: React.FC<{
               </div>
 
               {selectedMessageIds.size > 0 ? (
-                <div className="absolute bottom-0 left-0 right-0 p-3 bg-(--surface-hover) border-t border-orange-500/50 shadow-[0_-10px_20px_rgba(0,0,0,0.2)] animate-in slide-in-from-bottom-5 backdrop-blur-md">
+                <div className="shrink-0 p-3 bg-(--surface-hover) border-t border-orange-500/50 shadow-[0_-10px_20px_rgba(0,0,0,0.2)] animate-in slide-in-from-bottom-5 backdrop-blur-md">
                   <div className="flex items-center justify-between mb-2.5 px-1">
                     <span className="text-[10px] font-black text-orange-500 uppercase tracking-wider">
                       <ShoppingCart className="w-3.5 h-3.5 inline mr-1 -mt-0.5" />

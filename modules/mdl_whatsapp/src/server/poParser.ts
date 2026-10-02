@@ -7,6 +7,16 @@ import { publishEvent } from "../../../../apps/server_unv/src/config/nats.js";
 import { waMessages } from "./schema.js";
 import { ulid } from "ulidx";
 
+function sanitizeWhatsAppLine(rawLine: string): string {
+  return rawLine
+    .replace(/[\u200B-\u200D\u2060-\u206F\uFEFF]/g, "")
+    .replace(/[\u00AD\u034F\u180B-\u180D\uFE00-\uFE0F]/g, "")
+    .replace(/[\x00-\x1F\x7F]/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s•*\-–—]+/, "")
+    .trim();
+}
+
 // Algoritma Levenshtein Distance dengan Strict Typing & Null Safety
 function similarity(
   s1: string | null | undefined,
@@ -88,16 +98,19 @@ export class WhatsAppPOParser {
       );
 
     // 3. Pecah teks baris per baris
-    const lines = text.split("\n");
+    const lines = text.replace(/\r/g, "\n").split("\n");
     const parsedItems: ParsedItem[] = [];
 
     for (const rawLine of lines) {
-      const line = rawLine.trim();
+      const line = sanitizeWhatsAppLine(rawLine);
+
       if (!line || line.startsWith("#") || line.length < 3) continue;
+      if (/^\d{1,2}\s+[a-zA-Z]{3,9}\s+\d{4}$/.test(line)) continue;
+      if (/^(?:@?\d+|[A-Z0-9_@]+)$/.test(line)) continue;
 
       // Regex mendeteksi baris item & kuantitas
       const match = line.match(
-        /^[-*•\d\.\)\s]*([a-zA-Z\s]+?)\s*[:=]?\s*([\d,\.]+)\s*([a-zA-Z]*)$/,
+        /^\s*(?:[-*•]\s*)?([\p{L}\p{N}][\p{L}\p{N}\s'’\-./&]+?)\s+(\d+(?:[.,]\d+)?)\s*([a-zA-Z]{0,5})?\s*$/u,
       );
 
       if (match) {
@@ -108,6 +121,8 @@ export class WhatsAppPOParser {
         const rawItemName = rawName.trim().toUpperCase();
         const rawQtyStr = rawQty.trim().replace(",", ".");
         const qty = parseFloat(rawQtyStr) || 1;
+
+        if (qty <= 0 || qty > 10000) continue;
 
         // Cari produk dengan kemiripan tertinggi (Fuzzy Match >= 65%)
         let bestMatch: any = null;
