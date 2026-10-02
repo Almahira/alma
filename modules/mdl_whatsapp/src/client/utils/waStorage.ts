@@ -33,6 +33,35 @@ export const getStoredMessages = (jid: string): any[] => {
   }
 };
 
+export const markStoredMessagesAsParsed = (messageIds: string[]) => {
+  if (messageIds.length === 0) return;
+
+  try {
+    const raw = localStorage.getItem(WA_MESSAGES_KEY);
+    if (!raw) return;
+
+    const all = JSON.parse(raw);
+    const parsedIds = new Set(messageIds);
+    let hasChanges = false;
+
+    for (const jid of Object.keys(all)) {
+      all[jid] = all[jid].map((message: any) => {
+        if (!parsedIds.has(message.id)) return message;
+        if (message.isPoParsed && message.is_po_parsed) return message;
+
+        hasChanges = true;
+        return { ...message, isPoParsed: true, is_po_parsed: true };
+      });
+    }
+
+    if (hasChanges) {
+      localStorage.setItem(WA_MESSAGES_KEY, JSON.stringify(all));
+    }
+  } catch (err) {
+    console.error("[WA STORAGE PARSE STATUS ERROR]:", err);
+  }
+};
+
 export const saveStoredMessage = (msg: any) => {
   try {
     const raw = localStorage.getItem(WA_MESSAGES_KEY);

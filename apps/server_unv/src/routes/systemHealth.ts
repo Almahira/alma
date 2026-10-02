@@ -65,9 +65,13 @@ import {
   executiveAllocations,
   executiveOwnerLedger,
 } from "../../../../modules/mdl_executivepanel/src/server/schema.js";
+import {
+  SCHEMA_RELATION_DICTIONARY,
+  enrichWithSchemaDictionary,
+} from "../utils/snapshotEnricher.js";
 
 const router = express.Router();
-const SNAPSHOT_SCHEMA_VERSION = 4;
+const SNAPSHOT_SCHEMA_VERSION = 5;
 
 function getSnapshotSchemaVersion(data: unknown): number {
   try {
@@ -213,6 +217,20 @@ export async function generateServerCanonicalSnapshot(
         db.select().from(vendorDocuments),
       ]);
 
+      // ============================================================
+      // LOOKUP POOL O(1) UNIVERSAL UNTUK AUTO-ENRICHMENT SNAPSHOT
+      // ============================================================
+      const lookupTables = new Map<string, Map<string, any>>([
+        ["itemProducts", new Map(compProducts.map((p) => [p.id, p]))],
+        ["itemCategories", new Map(allCategories.map((c) => [c.id, c]))],
+        ["itemUoms", new Map(allUoms.map((u) => [u.id, u]))],
+        ["vendors", new Map(compVendors.map((v) => [v.id, v]))],
+        ["outlets", new Map(compOutlets.map((o) => [o.id, o]))],
+        ["regions", new Map(compRegions.map((r) => [r.id, r]))],
+        ["divisions", new Map(compDivisions.map((d) => [d.id, d]))],
+        ["employees", new Map(allEmployees.map((e) => [e.id, e]))],
+      ]);
+
       // --- 4.4 Modul Warehouse (mdl_warehouse) ---
       const [
         compDistributions,
@@ -312,7 +330,8 @@ export async function generateServerCanonicalSnapshot(
         receivingPaymentsMap.set(p.documentId, list);
       });
 
-      const receivingDocsFormatted = compReceivingDocs.map((d) => ({
+      // 1. Susun dokumen dasar beserta array items & payments
+      const rawReceivingDocs = compReceivingDocs.map((d) => ({
         ...d,
         date: d.date instanceof Date ? d.date.toISOString() : String(d.date),
         dueDate:
@@ -320,6 +339,13 @@ export async function generateServerCanonicalSnapshot(
         items: receivingItemsMap.get(d.id) || [],
         payments: receivingPaymentsMap.get(d.id) || [],
       }));
+
+      // 2. Auto-enrichment dinamis menggunakan Kamus Skema
+      // Otomatis menginjeksi name, itemName, categoryName, uomName, dan vendorName
+      const receivingDocsFormatted = enrichWithSchemaDictionary(
+        rawReceivingDocs,
+        lookupTables,
+      );
 
       // --- 4.7 Modul Executive Panel (mdl_executivepanel) ---
       const [
@@ -1362,15 +1388,30 @@ router.get(
 
       // --- MODUL RECEIVING (mdl_receiving) ---
       if (normalizedModule === "receiving") {
-        const [compReceivingDocs, allReceivingItems, allReceivingPayments] =
-          await Promise.all([
-            db
-              .select()
-              .from(receivingDocuments)
-              .where(eq(receivingDocuments.companyId, companyId)),
-            db.select().from(receivingItems),
-            db.select().from(receivingPayments),
-          ]);
+        // Ambil dokumen transaksi sekaligus master data produk & vendor terkait secara paralel
+        const [
+          compReceivingDocs,
+          allReceivingItems,
+          allReceivingPayments,
+          compProducts,
+          allCategories,
+          allUoms,
+          compVendors,
+        ] = await Promise.all([
+          db
+            .select()
+            .from(receivingDocuments)
+            .where(eq(receivingDocuments.companyId, companyId)),
+          db.select().from(receivingItems),
+          db.select().from(receivingPayments),
+          db
+            .select()
+            .from(itemProducts)
+            .where(eq(itemProducts.companyId, companyId)),
+          db.select().from(itemCategories),
+          db.select().from(itemUoms),
+          db.select().from(vendors).where(eq(vendors.companyId, companyId)),
+        ]);
 
         const receivingItemsMap = new Map<string, any[]>();
         allReceivingItems.forEach((item) => {
@@ -1386,6 +1427,29 @@ router.get(
           receivingPaymentsMap.set(p.documentId, list);
         });
 
+        // Bangun lookup map modular O(1)
+        const modularLookups = new Map<string, Map<string, any>>([
+          ["itemProducts", new Map(compProducts.map((p) => [p.id, p]))],
+          ["itemCategories", new Map(allCategories.map((c) => [c.id, c]))],
+          ["itemUoms", new Map(allUoms.map((u) => [u.id, u]))],
+          ["vendors", new Map(compVendors.map((v) => [v.id, v]))],
+        ]);
+
+        const rawDocs = compReceivingDocs.map((d) => ({
+          ...d,
+          date: d.date instanceof Date ? d.date.toISOString() : String(d.date),
+          dueDate:
+            d.dueDate instanceof Date ? d.dueDate.toISOString() : d.dueDate,
+          items: receivingItemsMap.get(d.id) || [],
+          payments: receivingPaymentsMap.get(d.id) || [],
+        }));
+
+        // Terapkan auto-enrichment dinamis menggunakan Kamus Skema
+        const enrichedDocs = enrichWithSchemaDictionary(
+          rawDocs,
+          modularLookups,
+        );
+
         return res.status(200).json({
           status: "SUCCESS",
           module: "RECEIVING_DOCUMENT",
@@ -1393,15 +1457,7 @@ router.get(
           lastEventId: latestEventId,
           generatedAt: Date.now(),
           data: {
-            documents: compReceivingDocs.map((d) => ({
-              ...d,
-              date:
-                d.date instanceof Date ? d.date.toISOString() : String(d.date),
-              dueDate:
-                d.dueDate instanceof Date ? d.dueDate.toISOString() : d.dueDate,
-              items: receivingItemsMap.get(d.id) || [],
-              payments: receivingPaymentsMap.get(d.id) || [],
-            })),
+            documents: enrichedDocs,
           },
         });
       }

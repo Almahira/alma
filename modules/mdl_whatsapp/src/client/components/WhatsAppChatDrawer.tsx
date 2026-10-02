@@ -21,6 +21,7 @@ import {
   getStoredMessages,
   saveStoredMessage,
   getStoredInbox,
+  markStoredMessagesAsParsed,
 } from "../utils/waStorage";
 
 export const WhatsAppChatDrawer: React.FC<{
@@ -56,15 +57,55 @@ export const WhatsAppChatDrawer: React.FC<{
 
   const fetchMessages = () => {
     if (!selectedJid) return;
+    const jid = selectedJid;
     setHasMore(false);
-    const localMsgs = getStoredMessages(selectedJid);
+    const localMsgs = getStoredMessages(jid);
     setMessages(localMsgs);
     setTimeout(() => chatEndRef.current?.scrollIntoView(), 100);
+
+    let isActive = true;
+    fetch(getApiUrl(`/api/whatsapp/messages?jid=${encodeURIComponent(jid)}`))
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error(`Gagal menyinkronkan status pesan (${res.status})`);
+        }
+        return res.json();
+      })
+      .then((serverMessages) => {
+        if (!isActive) return;
+        if (!Array.isArray(serverMessages)) {
+          throw new Error("Respons sinkronisasi pesan tidak valid");
+        }
+
+        const parsedIds = serverMessages
+          .filter((message: any) => message.isPoParsed || message.is_po_parsed)
+          .map((message: any) => message.id);
+        if (parsedIds.length === 0) return;
+
+        markStoredMessagesAsParsed(parsedIds);
+        setMessages((prev) =>
+          prev.map((message) =>
+            parsedIds.includes(message.id)
+              ? { ...message, isPoParsed: true, is_po_parsed: true }
+              : message,
+          ),
+        );
+      })
+      .catch((err) => {
+        if (isActive) {
+          console.error("[WA MESSAGE STATUS SYNC ERROR]:", err);
+        }
+      });
+
+    return () => {
+      isActive = false;
+    };
   };
 
   useEffect(() => {
-    fetchMessages();
-  }, [selectedJid]);
+    if (!isOpen) return;
+    return fetchMessages();
+  }, [isOpen, selectedJid]);
 
   const loadOlderMessages = async () => {
     if (!selectedJid || isLoadingMore || !hasMore || messages.length === 0)
@@ -197,6 +238,7 @@ export const WhatsAppChatDrawer: React.FC<{
     const handleMessagesProcessed = (e: any) => {
       const processedIds: string[] = e.detail?.messageIds || [];
       if (processedIds.length > 0) {
+        markStoredMessagesAsParsed(processedIds);
         setMessages((prev) =>
           prev.map((m) =>
             processedIds.includes(m.id)
