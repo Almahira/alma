@@ -527,6 +527,7 @@ io.on("connection", async (socket) => {
     // GABUNGKAN KE SPATIAL ROOMS SECARA DINAMIS
     if (devCheck.length > 0) {
       const dev = devCheck[0];
+      socket.join(`device:${dev.id}`);
       if (dev.companyId) {
         socket.join(`company:${dev.companyId}`);
       }
@@ -622,7 +623,7 @@ io.on("connection", async (socket) => {
       await publishEvent("events.sync.up", event);
       console.log(`[SOCKET] -> Sukses publish ${event.type} ke NATS`);
       if (typeof callback === "function") {
-        callback({ status: "SUCCESS" });
+        callback({ status: "SUCCESS", queued: true });
       }
     } catch (error: any) {
       console.error(`[SOCKET] -> Gagal publish ke NATS:`, error);

@@ -82,12 +82,29 @@ function getSnapshotSchemaVersion(data: unknown): number {
   }
 }
 
+function getSnapshotEventCounts(
+  data: unknown,
+): { system: number; tx: number } | null {
+  try {
+    const payload = typeof data === "string" ? JSON.parse(data) : data;
+    const metadata = (payload as any)?.__metadata;
+    const system = Number(metadata?.totalSystemEvents);
+    const tx = Number(metadata?.totalTxEvents);
+    return Number.isFinite(system) && Number.isFinite(tx)
+      ? { system, tx }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 // =========================================================================
 // ENGINE SNAPSHOT SERVER OTOMATIS (CANONICAL SNAPSHOT GENERATOR)
 // Merekam seluruh skema dari folder modules dan packages/db-schema
 // =========================================================================
 export async function generateServerCanonicalSnapshot(
   targetCompanyId?: string,
+  forceRefresh = false,
 ) {
   try {
     // 1. Ambil daftar perusahaan aktif
@@ -137,6 +154,7 @@ export async function generateServerCanonicalSnapshot(
 
       // Jika snapshot sudah ada dan tidak ada event baru, lewati demi efisiensi
       if (
+        !forceRefresh &&
         existingSnap &&
         getSnapshotSchemaVersion(existingSnap.data) >=
           SNAPSHOT_SCHEMA_VERSION &&
@@ -1096,6 +1114,11 @@ router.post("/broadcast-resync", async (req: Request, res: Response) => {
  * langsung dibuatkan dari tabel fisik secara instan.
  */
 router.get("/snapshot/system/latest", async (req: Request, res: Response) => {
+  res.set({
+    "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+    Pragma: "no-cache",
+    Expires: "0",
+  });
   try {
     const companyId = req.query.companyId as string | undefined;
 
@@ -1110,15 +1133,36 @@ router.get("/snapshot/system/latest", async (req: Request, res: Response) => {
       .orderBy(desc(systemSnapshots.updatedAt))
       .limit(1);
 
-    // Build missing or outdated snapshots directly from physical tables.
+    const [systemEventCount, txEventCount] = await Promise.all([
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(systemEventJournal)
+        .then((result) => Number(result[0]?.count || 0)),
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(txEventJournal)
+        .then((result) => Number(result[0]?.count || 0)),
+    ]);
+
+    const currentSnapshot = rows[0];
+    const snapshotEventCounts = currentSnapshot
+      ? getSnapshotEventCounts(currentSnapshot.data)
+      : null;
+    const journalChanged =
+      !snapshotEventCounts ||
+      snapshotEventCounts.system !== systemEventCount ||
+      snapshotEventCounts.tx !== txEventCount;
+
+    // Refresh the physical-table snapshot when its journal watermark is stale.
     if (
-      rows.length === 0 ||
-      getSnapshotSchemaVersion(rows[0]?.data) < SNAPSHOT_SCHEMA_VERSION
+      !currentSnapshot ||
+      getSnapshotSchemaVersion(currentSnapshot.data) < SNAPSHOT_SCHEMA_VERSION ||
+      journalChanged
     ) {
       console.log(
-        "[SNAPSHOT ROUTE] Snapshot belum ada atau versinya usang. Membentuk ulang dari tabel fisik...",
+        "[SNAPSHOT ROUTE] Snapshot belum ada, usang, atau tertinggal dari jurnal. Membentuk ulang dari tabel fisik...",
       );
-      await generateServerCanonicalSnapshot(companyId);
+      await generateServerCanonicalSnapshot(companyId, true);
       rows = await db
         .select()
         .from(systemSnapshots)
@@ -1161,6 +1205,11 @@ router.get("/snapshot/system/latest", async (req: Request, res: Response) => {
 router.get(
   "/snapshot/module/:moduleName",
   async (req: Request, res: Response) => {
+    res.set({
+      "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+      Pragma: "no-cache",
+      Expires: "0",
+    });
     try {
       const { moduleName } = req.params;
       const companyId = req.query.companyId as string;

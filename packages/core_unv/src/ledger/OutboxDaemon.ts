@@ -88,6 +88,7 @@ function formatHumanReadableLog(
 
 export class OutboxDaemon {
   private isProcessing = false;
+  private processAgain = false;
   private socket: Socket | null = null;
 
   public attachSocket(socket: Socket) {
@@ -107,10 +108,57 @@ export class OutboxDaemon {
       });
     }
 
-    // Jalankan sweep berkala setiap 3 detik sebagai jaring pengaman
+    // Jalankan sweep berkala setiap 30 detik sebagai jaring pengaman
     setInterval(() => {
       this.processQueue();
     }, 30000);
+  }
+
+  public async confirmCommittedEvent(data: {
+    eventId: string;
+    status: "SUCCESS" | "MERGED" | "REJECTED";
+    message?: string;
+  }): Promise<void> {
+    const rxdb = globalLedger.getRxDatabase();
+    if (!rxdb || !data.eventId) return;
+
+    const outboxDoc = await rxdb.collections.outbox
+      .findOne(data.eventId)
+      .exec();
+    if (!outboxDoc) return;
+
+    const eventPayload = outboxDoc.toJSON().eventPayload;
+    const actorUserId = eventPayload.dddMetadata?.actor?.userId || "Sistem";
+    const { title, message } = formatHumanReadableLog(
+      eventPayload.type,
+      eventPayload.payload,
+      actorUserId,
+      data.status,
+      data.message,
+    );
+
+    await rxdb.collections.sync_logs.insert({
+      id: ulid(),
+      title,
+      message,
+      status:
+        data.status === "SUCCESS"
+          ? "SUCCESS"
+          : data.status === "MERGED"
+            ? "WARNING"
+            : "FAILED",
+      isRead: false,
+      createdAt: Date.now(),
+    });
+    await outboxDoc.remove();
+
+    if (data.status === "REJECTED") {
+      const localEvent = await rxdb.collections.events
+        .findOne(data.eventId)
+        .exec();
+      if (localEvent) await localEvent.remove();
+      await globalLedger.syncInitial({ recovery: true });
+    }
   }
 
   /**
@@ -118,7 +166,10 @@ export class OutboxDaemon {
    * Dilengkapi proteksi Head-of-Line Blocking, Circuit Breaker, dan Timeout yang stabil.
    */
   public async processQueue() {
-    if (this.isProcessing) return;
+    if (this.isProcessing) {
+      this.processAgain = true;
+      return;
+    }
 
     // 1. Validasi Konektivitas Nyata Fisik Browser & Socket
     const isBrowserOnline =
@@ -139,6 +190,16 @@ export class OutboxDaemon {
     try {
       const rxdb = globalLedger.getRxDatabase();
       if (!rxdb || !rxdb.collections.outbox) return;
+
+      const sentEvents = await rxdb.collections.outbox
+        .find({ selector: { status: "SENT" } })
+        .exec();
+      const retryCutoff = Date.now() - 30000;
+      for (const sentEvent of sentEvents) {
+        if (sentEvent.createdAt <= retryCutoff) {
+          await sentEvent.patch({ status: "PENDING" });
+        }
+      }
 
       outer: while (true) {
         if (
@@ -207,39 +268,39 @@ export class OutboxDaemon {
               return;
             }
 
-            const { title, message } = formatHumanReadableLog(
-              payload.type,
-              payload.payload,
-              actorUserId,
-              response.status,
-              response.message,
-            );
+            if (response.status === "QUEUED" || response.queued === true) {
+              const currentOutboxDoc = await rxdb.collections.outbox
+                .findOne(docData.id)
+                .exec();
+              if (currentOutboxDoc) {
+                await currentOutboxDoc.patch({
+                  status: "SENT",
+                });
+              }
+              continue;
+            }
 
             // Jika sukses atau di-merge: buang dari antrean outbox
             if (response.status === "SUCCESS" || response.status === "MERGED") {
-              await rxdb.collections.sync_logs.insert({
-                id: ulid(),
-                title,
-                message,
-                status: response.status === "MERGED" ? "WARNING" : "SUCCESS",
-                isRead: false,
-                createdAt: Date.now(),
+              await this.confirmCommittedEvent({
+                eventId: docData.id,
+                status: response.status,
+                message: response.message,
               });
-              await doc.remove();
             } else if (response.status === "REJECTED") {
-              await rxdb.collections.sync_logs.insert({
-                id: ulid(),
-                title,
-                message,
-                status: "FAILED",
-                isRead: false,
-                createdAt: Date.now(),
+              await this.confirmCommittedEvent({
+                eventId: docData.id,
+                status: "REJECTED",
+                message: response.message,
               });
-              await doc.remove();
             } else if (response.status === "FAILED") {
               // Jika server mengembalikan FAILED, lempar error agar memicu backoff retry
               throw new Error(
                 response.message || "Server menolak memproses antrean.",
+              );
+            } else {
+              throw new Error(
+                `Respons sinkronisasi tidak dikenal: ${response.status || "kosong"}`,
               );
             }
           } catch (error) {
@@ -258,6 +319,10 @@ export class OutboxDaemon {
       }
     } finally {
       this.isProcessing = false;
+      if (this.processAgain) {
+        this.processAgain = false;
+        void this.processQueue();
+      }
     }
   }
 }

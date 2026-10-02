@@ -330,7 +330,7 @@ function SystemBootstrapper() {
           console.log(
             "[BOOT] Menyinkronkan snapshot terbaru sebelum membuka aplikasi...",
           );
-          await globalLedger.syncInitial();
+          await globalLedger.syncInitial({ recovery: true });
         }
 
         setIsEngineReady(true);

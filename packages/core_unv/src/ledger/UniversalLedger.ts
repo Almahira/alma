@@ -57,6 +57,9 @@ export class UniversalLedger {
   private socket!: Socket;
   private isSyncing = false;
   private syncPromise: Promise<void> | null = null;
+  private syncRequested = false;
+  private syncRecoveryRequested = false;
+  private syncExactCursorRequested = false;
   private appendQueue: Promise<unknown> = Promise.resolve();
 
   public async init(): Promise<void> {
@@ -258,6 +261,24 @@ export class UniversalLedger {
         }
       });
 
+      this.socket.on("SYNC_COMMITTED", (data: any) => {
+        if (
+          !data?.eventId ||
+          !["SUCCESS", "MERGED", "REJECTED"].includes(data.status)
+        ) {
+          console.error("[SOCKET SYNC] Konfirmasi commit server tidak valid:", data);
+          return;
+        }
+        void globalOutbox
+          .confirmCommittedEvent(data)
+          .catch((error) =>
+            console.error(
+              `[SOCKET SYNC] Gagal menyelesaikan outbox ${data.eventId}:`,
+              error,
+            ),
+          );
+      });
+
       // Listener status sesi dan pesan WhatsApp masuk secara real-time
       this.socket.on("WA_CONNECTION_STATUS", (data: any) => {
         if (typeof window !== "undefined") {
@@ -305,10 +326,33 @@ export class UniversalLedger {
     return this.initPromise;
   }
 
-  public async syncInitial(): Promise<void> {
-    if (this.syncPromise) return this.syncPromise;
+  public async syncInitial(
+    options: { recovery?: boolean; exactCursor?: boolean } = {},
+  ): Promise<void> {
+    if (this.syncPromise) {
+      this.syncRequested = true;
+      this.syncRecoveryRequested =
+        this.syncRecoveryRequested || options.recovery === true;
+      this.syncExactCursorRequested =
+        this.syncExactCursorRequested || options.exactCursor === true;
+      return this.syncPromise;
+    }
 
-    const syncPromise = this.performInitialSync();
+    const syncPromise = (async () => {
+      let recoveryRequested = options.recovery === true;
+      let exactCursorRequested = options.exactCursor === true;
+      do {
+        this.syncRequested = false;
+        const recovery = recoveryRequested || this.syncRecoveryRequested;
+        const exactCursor =
+          exactCursorRequested || this.syncExactCursorRequested;
+        recoveryRequested = false;
+        exactCursorRequested = false;
+        this.syncRecoveryRequested = false;
+        this.syncExactCursorRequested = false;
+        await this.performInitialSync(recovery, exactCursor);
+      } while (this.syncRequested);
+    })();
     this.syncPromise = syncPromise;
     try {
       await syncPromise;
@@ -317,7 +361,10 @@ export class UniversalLedger {
     }
   }
 
-  private async performInitialSync(): Promise<void> {
+  private async performInitialSync(
+    recovery: boolean,
+    exactCursor: boolean,
+  ): Promise<void> {
     this.isSyncing = true;
 
     // Pancarkan sinyal ke Footer UI: Mulai Sinkronisasi
@@ -370,14 +417,19 @@ export class UniversalLedger {
       let snapshotCutoffTime: number | null = null;
 
       try {
-        console.log(
-          "[SYNC INITIAL] Mengambil Snapshot Ground Truth Fisik dari server...",
-        );
-        const snapRes = await fetch(
-          getApiUrl(
-            `/api/system-health/snapshot/system/latest?companyId=${companyId || ""}`,
-          ),
-        ).catch(() => null);
+        if (recovery) {
+          console.log(
+            "[SYNC INITIAL] Mengambil Snapshot Ground Truth Fisik dari server...",
+          );
+        }
+        const snapRes = recovery
+          ? await fetch(
+              getApiUrl(
+                `/api/system-health/snapshot/system/latest?companyId=${companyId || ""}`,
+              ),
+              { cache: "no-store" },
+            ).catch(() => null)
+          : null;
 
         if (snapRes && snapRes.ok) {
           const snapJson = await snapRes.json();
@@ -451,11 +503,15 @@ export class UniversalLedger {
         const lastCursorTx = localStorage.getItem("__unv_cursor_tx");
 
         if (lastCursorSystem) {
-          const safeSystemSince = Math.max(0, Number(lastCursorSystem) - 2000);
+          const safeSystemSince = exactCursor
+            ? Number(lastCursorSystem)
+            : Math.max(0, Number(lastCursorSystem) - 2000);
           queryParamsSystem.set("since", String(safeSystemSince));
         }
         if (lastCursorTx) {
-          const safeTxSince = Math.max(0, Number(lastCursorTx) - 2000);
+          const safeTxSince = exactCursor
+            ? Number(lastCursorTx)
+            : Math.max(0, Number(lastCursorTx) - 2000);
           queryParamsTx.set("since", String(safeTxSince));
         }
       }
@@ -500,6 +556,9 @@ export class UniversalLedger {
       });
 
       if (!serverEvents || serverEvents.length === 0) {
+        if (recovery && snapshotCutoffTime !== null) {
+          await this.reapplyPendingLocalEvents(true);
+        }
         this.isSyncing = false;
         return;
       }
@@ -564,6 +623,10 @@ export class UniversalLedger {
 
         notifyStateUpdated();
       }
+
+      if (recovery && snapshotCutoffTime !== null) {
+        await this.reapplyPendingLocalEvents(true);
+      }
     } catch (error) {
       console.warn("[UNIVERSAL LEDGER] Gagal sinkronisasi awal:", error);
     } finally {
@@ -587,6 +650,44 @@ export class UniversalLedger {
         );
       }
     }
+  }
+
+  public async reapplyPendingLocalEvents(replayAll = true): Promise<void> {
+    const pendingOutbox = await this.db.collections.outbox
+      .find({
+        selector: { status: { $in: ["PENDING", "SENT"] } },
+        sort: [{ createdAt: "asc" }],
+      })
+      .exec();
+    if (pendingOutbox.length === 0) return;
+
+    const snapshot = await this.db.collections.snapshots
+      .findOne("GLOBAL_SNAPSHOT")
+      .exec();
+    const snapshotSeq = snapshot?.lastSeq || 0;
+    let replayedCount = 0;
+
+    for (const outboxDoc of pendingOutbox) {
+      const pendingEvent = outboxDoc.toJSON().eventPayload as LedgerEventDoc;
+      const localEvent = await this.db.collections.events
+        .findOne(pendingEvent.id)
+        .exec();
+      if (!localEvent) continue;
+      if (!replayAll && localEvent.seq > snapshotSeq) continue;
+      globalRegistry.processEvent(localEvent.toJSON());
+      replayedCount += 1;
+    }
+
+    if (replayedCount > 0 && this.memCurrentSeq > 0) {
+      await this.db.collections.snapshots.upsert({
+        id: "GLOBAL_SNAPSHOT",
+        lastSeq: this.memCurrentSeq,
+        data: globalRegistry.getAllStates(),
+        updatedAt: Date.now(),
+      });
+    }
+
+    notifyStateUpdated();
   }
 
   /**
@@ -825,6 +926,10 @@ export class UniversalLedger {
 
   public getCurrentSeq(): number {
     return this.memCurrentSeq;
+  }
+
+  public setSnapshotBaseSequence(sequence: number): void {
+    this.memCurrentSeq = Math.max(0, Number(sequence) || 0);
   }
 
   /**

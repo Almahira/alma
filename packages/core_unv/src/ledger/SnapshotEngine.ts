@@ -26,6 +26,7 @@ export class SnapshotEngine {
         getApiUrl(
           `/api/system-health/snapshot/system/latest?companyId=${companyId || ""}`,
         ),
+        { cache: "no-store" },
       ).catch(() => null);
 
       if (!res || !res.ok) {
@@ -55,6 +56,13 @@ export class SnapshotEngine {
         data: s.data,
         updatedAt: s.updatedAt,
       });
+      globalLedger.setSnapshotBaseSequence(s.lastSeq);
+
+      if (s.updatedAt) {
+        const snapshotCursor = String(new Date(s.updatedAt).getTime());
+        localStorage.setItem("__unv_cursor_system", snapshotCursor);
+        localStorage.setItem("__unv_cursor_tx", snapshotCursor);
+      }
 
       // 2. Rehidrasi memori CQRS Read Model seketika
       if (s.data) {
@@ -102,6 +110,7 @@ export class SnapshotEngine {
         getApiUrl(
           `/api/system-health/snapshot/module/${normalized}?companyId=${companyId}`,
         ),
+        { cache: "no-store" },
       ).catch(() => null);
 
       if (!res || !res.ok) return false;

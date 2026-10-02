@@ -30,6 +30,60 @@ const serverHandlers: Record<string, Function> = {
   ...warehouseHandlers,
 };
 
+function broadcastSyncNeeded(
+  io: Server,
+  event: any,
+  spatial: {
+    companyId?: string | null;
+    regionId?: string | null;
+    outletId?: string | null;
+    targetVendorId?: string | null;
+  },
+): void {
+  const rooms = [
+    spatial.companyId ? `company:${spatial.companyId}` : null,
+    spatial.regionId ? `region:${spatial.regionId}` : null,
+    spatial.outletId ? `outlet:${spatial.outletId}` : null,
+    spatial.targetVendorId ? `region:${spatial.targetVendorId}` : null,
+  ].filter((room): room is string => Boolean(room));
+
+  const syncPayload = {
+    eventId: event.id,
+    type: event.type,
+    aggregateId: event.aggregateId,
+    version: event.aggregateVersion || 1,
+    aggregateType:
+      event.aggregateType || event.dddMetadata?.aggregateType || "SYSTEM",
+    originDeviceId:
+      event.nodeMetadata?.originDeviceId || event.originDeviceId || "SERVER",
+    companyId: spatial.companyId || null,
+    regionId: spatial.regionId || null,
+    outletId: spatial.outletId || null,
+  };
+
+  if (rooms.length === 0) {
+    io.emit("SYNC_NEEDED", syncPayload);
+    return;
+  }
+
+  io.to(rooms).emit("SYNC_NEEDED", syncPayload);
+}
+
+function confirmOriginDevice(
+  io: Server,
+  deviceId: string | undefined,
+  eventId: string,
+  status: "SUCCESS" | "MERGED" | "REJECTED",
+  message?: string,
+): void {
+  if (!deviceId || deviceId === "SERVER") return;
+  io.to(`device:${deviceId}`).emit("SYNC_COMMITTED", {
+    eventId,
+    status,
+    message,
+  });
+}
+
 export async function startSyncWorker(io: Server) {
   console.log("[WORKER] Menginisialisasi Consumer NATS Universal...");
   try {
@@ -156,39 +210,30 @@ export async function startSyncWorker(io: Server) {
           payload.vendorId ||
           payload.data?.vendorId;
 
-        const syncPayload = {
+        broadcastSyncNeeded(
+          io,
+          {
+            ...event,
+            id: eventId,
+            aggregateId,
+            type,
+            payload,
+            aggregateType: event.dddMetadata?.aggregateType || "SYSTEM",
+            actor: event.dddMetadata?.actor?.userId || "SYSTEM",
+          },
+          {
+            companyId: payloadCompanyId,
+            regionId: payloadRegionId,
+            outletId: payloadOutletId,
+            targetVendorId,
+          },
+        );
+        confirmOriginDevice(
+          io,
+          event.nodeMetadata?.originDeviceId,
           eventId,
-          type,
-          aggregateType: event.dddMetadata?.aggregateType,
-          originDeviceId: event.nodeMetadata?.originDeviceId,
-          companyId: payloadCompanyId,
-          regionId: payloadRegionId,
-          outletId: payloadOutletId,
-          targetVendorId: targetVendorId,
-        };
-
-        // Jika event tidak memiliki konteks spasial perusahaan (seperti DICTIONARY), pancarkan broadcast global
-        if (!payloadCompanyId && !payloadRegionId && !payloadOutletId) {
-          io.emit("SYNC_NEEDED", syncPayload);
-        } else if (payloadCompanyId && !payloadRegionId && !payloadOutletId) {
-          io.to(`company:${payloadCompanyId}`).emit("SYNC_NEEDED", syncPayload);
-        } else {
-          if (payloadRegionId) {
-            io.to(`region:${payloadRegionId}`).emit("SYNC_NEEDED", syncPayload);
-          }
-          if (targetVendorId && targetVendorId !== payloadRegionId) {
-            io.to(`region:${targetVendorId}`).emit("SYNC_NEEDED", syncPayload);
-          }
-          if (payloadOutletId) {
-            io.to(`outlet:${payloadOutletId}`).emit("SYNC_NEEDED", syncPayload);
-          }
-          if (payloadCompanyId) {
-            io.to(`company:${payloadCompanyId}`).emit(
-              "SYNC_NEEDED",
-              syncPayload,
-            );
-          }
-        }
+          "SUCCESS",
+        );
 
         // Tetap broadcast dashboard refresh secara global
         io.emit("EXECUTIVE_DASHBOARD_REFRESH", {
@@ -205,11 +250,104 @@ export async function startSyncWorker(io: Server) {
             constraint === "system_event_journal_pkey" ||
             constraint === "tx_event_journal_pkey"
           ) {
+            const committedRows = await db
+              .select()
+              .from(targetJournal)
+              .where(eq(targetJournal.id, eventId))
+              .limit(1);
+            if (committedRows.length > 0) {
+              const committed = committedRows[0];
+              const committedPayload =
+                typeof committed.payload === "string"
+                  ? JSON.parse(committed.payload)
+                  : committed.payload;
+              broadcastSyncNeeded(
+                io,
+                {
+                  ...event,
+                  id: committed.id,
+                  aggregateId: committed.aggregateId,
+                  aggregateVersion: committed.aggregateVersion,
+                  aggregateType: committed.aggregateType,
+                  type: committed.type,
+                  payload: committedPayload,
+                  actor: committed.actor,
+                  createdAt: committed.createdAt,
+                },
+                {
+                  companyId: effectiveCompanyId,
+                  regionId: committed.regionId,
+                  outletId: committed.outletId,
+                  targetVendorId:
+                    committedPayload.reference?.supplierId ||
+                    committedPayload.vendorId ||
+                    committedPayload.data?.vendorId,
+                },
+              );
+            }
             console.warn(
               `[WORKER] Idempotent: Event ${eventId} sudah ada di DB. Ack pesan.`,
             );
+            confirmOriginDevice(
+              io,
+              event.nodeMetadata?.originDeviceId,
+              eventId,
+              "SUCCESS",
+            );
             m.ack();
           } else {
+            const existingRebaseId = `REBASED_${eventId}`;
+            const existingRebaseRows = await db
+              .select()
+              .from(targetJournal)
+              .where(eq(targetJournal.id, existingRebaseId))
+              .limit(1);
+
+            if (existingRebaseRows.length > 0) {
+              const rebased = existingRebaseRows[0];
+              const rebasedPayload =
+                typeof rebased.payload === "string"
+                  ? JSON.parse(rebased.payload)
+                  : rebased.payload;
+              broadcastSyncNeeded(
+                io,
+                {
+                  ...event,
+                  id: rebased.id,
+                  aggregateId: rebased.aggregateId,
+                  aggregateVersion: rebased.aggregateVersion,
+                  aggregateType: rebased.aggregateType,
+                  type: rebased.type,
+                  payload: rebasedPayload,
+                  actor: rebased.actor,
+                  nodeMetadata: {
+                    originDeviceId: "SERVER_REBASE",
+                    signature: "SERVER_COMMITTED",
+                  },
+                  dddMetadata: {
+                    ...event.dddMetadata,
+                    eventId: rebased.id,
+                    aggregateId: rebased.aggregateId,
+                    aggregateType: rebased.aggregateType,
+                    aggregateVersion: rebased.aggregateVersion,
+                  },
+                },
+                {
+                  companyId: effectiveCompanyId,
+                  regionId: rebased.regionId,
+                  outletId: rebased.outletId,
+                },
+              );
+              confirmOriginDevice(
+                io,
+                event.nodeMetadata?.originDeviceId,
+                eventId,
+                "MERGED",
+              );
+              m.ack();
+              continue;
+            }
+
             console.log(
               `[WORKER] Terdeteksi Event Konkuren/Offline pada ${aggregateId} (Target v${event.aggregateVersion || 1}). Memulai Sequential Rebase...`,
             );
@@ -320,36 +458,37 @@ export async function startSyncWorker(io: Server) {
                   `[WORKER] SUKSES: Rebase ${aggregateId} selesai! Versi dinaikkan menjadi v${newVersion} dan tabel fisik diperbarui.`,
                 );
 
-                // 7. Siarkan SYNC_NEEDED ke Seluruh Cabang dengan Versi Terkini
-                const syncPayload = {
-                  eventId: newEventId,
-                  type,
-                  aggregateId,
-                  version: newVersion,
-                  aggregateType: event.dddMetadata?.aggregateType,
-                  originDeviceId: "SERVER_REBASE",
-                  companyId: effectiveCompanyId,
-                  regionId: mergedRegionId,
-                  outletId: mergedOutletId,
-                };
-
-                if (mergedOutletId) {
-                  io.to(`outlet:${mergedOutletId}`).emit(
-                    "SYNC_NEEDED",
-                    syncPayload,
-                  );
-                } else if (mergedRegionId) {
-                  io.to(`region:${mergedRegionId}`).emit(
-                    "SYNC_NEEDED",
-                    syncPayload,
-                  );
-                }
-                if (effectiveCompanyId) {
-                  io.to(`company:${effectiveCompanyId}`).emit(
-                    "SYNC_NEEDED",
-                    syncPayload,
-                  );
-                }
+                broadcastSyncNeeded(
+                  io,
+                  {
+                    ...newEvent,
+                    aggregateType:
+                      event.dddMetadata?.aggregateType || "SYSTEM",
+                    actor:
+                      event.dddMetadata?.actor?.userId || "SYSTEM_REBASE",
+                    nodeMetadata: {
+                      originDeviceId: "SERVER_REBASE",
+                      signature: "SERVER_COMMITTED",
+                    },
+                    dddMetadata: {
+                      ...event.dddMetadata,
+                      eventId: newEventId,
+                      aggregateId,
+                      aggregateVersion: newVersion,
+                    },
+                  },
+                  {
+                    companyId: effectiveCompanyId,
+                    regionId: mergedRegionId,
+                    outletId: mergedOutletId,
+                  },
+                );
+                confirmOriginDevice(
+                  io,
+                  event.nodeMetadata?.originDeviceId,
+                  eventId,
+                  "MERGED",
+                );
               }
 
               // Selesaikan pesan di NATS
@@ -368,6 +507,13 @@ export async function startSyncWorker(io: Server) {
                   actor: event.dddMetadata?.actor?.userId || "SYSTEM",
                   errorReason: `Fatal Crash Rebase: ${mergeErr.message}`,
                 });
+                confirmOriginDevice(
+                  io,
+                  event.nodeMetadata?.originDeviceId,
+                  eventId,
+                  "REJECTED",
+                  mergeErr.message,
+                );
                 m.ack();
               } catch (qErr) {
                 console.error("[WORKER] Gagal mencatat crash:", qErr);
@@ -394,6 +540,13 @@ export async function startSyncWorker(io: Server) {
               errorReason:
                 error.message || error?.cause?.message || "Unknown Fatal Error",
             });
+            confirmOriginDevice(
+              io,
+              event.nodeMetadata?.originDeviceId,
+              eventId,
+              "REJECTED",
+              error.message || error?.cause?.message || "Unknown Fatal Error",
+            );
             m.ack();
           } catch (qError) {
             console.error(

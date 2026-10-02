@@ -7,6 +7,7 @@ export class InboxDaemon {
   private intervalId: any = null;
   private insertSub: Subscription | null = null;
   private isStarted = false;
+  private processAgain = false;
 
   /**
    * MEMULAI DAEMON INBOX (Dipanggil saat boot di main.tsx)
@@ -53,7 +54,10 @@ export class InboxDaemon {
    * MEMPROSES SELURUH ANTREAN EVENT DI INBOX SECARA IDEMPOTEN & KEBAL MACET
    */
   public async processQueue(): Promise<void> {
-    if (this.isProcessing) return;
+    if (this.isProcessing) {
+      this.processAgain = true;
+      return;
+    }
     this.isProcessing = true;
     try {
       const db = globalLedger.getRxDatabase();
@@ -118,6 +122,10 @@ export class InboxDaemon {
       console.error("[INBOX DAEMON] Error pada siklus antrean:", err);
     } finally {
       this.isProcessing = false;
+      if (this.processAgain) {
+        this.processAgain = false;
+        void this.processQueue();
+      }
     }
   }
 }

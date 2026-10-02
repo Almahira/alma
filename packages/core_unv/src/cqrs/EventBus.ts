@@ -111,18 +111,26 @@ export class EventBus {
     if (!rxdb) return;
 
     try {
-      // 1. PEMBERSIHAN DATA LOKAL TOTAL (Wajib Bersih)
-      if (rxdb.collections.inbox) {
-        await rxdb.collections.inbox.find().remove();
-      }
-      if (rxdb.collections.outbox) {
-        await rxdb.collections.outbox.find().remove();
-      }
+      // 1. Buang cache committed lama, tetapi pertahankan event lokal yang belum terkirim.
+      const pendingOutbox = rxdb.collections.outbox
+        ? await rxdb.collections.outbox
+            .find({ selector: { status: { $in: ["PENDING", "SENT"] } } })
+            .exec()
+        : [];
+      const pendingEventIds = new Set(
+        pendingOutbox.map((doc) => doc.eventPayload.id),
+      );
+
       if (rxdb.collections.snapshots) {
         await rxdb.collections.snapshots.find().remove();
       }
       if (rxdb.collections.events) {
-        await rxdb.collections.events.find().remove();
+        const localEvents = await rxdb.collections.events.find().exec();
+        for (const eventDoc of localEvents) {
+          if (!pendingEventIds.has(eventDoc.id)) {
+            await eventDoc.remove();
+          }
+        }
       }
 
       // 2. RESET SEQUENCE & HASH CHAIN RAM KE 0
@@ -156,11 +164,14 @@ export class EventBus {
         console.warn(
           "[RESYNC ENGINE] Gagal memuat snapshot server, menjalankan fallback syncInitial...",
         );
-        await globalLedger.syncInitial();
+        await globalLedger.syncInitial({ recovery: true });
+      } else {
+        await globalLedger.syncInitial({ exactCursor: true });
       }
 
       // 6. PASTIKAN SELURUH READ MODEL SUDAH SESUAI DENGAN DATA FISIK
       await this.rebuildState();
+      await globalLedger.reapplyPendingLocalEvents(false);
 
       console.log(
         "[RESYNC ENGINE] SUKSES: Database lokal bersih 100% dan identik 1:1 dengan server pusat!",
