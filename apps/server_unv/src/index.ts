@@ -2,7 +2,7 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import { eq, inArray, or, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import { db } from "./config/db.js";
@@ -251,17 +251,11 @@ app.get("/api/events/pull/system", async (req, res) => {
 
     // Pastikan event master data SELALU berurutan dari waktu paling awal ke terbaru
     let systemEventsRaw: any[] = [];
-    if (requestedEventIds.length > 0 && hasDeltaCursor) {
-      const sinceDate = new Date(sinceTimestamp);
+    if (requestedEventIds.length > 0) {
       systemEventsRaw = await db
         .select()
         .from(systemEventJournal)
-        .where(
-          or(
-            inArray(systemEventJournal.id, requestedEventIds),
-            sql`${systemEventJournal.createdAt} > ${sinceDate}`,
-          ),
-        )
+        .where(inArray(systemEventJournal.id, requestedEventIds))
         .orderBy(systemEventJournal.createdAt, systemEventJournal.id)
         .limit(JOURNAL_PULL_BATCH_SIZE + 1)
         .offset(pageOffset);
@@ -393,17 +387,11 @@ app.get("/api/events/pull/tx", async (req, res) => {
 
     // Kueri inkremental berindeks: hanya ambil baris yang terjadi setelah stempel waktu cursor
     let txEventsRaw: any[] = [];
-    if (requestedEventIds.length > 0 && hasDeltaCursor) {
-      const sinceDate = new Date(sinceTimestamp);
+    if (requestedEventIds.length > 0) {
       txEventsRaw = await db
         .select()
         .from(txEventJournal)
-        .where(
-          or(
-            inArray(txEventJournal.id, requestedEventIds),
-            sql`${txEventJournal.createdAt} > ${sinceDate}`,
-          ),
-        )
+        .where(inArray(txEventJournal.id, requestedEventIds))
         .orderBy(txEventJournal.createdAt, txEventJournal.id)
         .limit(JOURNAL_PULL_BATCH_SIZE + 1)
         .offset(pageOffset);

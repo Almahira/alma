@@ -243,6 +243,14 @@ export function ReceivingPage() {
   const [dateEnd, setDateEnd] = useState(
     () => getCurrentMonthDateRange().end,
   );
+  const handleDateStartChange = (value: string) => {
+    setDateStart(value);
+    if (value && dateEnd && value > dateEnd) setDateEnd(value);
+  };
+  const handleDateEndChange = (value: string) => {
+    setDateEnd(value);
+    if (value && dateStart && value < dateStart) setDateStart(value);
+  };
   const [filterStatus, setFilterStatus] = useState("ALL");
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
     {},
@@ -770,7 +778,7 @@ export function ReceivingPage() {
           <input
             type="date"
             value={dateStart}
-            onChange={(e) => setDateStart(e.target.value)}
+            onChange={(e) => handleDateStartChange(e.target.value)}
             className="bg-transparent text-xs font-bold text-slate-900 outline-none"
             title="Tanggal Mulai Periode"
           />
@@ -778,7 +786,7 @@ export function ReceivingPage() {
           <input
             type="date"
             value={dateEnd}
-            onChange={(e) => setDateEnd(e.target.value)}
+            onChange={(e) => handleDateEndChange(e.target.value)}
             className="bg-transparent text-xs font-bold text-slate-900 outline-none"
             title="Tanggal Akhir Periode"
           />

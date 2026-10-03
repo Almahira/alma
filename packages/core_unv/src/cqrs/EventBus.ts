@@ -3,6 +3,7 @@ import { globalLedger } from "../ledger/UniversalLedger";
 import { globalRegistry } from "./UniversalRegistry";
 import { SnapshotEngine } from "../ledger/SnapshotEngine";
 import { RuntimeSession } from "../config/session";
+import { LedgerEventDoc } from "../ledger/schema";
 
 // Microtask Debouncer: Menggabungkan puluhan event sinkronisasi menjadi 1 sinyal UI render
 let isNotifyScheduled = false;
@@ -20,6 +21,10 @@ export function notifyStateUpdated(): void {
 export class EventBus {
   private static initialized = false;
   private static initPromise: Promise<void> | null = null;
+  private static rebuildPromise: Promise<void> | null = null;
+  private static isRebuilding = false;
+  private static queuedEvents = new Map<string, LedgerEventDoc>();
+  private static eventsListenerAttached = false;
 
   public static async bootAndReplay(): Promise<void> {
     if (this.initialized) return;
@@ -27,16 +32,26 @@ export class EventBus {
     this.initPromise = (async () => {
       // 1. Inisialisasi Database RxDB
       await globalLedger.init();
+      const rxdb = globalLedger.getRxDatabase();
+      if (
+        !this.eventsListenerAttached &&
+        rxdb &&
+        rxdb.collections.events
+      ) {
+        rxdb.collections.events.insert$.subscribe((changeEvent) => {
+          const event = changeEvent.documentData;
+          if (this.isRebuilding) {
+            this.queuedEvents.set(event.id, event);
+          } else {
+            globalRegistry.processEvent(event);
+            notifyStateUpdated();
+          }
+        });
+        this.eventsListenerAttached = true;
+      }
       // 2. Rehidrasi Pasti: Replay seluruh event lokal dari Sequence 1
       await this.rebuildState();
-      // 3. Pasang listener reaktif untuk transaksi baru yang masuk
-      const rxdb = globalLedger.getRxDatabase();
-      if (rxdb && rxdb.collections.events) {
-        rxdb.collections.events.insert$.subscribe((changeEvent) => {
-          globalRegistry.processEvent(changeEvent.documentData);
-          notifyStateUpdated();
-        });
-      }
+      // 3. Aktifkan EventBus setelah replay awal selesai.
       this.initialized = true;
       console.log("[EVENT BUS] Active & Listening for new transactions.");
     })();
@@ -46,55 +61,91 @@ export class EventBus {
   /**
    * MEMBANGUN ULANG STATE DARI SEQUENCE 1 KE SELURUH PROYEKSI
    */
-  public static async rebuildState(): Promise<void> {
+  public static async rebuildState(
+    options: { persistSnapshot?: boolean } = {},
+  ): Promise<void> {
+    if (this.rebuildPromise) return this.rebuildPromise;
+    const rebuildPromise = this.rebuildStateInternal(options);
+    this.rebuildPromise = rebuildPromise;
+    try {
+      return await rebuildPromise;
+    } finally {
+      if (this.rebuildPromise === rebuildPromise) this.rebuildPromise = null;
+    }
+  }
+
+  private static async rebuildStateInternal(
+    options: { persistSnapshot?: boolean },
+  ): Promise<void> {
     const rxdb = globalLedger.getRxDatabase();
     if (!rxdb || !rxdb.collections.events) return;
 
-    globalRegistry.hardReset();
+    this.isRebuilding = true;
+    try {
+      // 1. CEK APAKAH ADA FOTO SNAPSHOT TERAKHIR DI DATABASE LOKAL
+      let startSeq = 0;
+      let snapshotState: Record<string, any> | null = null;
+      if (rxdb.collections.snapshots) {
+        const snapDoc = await rxdb.collections.snapshots
+          .findOne("GLOBAL_SNAPSHOT")
+          .exec();
 
-    // 1. CEK APAKAH ADA FOTO SNAPSHOT TERAKHIR DI DATABASE LOKAL
-    let startSeq = 0;
-    if (rxdb.collections.snapshots) {
-      const snapDoc = await rxdb.collections.snapshots
-        .findOne("GLOBAL_SNAPSHOT")
-        .exec();
-
-      if (snapDoc) {
-        const snap = snapDoc.toJSON();
-        if (snap.data && snap.lastSeq > 0) {
-          console.log(
-            `[EVENT BUS] Snapshot ditemukan (Sequence #${snap.lastSeq}). Memulihkan memori secara instan...`,
-          );
-          globalRegistry.restoreAllStates(snap.data);
-          startSeq = snap.lastSeq;
+        if (snapDoc) {
+          const snap = snapDoc.toJSON();
+          if (snap.data && snap.lastSeq > 0) {
+            console.log(
+              `[EVENT BUS] Snapshot ditemukan (Sequence #${snap.lastSeq}). Memulihkan memori secara instan...`,
+            );
+            snapshotState =
+              typeof snap.data === "string" ? JSON.parse(snap.data) : snap.data;
+            startSeq = snap.lastSeq;
+          }
         }
       }
+
+      // 2. HANYA PUTAR EVENT YANG TERJADI SETELAH SNAPSHOT (DELTA EVENT)
+      const querySelector = startSeq > 0 ? { seq: { $gt: startSeq } } : {};
+
+      const deltaEvents = await rxdb.collections.events
+        .find({
+          selector: querySelector,
+          sort: [{ seq: "asc" }],
+        })
+        .exec();
+
+      globalRegistry.hardReset();
+      if (snapshotState) globalRegistry.restoreAllStates(snapshotState);
+      const replayedIds = new Set<string>();
+      for (const doc of deltaEvents) {
+        const event = doc.toJSON();
+        globalRegistry.processEvent(event);
+        replayedIds.add(event.id);
+      }
+
+      const applyQueuedEvents = () => {
+        for (const [eventId, event] of this.queuedEvents) {
+          if (!replayedIds.has(eventId)) {
+            globalRegistry.processEvent(event);
+            replayedIds.add(eventId);
+          }
+        }
+        this.queuedEvents.clear();
+      };
+      applyQueuedEvents();
+
+      console.log(
+        `[EVENT BUS] Rehidrasi selesai. Snapshot Sequence: #${startSeq} + ${deltaEvents.length} delta event baru.`,
+      );
+
+      if (deltaEvents.length > 0 && options.persistSnapshot !== false) {
+        await SnapshotEngine.takeSnapshot();
+      }
+
+      applyQueuedEvents();
+      notifyStateUpdated();
+    } finally {
+      this.isRebuilding = false;
     }
-
-    // 2. HANYA PUTAR EVENT YANG TERJADI SETELAH SNAPSHOT (DELTA EVENT)
-    const querySelector = startSeq > 0 ? { seq: { $gt: startSeq } } : {};
-
-    const deltaEvents = await rxdb.collections.events
-      .find({
-        selector: querySelector,
-        sort: [{ seq: "asc" }],
-      })
-      .exec();
-
-    for (const doc of deltaEvents) {
-      globalRegistry.processEvent(doc.toJSON());
-    }
-
-    console.log(
-      `[EVENT BUS] Rehidrasi selesai. Snapshot Sequence: #${startSeq} + ${deltaEvents.length} delta event baru.`,
-    );
-
-    // 3. Ambil potret baru jika ada event delta yang baru diproses
-    if (deltaEvents.length > 0) {
-      await SnapshotEngine.takeSnapshot();
-    }
-
-    notifyStateUpdated();
   }
 
   /**
@@ -171,9 +222,7 @@ export class EventBus {
       } catch {}
 
       // PASTIKAN READ MODEL SUDAH SESUAI DENGAN SNAPSHOT + DELTA
-      await this.rebuildState();
-      await globalLedger.reapplyPendingLocalEvents(true);
-
+      await this.rebuildState({ persistSnapshot: false });
       console.log(
         "[RESYNC ENGINE] SUKSES: Database lokal bersih 100% dan identik 1:1 dengan server pusat!",
       );

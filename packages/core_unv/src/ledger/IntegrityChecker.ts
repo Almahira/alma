@@ -14,15 +14,30 @@ export class IntegrityChecker {
         .find({ sort: [{ seq: "asc" }] })
         .exec();
 
+      const snapshot = await rxdb.collections.snapshots
+        .findOne("GLOBAL_SNAPSHOT")
+        .exec();
+      const snapshotSeq = snapshot?.lastSeq || 0;
+      const eventsAfterSnapshot = events.filter(
+        (doc) => doc.seq > snapshotSeq,
+      );
+
       if (events.length === 0) {
         console.log("[INTEGRITY] Ledger kosong. Rantai aman.");
         return true;
       }
 
-      let expectedSeq = events[0].seq; // Biasanya 1, tapi bisa berlanjut dari tarikan server
-      let previousHash = events[0].prevHash; // Biasanya "0" untuk event pertama
+      if (eventsAfterSnapshot.length === 0) {
+        console.log(
+          `[INTEGRITY] ${events.length} event tercakup snapshot sequence #${snapshotSeq}.`,
+        );
+        return true;
+      }
 
-      for (const doc of events) {
+      let expectedSeq = eventsAfterSnapshot[0].seq;
+      let previousHash = eventsAfterSnapshot[0].prevHash;
+
+      for (const doc of eventsAfterSnapshot) {
         const ev = doc.toJSON();
 
         // 1. Cek Urutan Sequence (Monotonic)

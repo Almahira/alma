@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { CryptoManager } from "../../../../packages/core_unv/src/ledger/crypto";
 import { globalLedger } from "../../../../packages/core_unv/src/ledger/UniversalLedger";
+import { EventBus } from "../../../../packages/core_unv/src/cqrs/EventBus";
 import { LicenseManager } from "../../../../packages/core_unv/src/ledger/licenseManager";
 import { sysToast } from "../shared-ui/useToastStore";
 import { manager } from "../pluginRegistry";
@@ -490,10 +491,6 @@ export const SetupWizardSM: React.FC<{ onComplete: () => void }> = ({ onComplete
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
 
-      addLog(`[STORAGE] Menginisialisasi Universal Ledger (RxDB)...`);
-      await globalLedger.init();
-      addLog(`[STORAGE] Database Lokal Terenkripsi Siap.`);
-
       localStorage.setItem("__unv_deviceToken", data.deviceToken);
       localStorage.setItem(
         "__unv_allowed_modules",
@@ -504,6 +501,11 @@ export const SetupWizardSM: React.FC<{ onComplete: () => void }> = ({ onComplete
       localStorage.setItem("__unv_outletId", data.outletId || "");
       localStorage.setItem("__unv_license_tier", licenseTier);
       if (licenseKey) localStorage.setItem("__unv_license_token", licenseKey);
+
+      addLog(`[STORAGE] Menginisialisasi Universal Ledger (RxDB)...`);
+      await globalLedger.init();
+      await EventBus.bootAndReplay();
+      addLog(`[STORAGE] Database Lokal Terenkripsi Siap.`);
 
       addLog(
         "[RAPID RECOVERY] Snapshot fisik akan dimuat setelah inisialisasi perangkat.",

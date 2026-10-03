@@ -1,6 +1,6 @@
 // File: apps/server_unv/src/worker/syncWorker.ts
 import { AckPolicy } from "nats";
-import { eq, and, desc, asc } from "drizzle-orm";
+import { eq, and, desc, asc, lt } from "drizzle-orm";
 import { js, jsm, sc } from "../config/nats.js";
 import { db } from "../config/db.js";
 import {
@@ -50,6 +50,17 @@ function broadcastSyncNeeded(
 
   const syncPayload = {
     eventId: event.id,
+    isTx:
+      event.isTx === true ||
+      event.type?.startsWith("RECEIVING_") ||
+      event.type?.startsWith("TX_") ||
+      event.type?.startsWith("POS_") ||
+      event.type?.startsWith("ORDER_") ||
+      event.type?.startsWith("ATTENDANCE_") ||
+      event.dddMetadata?.aggregateType === "RECEIVING_DOCUMENT" ||
+      event.dddMetadata?.aggregateType?.startsWith("TX_") ||
+      event.dddMetadata?.aggregateType === "WAREHOUSE_DOCUMENT" ||
+      event.dddMetadata?.aggregateType === "PLUSALES_DOCUMENT",
     type: event.type,
     aggregateId: event.aggregateId,
     version: event.aggregateVersion || 1,
@@ -423,6 +434,70 @@ export async function startSyncWorker(io: Server) {
               continue;
             }
 
+            const versionCollisionRows = await db
+              .select({ id: targetJournal.id })
+              .from(targetJournal)
+              .where(
+                and(
+                  eq(targetJournal.aggregateId, aggregateId),
+                  eq(
+                    targetJournal.aggregateVersion,
+                    event.aggregateVersion || 1,
+                  ),
+                ),
+              )
+              .limit(1);
+            if (versionCollisionRows.length === 0) {
+              const reason =
+                `Unique business constraint violation${constraint ? ` (${constraint})` : ""}`;
+              await db.insert(quarantineEventJournal).values({
+                id: eventId,
+                aggregateId,
+                aggregateType: event.dddMetadata?.aggregateType || "SYSTEM",
+                aggregateVersion: event.aggregateVersion || 1,
+                type,
+                payload: JSON.stringify(payload),
+                actor: event.dddMetadata?.actor?.userId || "SYSTEM",
+                errorReason: reason,
+              });
+              confirmOriginDevice(
+                io,
+                event.nodeMetadata?.originDeviceId,
+                eventId,
+                "REJECTED",
+                reason,
+              );
+              m.ack();
+              continue;
+            }
+
+            if (
+              Number(event.aggregateVersion || 1) <= 1 ||
+              type.endsWith("_CREATED")
+            ) {
+              const reason =
+                "Aggregate creation conflicts with an existing aggregate; creation events cannot be rebased.";
+              await db.insert(quarantineEventJournal).values({
+                id: eventId,
+                aggregateId,
+                aggregateType: event.dddMetadata?.aggregateType || "SYSTEM",
+                aggregateVersion: event.aggregateVersion || 1,
+                type,
+                payload: JSON.stringify(payload),
+                actor: event.dddMetadata?.actor?.userId || "SYSTEM",
+                errorReason: reason,
+              });
+              confirmOriginDevice(
+                io,
+                event.nodeMetadata?.originDeviceId,
+                eventId,
+                "REJECTED",
+                reason,
+              );
+              m.ack();
+              continue;
+            }
+
             console.log(
               `[WORKER] Terdeteksi Event Konkuren/Offline pada ${aggregateId} (Target v${event.aggregateVersion || 1}). Memulai Sequential Rebase...`,
             );
@@ -445,11 +520,26 @@ export async function startSyncWorker(io: Server) {
                     ),
                   )
                   .limit(1);
-                if (baseEventData.length > 0 && baseEventData[0].payload) {
+                let baseEvent = baseEventData[0];
+                if (!baseEvent) {
+                  const nearestBaseEvent = await db
+                    .select()
+                    .from(targetJournal)
+                    .where(
+                      and(
+                        eq(targetJournal.aggregateId, aggregateId),
+                        lt(targetJournal.aggregateVersion, baseVersion),
+                      ),
+                    )
+                    .orderBy(desc(targetJournal.aggregateVersion))
+                    .limit(1);
+                  baseEvent = nearestBaseEvent[0];
+                }
+                if (baseEvent?.payload) {
                   basePayload =
-                    typeof baseEventData[0].payload === "string"
-                      ? JSON.parse(baseEventData[0].payload)
-                      : baseEventData[0].payload;
+                    typeof baseEvent.payload === "string"
+                      ? JSON.parse(baseEvent.payload)
+                      : baseEvent.payload;
                 }
               }
 

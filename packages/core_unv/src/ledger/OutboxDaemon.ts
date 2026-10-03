@@ -152,7 +152,13 @@ export class OutboxDaemon {
     });
     await outboxDoc.remove();
 
-    if (data.status === "REJECTED") {
+    if (data.status === "MERGED") {
+      const localEvent = await rxdb.collections.events
+        .findOne(data.eventId)
+        .exec();
+      if (localEvent) await localEvent.remove();
+      await globalLedger.reapplyPendingLocalEvents();
+    } else if (data.status === "REJECTED") {
       const localEvent = await rxdb.collections.events
         .findOne(data.eventId)
         .exec();
@@ -196,7 +202,10 @@ export class OutboxDaemon {
         .exec();
       const retryCutoff = Date.now() - 30000;
       for (const sentEvent of sentEvents) {
-        if (sentEvent.createdAt <= retryCutoff) {
+        const sentAt = sentEvent.sentAt;
+        if (sentAt === undefined) {
+          await sentEvent.patch({ sentAt: Date.now() });
+        } else if (sentAt <= retryCutoff) {
           await sentEvent.patch({ status: "PENDING" });
         }
       }
@@ -275,6 +284,7 @@ export class OutboxDaemon {
               if (currentOutboxDoc) {
                 await currentOutboxDoc.patch({
                   status: "SENT",
+                  sentAt: Date.now(),
                 });
               }
               continue;

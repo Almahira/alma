@@ -11,6 +11,7 @@ import {
   UniversalEventSchema,
   eventMigrationStrategies,
   OutboxSchema,
+  outboxMigrationStrategies,
   SyncLogSchema,
   InboxSchema,
   SnapshotSchema,
@@ -28,7 +29,7 @@ import { globalInboxDaemon } from "./InboxDaemon";
 import { globalCircuitBreaker } from "../io/CircuitBreaker";
 import { getServerUrl, getApiUrl } from "../config/env";
 import { LicenseManager } from "./licenseManager";
-import { notifyStateUpdated } from "../cqrs/EventBus";
+import { EventBus, notifyStateUpdated } from "../cqrs/EventBus";
 import { globalRegistry } from "../cqrs/UniversalRegistry";
 
 if (typeof window !== "undefined" && (import.meta as any).env?.DEV) {
@@ -63,6 +64,11 @@ export class UniversalLedger {
   private syncRequireSnapshotRequested = false;
   private syncResetChainRequested = false;
   private readonly pendingSyncEventIds = new Set<string>();
+  private readonly pendingSyncEventScopes = new Map<
+    string,
+    "system" | "tx"
+  >();
+  private hasCompletedInitialSync = false;
   private appendQueue: Promise<unknown> = Promise.resolve();
 
   public async init(): Promise<void> {
@@ -100,7 +106,10 @@ export class UniversalLedger {
           schema: UniversalEventSchema,
           migrationStrategies: eventMigrationStrategies,
         },
-        outbox: { schema: OutboxSchema },
+        outbox: {
+          schema: OutboxSchema,
+          migrationStrategies: outboxMigrationStrategies,
+        },
         sync_logs: { schema: SyncLogSchema },
         inbox: { schema: InboxSchema },
         snapshots: { schema: SnapshotSchema },
@@ -227,7 +236,7 @@ export class UniversalLedger {
           outletId: localStorage.getItem("__unv_outletId"),
         });
         const hasReset = await verifyServerEpoch();
-        if (!hasReset) {
+        if (!hasReset && this.hasCompletedInitialSync) {
           this.syncInitial();
         }
       });
@@ -236,7 +245,7 @@ export class UniversalLedger {
       if (typeof window !== "undefined") {
         window.addEventListener("online", async () => {
           const hasReset = await verifyServerEpoch();
-          if (!hasReset) {
+          if (!hasReset && this.hasCompletedInitialSync) {
             this.syncInitial();
           }
         });
@@ -256,6 +265,11 @@ export class UniversalLedger {
           );
           await this.syncInitial({
             eventIds: data?.eventId ? [data.eventId] : [],
+            eventScopes: data?.eventId
+              ? {
+                  [data.eventId]: data.isTx === true ? "tx" : "system",
+                }
+              : undefined,
             exactCursor: true,
           });
           notifyStateUpdated();
@@ -307,7 +321,7 @@ export class UniversalLedger {
             const hasReset = await verifyServerEpoch();
             if (hasReset) return;
 
-            await this.syncInitial();
+            if (this.hasCompletedInitialSync) await this.syncInitial();
           }
         },
         5 * 60 * 1000,
@@ -332,6 +346,7 @@ export class UniversalLedger {
       recovery?: boolean;
       exactCursor?: boolean;
       eventIds?: string[];
+      eventScopes?: Record<string, "system" | "tx">;
       requireSnapshot?: boolean;
       resetChain?: boolean;
     } = {},
@@ -344,12 +359,30 @@ export class UniversalLedger {
       });
     }
 
+    let additionalWorkRequested = false;
     options.eventIds?.forEach((eventId) => {
-      if (eventId) this.pendingSyncEventIds.add(eventId);
+      if (!eventId) return;
+      if (!this.pendingSyncEventIds.has(eventId)) {
+        additionalWorkRequested = true;
+      }
+      this.pendingSyncEventIds.add(eventId);
+      const scope = options.eventScopes?.[eventId];
+      if (scope && this.pendingSyncEventScopes.get(eventId) !== scope) {
+        this.pendingSyncEventScopes.set(eventId, scope);
+        additionalWorkRequested = true;
+      }
     });
 
     if (this.syncPromise) {
-      this.syncRequested = true;
+      if (
+        (options.recovery && !this.syncRecoveryRequested) ||
+        (options.exactCursor && !this.syncExactCursorRequested) ||
+        (options.requireSnapshot && !this.syncRequireSnapshotRequested) ||
+        (options.resetChain && !this.syncResetChainRequested) ||
+        additionalWorkRequested
+      ) {
+        this.syncRequested = true;
+      }
       this.syncRecoveryRequested =
         this.syncRecoveryRequested || options.recovery === true;
       this.syncExactCursorRequested =
@@ -358,7 +391,6 @@ export class UniversalLedger {
         this.syncRequireSnapshotRequested || options.requireSnapshot === true;
       this.syncResetChainRequested =
         this.syncResetChainRequested || options.resetChain === true;
-      this.syncRequested = true;
       return this.syncPromise;
     }
 
@@ -386,11 +418,18 @@ export class UniversalLedger {
         this.syncRequireSnapshotRequested = false;
         this.syncResetChainRequested = false;
         const eventIds = [...this.pendingSyncEventIds].slice(0, 100);
-        eventIds.forEach((eventId) => this.pendingSyncEventIds.delete(eventId));
+        const eventScopes: Record<string, "system" | "tx"> = {};
+        eventIds.forEach((eventId) => {
+          this.pendingSyncEventIds.delete(eventId);
+          const scope = this.pendingSyncEventScopes.get(eventId);
+          if (scope) eventScopes[eventId] = scope;
+          this.pendingSyncEventScopes.delete(eventId);
+        });
         const syncSucceeded = await this.performInitialSync(
           recovery,
           exactCursor,
           eventIds,
+          eventScopes,
           requireSnapshot,
           resetChain,
         );
@@ -403,7 +442,9 @@ export class UniversalLedger {
     })();
     this.syncPromise = syncPromise;
     try {
-      return await syncPromise;
+      const succeeded = await syncPromise;
+      this.hasCompletedInitialSync = true;
+      return succeeded;
     } finally {
       if (this.syncPromise === syncPromise) this.syncPromise = null;
     }
@@ -413,11 +454,21 @@ export class UniversalLedger {
     recovery: boolean,
     exactCursor: boolean,
     eventIds: string[],
+    eventScopes: Record<string, "system" | "tx">,
     requireSnapshot: boolean,
     resetChain: boolean,
   ): Promise<boolean> {
     this.isSyncing = true;
     let syncSucceeded = true;
+    let snapshotCutoffTime: number | null = null;
+    const requeueEventIds = () => {
+      if (recovery) return;
+      eventIds.forEach((eventId) => {
+        this.pendingSyncEventIds.add(eventId);
+        const scope = eventScopes[eventId];
+        if (scope) this.pendingSyncEventScopes.set(eventId, scope);
+      });
+    };
 
     // Pancarkan sinyal ke Footer UI: Mulai Sinkronisasi
     if (typeof window !== "undefined") {
@@ -472,7 +523,6 @@ export class UniversalLedger {
         }
       }
 
-      let snapshotCutoffTime: number | null = null;
       let snapshotLoaded = false;
 
       try {
@@ -515,10 +565,16 @@ export class UniversalLedger {
             });
 
             // 2. Pasang Sequence dasar lokal
-            this.memCurrentSeq = s.lastSeq;
-            if (resetChain) {
+            const priorLocalSeq = this.memCurrentSeq;
+            const priorLocalHash = this.memCurrentHash;
+            if (resetChain || recovery) {
               this.resetMemoryChain(true);
-              this.setSnapshotBaseSequence(s.lastSeq);
+              this.setSnapshotBaseSequence(
+                Math.max(s.lastSeq, priorLocalSeq),
+                priorLocalSeq > s.lastSeq ? priorLocalHash : "0",
+              );
+            } else {
+              this.memCurrentSeq = s.lastSeq;
             }
 
             // 3. Rehidrasi memori CQRS Read Model seketika dari tabel fisik
@@ -567,14 +623,23 @@ export class UniversalLedger {
       }
 
       // Siapkan cursor checkpoint inkremental
+      const targetedPull = eventIds.length > 0 && !recovery;
+      const systemEventIds = targetedPull
+        ? eventIds.filter((eventId) => eventScopes[eventId] !== "tx")
+        : [];
+      const txEventIds = targetedPull
+        ? eventIds.filter((eventId) => eventScopes[eventId] !== "system")
+        : [];
       const queryParamsSystem = new URLSearchParams(queryParams);
       const queryParamsTx = new URLSearchParams(queryParams);
-      eventIds.forEach((eventId) => {
-        queryParamsSystem.append("eventId", eventId);
-        queryParamsTx.append("eventId", eventId);
-      });
+      systemEventIds.forEach((eventId) =>
+        queryParamsSystem.append("eventId", eventId),
+      );
+      txEventIds.forEach((eventId) =>
+        queryParamsTx.append("eventId", eventId),
+      );
 
-      if (snapshotCutoffTime) {
+      if (!targetedPull && snapshotCutoffTime) {
         // Resume both journals only after the canonical snapshot watermark.
         queryParamsSystem.set("since", String(snapshotCutoffTime));
         queryParamsTx.set("since", String(snapshotCutoffTime));
@@ -582,7 +647,7 @@ export class UniversalLedger {
         localStorage.setItem("__unv_cursor_tx", String(snapshotCutoffTime));
         localStorage.removeItem("__unv_pull_system_offset");
         localStorage.removeItem("__unv_pull_tx_offset");
-      } else {
+      } else if (!targetedPull) {
         // Never issue an unbounded journal pull when the client has no snapshot/cursor.
         const lastCursorSystem = localStorage.getItem("__unv_cursor_system");
         const lastCursorTx = localStorage.getItem("__unv_cursor_tx");
@@ -598,9 +663,7 @@ export class UniversalLedger {
           console.warn(
             "[SYNC] Snapshot dan cursor belum tersedia; melewati penarikan jurnal agar tidak memuat seluruh riwayat.",
           );
-          eventIds.forEach((eventId) =>
-            this.pendingSyncEventIds.add(eventId),
-          );
+          requeueEventIds();
           syncSucceeded = false;
           return false;
         }
@@ -608,25 +671,31 @@ export class UniversalLedger {
         queryParamsSystem.set("since", String(systemCursor));
         queryParamsTx.set("since", String(txCursor));
       }
-      queryParamsSystem.set(
-        "offset",
-        localStorage.getItem("__unv_pull_system_offset") || "0",
-      );
-      queryParamsTx.set(
-        "offset",
-        localStorage.getItem("__unv_pull_tx_offset") || "0",
-      );
+      if (!targetedPull) {
+        queryParamsSystem.set(
+          "offset",
+          localStorage.getItem("__unv_pull_system_offset") || "0",
+        );
+        queryParamsTx.set(
+          "offset",
+          localStorage.getItem("__unv_pull_tx_offset") || "0",
+        );
+      }
 
       const serverEvents = await globalCircuitBreaker.fire(async () => {
         const [resSystem, resTx] = await Promise.all([
-          fetch(
-            getApiUrl(
-              `/api/events/pull/system?${queryParamsSystem.toString()}`,
-            ),
-          ).catch(() => null),
-          fetch(
-            getApiUrl(`/api/events/pull/tx?${queryParamsTx.toString()}`),
-          ).catch(() => null),
+          systemEventIds.length > 0 || !targetedPull
+            ? fetch(
+                getApiUrl(
+                  `/api/events/pull/system?${queryParamsSystem.toString()}`,
+                ),
+              ).catch(() => null)
+            : Promise.resolve(null),
+          txEventIds.length > 0 || !targetedPull
+            ? fetch(
+                getApiUrl(`/api/events/pull/tx?${queryParamsTx.toString()}`),
+              ).catch(() => null)
+            : Promise.resolve(null),
         ]);
 
         let eventsSys: any[] = [];
@@ -636,7 +705,7 @@ export class UniversalLedger {
           eventsSys = Array.isArray(response) ? response : response.events || [];
           const cursor = Array.isArray(response) ? null : response.cursor;
           const hasMore = !Array.isArray(response) && response.hasMore === true;
-          if (hasMore) {
+          if (!targetedPull && hasMore) {
             const currentOffset =
               Number(
                 localStorage.getItem("__unv_pull_system_offset") || 0,
@@ -645,11 +714,9 @@ export class UniversalLedger {
               "__unv_pull_system_offset",
               String(currentOffset + 500),
             );
-            eventIds.forEach((eventId) =>
-              this.pendingSyncEventIds.add(eventId),
-            );
+            requeueEventIds();
             this.syncRequested = true;
-          } else {
+          } else if (!targetedPull) {
             const maxEventTime =
               cursor?.createdAt ||
               (eventsSys.length > 0
@@ -675,18 +742,16 @@ export class UniversalLedger {
           eventsTx = Array.isArray(response) ? response : response.events || [];
           const cursor = Array.isArray(response) ? null : response.cursor;
           const hasMore = !Array.isArray(response) && response.hasMore === true;
-          if (hasMore) {
+          if (!targetedPull && hasMore) {
             const currentOffset =
               Number(localStorage.getItem("__unv_pull_tx_offset") || 0) || 0;
             localStorage.setItem(
               "__unv_pull_tx_offset",
               String(currentOffset + 500),
             );
-            eventIds.forEach((eventId) =>
-              this.pendingSyncEventIds.add(eventId),
-            );
+            requeueEventIds();
             this.syncRequested = true;
-          } else {
+          } else if (!targetedPull) {
             const maxEventTime =
               cursor?.createdAt ||
               (eventsTx.length > 0
@@ -704,19 +769,17 @@ export class UniversalLedger {
             localStorage.removeItem("__unv_pull_tx_offset");
           }
         }
-        if (!resSystem?.ok || !resTx?.ok) {
-          eventIds.forEach((eventId) =>
-            this.pendingSyncEventIds.add(eventId),
-          );
+        if (
+          ((systemEventIds.length > 0 || !targetedPull) && !resSystem?.ok) ||
+          ((txEventIds.length > 0 || !targetedPull) && !resTx?.ok)
+        ) {
+          requeueEventIds();
           syncSucceeded = false;
         }
         return [...eventsSys, ...eventsTx];
       });
 
       if (!serverEvents || serverEvents.length === 0) {
-        if (recovery && snapshotCutoffTime !== null) {
-          await this.reapplyPendingLocalEvents(true);
-        }
         this.isSyncing = false;
         return syncSucceeded;
       }
@@ -782,15 +845,23 @@ export class UniversalLedger {
         notifyStateUpdated();
       }
 
-      if (recovery && snapshotCutoffTime !== null) {
-        await this.reapplyPendingLocalEvents(true);
-      }
       return syncSucceeded;
     } catch (error) {
-      eventIds.forEach((eventId) => this.pendingSyncEventIds.add(eventId));
+      requeueEventIds();
       console.warn("[UNIVERSAL LEDGER] Gagal sinkronisasi awal:", error);
       return false;
     } finally {
+      if (recovery && snapshotCutoffTime !== null) {
+        try {
+          await EventBus.rebuildState({ persistSnapshot: false });
+        } catch (rebuildError) {
+          console.error(
+            "[SYNC] Gagal membangun ulang proyeksi dari snapshot dan event lokal.",
+            rebuildError,
+          );
+          throw rebuildError;
+        }
+      }
       this.isSyncing = false;
 
       const nowFormatted = new Date().toLocaleString("id-ID", {
@@ -813,42 +884,8 @@ export class UniversalLedger {
     }
   }
 
-  public async reapplyPendingLocalEvents(replayAll = true): Promise<void> {
-    const pendingOutbox = await this.db.collections.outbox
-      .find({
-        selector: { status: { $in: ["PENDING", "SENT"] } },
-        sort: [{ createdAt: "asc" }],
-      })
-      .exec();
-    if (pendingOutbox.length === 0) return;
-
-    const snapshot = await this.db.collections.snapshots
-      .findOne("GLOBAL_SNAPSHOT")
-      .exec();
-    const snapshotSeq = snapshot?.lastSeq || 0;
-    let replayedCount = 0;
-
-    for (const outboxDoc of pendingOutbox) {
-      const pendingEvent = outboxDoc.toJSON().eventPayload as LedgerEventDoc;
-      const localEvent = await this.db.collections.events
-        .findOne(pendingEvent.id)
-        .exec();
-      if (!localEvent) continue;
-      if (!replayAll && localEvent.seq > snapshotSeq) continue;
-      globalRegistry.processEvent(localEvent.toJSON());
-      replayedCount += 1;
-    }
-
-    if (replayedCount > 0 && this.memCurrentSeq > 0) {
-      await this.db.collections.snapshots.upsert({
-        id: "GLOBAL_SNAPSHOT",
-        lastSeq: this.memCurrentSeq,
-        data: globalRegistry.getAllStates(),
-        updatedAt: Date.now(),
-      });
-    }
-
-    notifyStateUpdated();
+  public async reapplyPendingLocalEvents(): Promise<void> {
+    await EventBus.rebuildState({ persistSnapshot: false });
   }
 
   /**
@@ -1089,8 +1126,9 @@ export class UniversalLedger {
     return this.memCurrentSeq;
   }
 
-  public setSnapshotBaseSequence(sequence: number): void {
+  public setSnapshotBaseSequence(sequence: number, hash = "0"): void {
     this.memCurrentSeq = Math.max(0, Number(sequence) || 0);
+    this.memCurrentHash = hash;
   }
 
   /**

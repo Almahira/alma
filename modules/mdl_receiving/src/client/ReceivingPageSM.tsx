@@ -82,6 +82,14 @@ export function ReceivingPageSM() {
   const [dateEnd, setDateEnd] = useState(
     () => getCurrentMonthDateRange().end,
   );
+  const handleDateStartChange = (value: string) => {
+    setDateStart(value);
+    if (value && dateEnd && value > dateEnd) setDateEnd(value);
+  };
+  const handleDateEndChange = (value: string) => {
+    setDateEnd(value);
+    if (value && dateStart && value < dateStart) setDateStart(value);
+  };
   const [filterStatus, setFilterStatus] = useState("ALL");
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
     {},
@@ -759,14 +767,14 @@ export function ReceivingPageSM() {
             <input
               type="date"
               value={dateStart}
-              onChange={(e) => setDateStart(e.target.value)}
+              onChange={(e) => handleDateStartChange(e.target.value)}
               className="flex-1 text-xs font-bold p-2 bg-(--bg-input) border border-(--border-color) rounded-lg"
             />
             <span className="text-(--text-secondary)">-</span>
             <input
               type="date"
               value={dateEnd}
-              onChange={(e) => setDateEnd(e.target.value)}
+              onChange={(e) => handleDateEndChange(e.target.value)}
               className="flex-1 text-xs font-bold p-2 bg-(--bg-input) border border-(--border-color) rounded-lg"
             />
           </div>

@@ -89,10 +89,17 @@ export function threeWayMerge(
       clientChanged &&
       JSON.stringify(valServer) !== JSON.stringify(valClient)
     ) {
-      // 1. Khusus Keputusan Validasi: approvalStatus & validateId dari supervisor WAJIB menang
+      // An approved supervisor decision must not be replaced by an unapproved edit.
       if (
         (key === "approvalStatus" || key === "validateId") &&
-        (clientState.approvalStatus === "APPROVED" || valClient !== undefined)
+        serverState.approvalStatus === "APPROVED" &&
+        clientState.approvalStatus !== "APPROVED"
+      ) {
+        merged[key] = valServer;
+      } else if (
+        (key === "approvalStatus" || key === "validateId") &&
+        clientState.approvalStatus === "APPROVED" &&
+        serverState.approvalStatus !== "APPROVED"
       ) {
         merged[key] = valClient;
       }

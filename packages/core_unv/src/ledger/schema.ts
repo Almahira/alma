@@ -38,6 +38,7 @@ export interface OutboxDoc {
   status: string;
   retryCount: number;
   createdAt: number;
+  sentAt?: number;
 }
 
 export interface SyncLogDoc {
@@ -109,7 +110,7 @@ export const UniversalEventSchema: RxJsonSchema<LedgerEventDoc> = {
 
 export const OutboxSchema = {
   title: "outbox schema",
-  version: 0,
+  version: 1,
   primaryKey: "id",
   type: "object",
   properties: {
@@ -117,6 +118,12 @@ export const OutboxSchema = {
     eventPayload: { type: "object" },
     status: { type: "string" },
     retryCount: { type: "number" },
+    sentAt: {
+      type: "number",
+      multipleOf: 1,
+      minimum: 0,
+      maximum: 999999999999999,
+    },
     createdAt: {
       type: "number",
       multipleOf: 1,
@@ -125,6 +132,13 @@ export const OutboxSchema = {
     },
   },
   required: ["id", "eventPayload", "status", "retryCount", "createdAt"],
+};
+
+export const outboxMigrationStrategies = {
+  1: function (oldDoc: OutboxDoc) {
+    if (oldDoc.status === "SENT") oldDoc.sentAt = Date.now();
+    return oldDoc;
+  },
 };
 
 export const SyncLogSchema = {
