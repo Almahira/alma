@@ -98,6 +98,7 @@ export class EventBus {
             );
             snapshotState =
               typeof snap.data === "string" ? JSON.parse(snap.data) : snap.data;
+            globalLedger.seedAggregateVersions(snapshotState);
             startSeq = snap.lastSeq;
           }
         }
@@ -119,6 +120,10 @@ export class EventBus {
       for (const doc of deltaEvents) {
         const event = doc.toJSON();
         globalRegistry.processEvent(event);
+        globalLedger.setAggregateVersion(
+          event.aggregateId,
+          event.aggregateVersion,
+        );
         replayedIds.add(event.id);
       }
 

@@ -471,10 +471,7 @@ export async function startSyncWorker(io: Server) {
               continue;
             }
 
-            if (
-              Number(event.aggregateVersion || 1) <= 1 ||
-              type.endsWith("_CREATED")
-            ) {
+            if (type.endsWith("_CREATED")) {
               const reason =
                 "Aggregate creation conflicts with an existing aggregate; creation events cannot be rebased.";
               await db.insert(quarantineEventJournal).values({

@@ -71,7 +71,7 @@ export class SnapshotEngine {
         globalRegistry.restoreAllStates(payload);
 
         // 3. Seeding versi agregat ke UniversalLedger agar client mengenali versi terkini
-        this.seedAggregateVersionsFromPayload(payload);
+        globalLedger.seedAggregateVersions(payload);
       }
 
       // 4. Picu re-render UI secara reaktif
@@ -124,13 +124,7 @@ export class SnapshotEngine {
         handler.restoreState(result.data);
       }
 
-      // Seeding versi produk jika modul item
-      if (normalized === "item" && Array.isArray(result.data.products)) {
-        result.data.products.forEach((p: any) => {
-          const v = p.aggregateVersion ?? p.aggregate_version ?? 1;
-          globalLedger.setAggregateVersion(p.id, Number(v) || 1);
-        });
-      }
+      globalLedger.seedAggregateVersions(result.data);
 
       notifyStateUpdated();
       console.log(
@@ -143,40 +137,6 @@ export class SnapshotEngine {
         error,
       );
       return false;
-    }
-  }
-
-  /**
-   * Helper private untuk mendaftarkan versi agregat dari snapshot ke UniversalLedger
-   */
-  private static seedAggregateVersionsFromPayload(payload: any): void {
-    try {
-      // Modul Produk
-      if (payload.ITEM_DOMAIN?.products) {
-        payload.ITEM_DOMAIN.products.forEach((p: any) => {
-          const v = p.aggregateVersion ?? p.aggregate_version ?? 1;
-          globalLedger.setAggregateVersion(p.id, Number(v) || 1);
-        });
-      }
-      // Modul Organisasi (Outlet & Region)
-      if (payload.ORGANIZATION?.outlets) {
-        payload.ORGANIZATION.outlets.forEach((o: any) => {
-          const v = o.aggregateVersion ?? o.aggregate_version ?? 1;
-          globalLedger.setAggregateVersion(o.id, Number(v) || 1);
-        });
-      }
-      // Modul Dokumen Gudang
-      if (payload.WAREHOUSE_DOCUMENT?.distributions) {
-        payload.WAREHOUSE_DOCUMENT.distributions.forEach((d: any) => {
-          const v = d.aggregateVersion ?? d.aggregate_version ?? 1;
-          globalLedger.setAggregateVersion(d.id, Number(v) || 1);
-        });
-      }
-    } catch (e) {
-      console.warn(
-        "[SNAPSHOT ENGINE] Gagal seeding beberapa versi agregat:",
-        e,
-      );
     }
   }
 

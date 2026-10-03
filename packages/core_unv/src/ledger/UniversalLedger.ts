@@ -582,20 +582,7 @@ export class UniversalLedger {
               const payload =
                 typeof s.data === "string" ? JSON.parse(s.data) : s.data;
               globalRegistry.restoreAllStates(payload);
-
-              // 4. Seeding versi agregat ke ledger lokal
-              if (payload.ITEM_DOMAIN?.products) {
-                payload.ITEM_DOMAIN.products.forEach((p: any) => {
-                  const v = p.aggregateVersion ?? p.aggregate_version ?? 1;
-                  this.setAggregateVersion(p.id, Number(v) || 1);
-                });
-              }
-              if (payload.ORGANIZATION?.outlets) {
-                payload.ORGANIZATION.outlets.forEach((o: any) => {
-                  const v = o.aggregateVersion ?? o.aggregate_version ?? 1;
-                  this.setAggregateVersion(o.id, Number(v) || 1);
-                });
-              }
+              this.seedAggregateVersions(payload);
             }
 
             // Picu pembaruan antarmuka (UI re-render seketika)
@@ -896,6 +883,28 @@ export class UniversalLedger {
       aggregateId,
       Math.max(1, Number(version) || 1),
     );
+  }
+
+  public seedAggregateVersions(snapshot: unknown): void {
+    const visit = (value: unknown): void => {
+      if (Array.isArray(value)) {
+        value.forEach(visit);
+        return;
+      }
+      if (!value || typeof value !== "object") return;
+
+      const record = value as Record<string, unknown>;
+      const id = record.id;
+      const version = Number(
+        record.aggregateVersion ?? record.aggregate_version,
+      );
+      if (typeof id === "string" && Number.isFinite(version) && version > 0) {
+        this.setAggregateVersion(id, version);
+      }
+      Object.values(record).forEach(visit);
+    };
+
+    visit(snapshot);
   }
 
   /**
